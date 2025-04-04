@@ -58,9 +58,7 @@ node down -url "URL" [-start STARTINDEX] [-last LASTINDEX]
 - -start는 옵션입니다. 받고싶은 회차 시작 번호를 입력하세요. 생략하면 처음부터 받습니다.
 - -last는 옵션입니다. 받고싶은 마지막 회차 번호를 입력하세요. 생략하면 마지막까지 받습니다.
 
-처음 명령어를 실행하면 cloudflare captcha가 뜰겁니다. 직접 체크박스를 체크해주세요.
-
-https://github.com/user-attachments/assets/615133d6-d995-488d-98f1-7f3cbf8df887
+https://github.com/user-attachments/assets/86c17334-c96c-48d2-bfdb-31072766030c
 
 ## 폴더(디렉토리) 구조
 ```
@@ -102,6 +100,6 @@ https://github.com/user-attachments/assets/615133d6-d995-488d-98f1-7f3cbf8df887
 ```
 ## 질문
 ### 오류 또는 개선사항 문의 
-[issue](https://github.com/crossSiteKikyo/tokiDownloader/issues) 에 제보해주세요. 익명으로 제보하고싶다면 [블로그](https://whitebearwow.blogspot.com/2024/08/tokidownloader.html) 에 댓글을 남겨주세요.
+[issue](https://github.com/crossSiteKikyo/tokiDownloader/issues) 에 제보해주세요. 스크립트방식인지 다운로더인지, 어떤 링크를 시도한건지 어떤 오류가 난건지 상세히 적어주셔야 해결 가능합니다.
 ### cloudflare captcha 자동으로 체크해주실 수 없나요?
-현재 라이브러리를 사용해 자동 체크 기능을 사용할경우 이상한게 클릭되는 오류가 있습니다. 직접 클릭해주세요.
+전에는 라이브러리에 오류가 있었는데 지금은 자동 체크 합니다.
