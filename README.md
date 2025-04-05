@@ -2,14 +2,12 @@
 - 프로그램 설치 불필요
 - 정보수집 없음
 ## 사용법
-1. [다운로드 스크립트](https://raw.githubusercontent.com/crossSiteKikyo/tokiDownloader/main/tokiDownloader.js) 전체 복사하기
-2. 브라우저에서 개발자 도구 열기 (단축키: `F12` 또는 `Ctrl+Shift+I`)
-3. Sources창 - Snippets하위창 열기
-4. New snippet으로 tokiDownloader 생성후 붙여넣기. Ctrl+s로 저장한다.
-![1~4진행이미지](https://github.com/user-attachments/assets/2f044da0-d0ee-4a32-9f73-2080d4d536e4)
-5. 다운받을 목록 페이지에서 tokiDownload()함수 인자 설정후 Ctrl+s로 저장. <br>전체다운: tokiDownload(), 30회차부터 다운: tokiDownload(30), 30회차부터 60회차까지 다운: tokiDownload(30, 60)
-6. snippet 실행. 단축키: Ctrl+Enter (snippet에 저장되었으므로 다회성 사용 가능)
-![5to6](https://github.com/user-attachments/assets/ab5dfe4b-14f9-4aec-b845-66c2b052da15)
+1. Tempermonkey 확장 프로그램 설치
+2. [tokiDownloader](https://greasyfork.org/ko/scripts/531932-tokidownloader) 접속해 스크립트 설치
+3. 뉴토끼, 마나토끼, 북토끼 회차 목록 페이지 접속
+4. 원하는 기능을 클릭해 다운로드
+
+https://github.com/user-attachments/assets/fe974989-5ffb-4831-b2dc-7ea576712f62
 ## 폴더(디렉토리) 구조
 뉴토끼, 마나토끼
 ```

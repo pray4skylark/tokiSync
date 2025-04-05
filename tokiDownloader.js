@@ -12,6 +12,7 @@
 // @require      https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js
 // @require      https://cdnjs.cloudflare.com/ajax/libs/jszip-utils/0.1.0/jszip-utils.js
 // @run-at       document-end
+// @license      MIT
 // ==/UserScript==
 
 (function () {
