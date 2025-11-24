@@ -3,7 +3,7 @@
 **북토끼, 뉴토끼, 마나토끼**의 콘텐츠를 **구글 드라이브로 직접 업로드**하고, **구글 스프레드시트에 다운로드 기록을 자동 동기화**하는 강력한 유저 스크립트입니다.
 
 > **Original Idea by:** hehaho (tokiDownloader)  
-> **Rewritten by:** [YourNickname]
+> **Rewritten by:** pray4skylark
 
 -----
 
