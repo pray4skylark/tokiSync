@@ -1,36 +1,128 @@
 // =====================================================
 // 🔒 설정
 // =====================================================
-const ROOT_FOLDER_ID = ""; // 저장될 구글 드라이브 폴더ID
-const SECRET_KEY = "";     // 접근 제한용 비밀키
+const ROOT_FOLDER_ID = ""; // 사용자님 ID 유지
+const SECRET_KEY = "";       // 사용자님 Key 유지
 // =====================================================
+
 
 function doPost(e) {
   try {
     const data = JSON.parse(e.postData.contents);
-
-    // 1. 보안 검사
     if (data.key !== SECRET_KEY) return createRes("error", "Unauthorized");
 
-    // 2. 요청 분기 (라우팅)
-    if (data.type === "init") return initResumableUpload(data);       // 업로드 시작
-    if (data.type === "upload") return uploadChunk(data);             // 조각 전송
-    if (data.type === "history_get") return handleHistoryGet(data);   // 기록 조회
-    if (data.type === "history_save") return handleHistoryPost(data); // 기록 저장
-    
-    // (구버전 호환용: 혹시 몰라 남겨둠)
-    if (data.fileData) return createRes("error", "Please use chunk upload (update script)");
+    if (data.type === "init") return initResumableUpload(data);
+    if (data.type === "upload") return uploadChunk(data);
+    if (data.type === "check_history") return checkDownloadHistory(data); // ⭐️ 수정됨
+    if (data.type === "save_info") return saveSeriesInfo(data);
 
     return createRes("error", "Unknown type");
-
   } catch (error) {
     return createRes("error", error.toString());
   }
 }
 
-// =======================================================
-// 📂 기능 1: 이어 올리기 (Resumable Upload) - 핵심!
-// =======================================================
+// -------------------------------------------------------
+// 📂 기능 1: 다운로드 기록 확인 (ID 기반 검색 & 유연한 파싱)
+// -------------------------------------------------------
+function checkDownloadHistory(data) {
+  const root = DriveApp.getFolderById(ROOT_FOLDER_ID);
+  
+  // 클라이언트가 보낸 폴더명에서 [ID] 추출 (예: "[12345] 제목" -> "12345")
+  const idMatch = data.folderName.match(/^\[(\d+)\]/);
+  let seriesFolder;
+
+  if (idMatch) {
+    // 1. 제목이 달라도 ID가 포함된 폴더 검색 (가장 정확함)
+    const id = idMatch[1];
+    const search = root.searchFolders(`title contains '[${id}]' and trashed = false`);
+    if (search.hasNext()) {
+      seriesFolder = search.next();
+    }
+  }
+  
+  // ID 검색 실패 시, 이름으로 재시도 (Fallback)
+  if (!seriesFolder) {
+    const sFolders = root.getFoldersByName(data.folderName);
+    if (sFolders.hasNext()) seriesFolder = sFolders.next();
+  }
+
+  // 폴더를 못 찾았으면 -> 다운로드 내역 없음 (빈 배열 반환)
+  if (!seriesFolder) return createRes("success", []);
+
+  // 2. 파일 스캔 (CBZ/ZIP 등)
+  const existingEpisodes = [];
+  const files = seriesFolder.getFiles();
+  
+  while (files.hasNext()) {
+    const name = files.next().getName();
+    // ⭐️ 수정: "0001 - " 뿐만 아니라 "1 - ", "1화" 등 숫자로 시작하면 다 잡음
+    const match = name.match(/^(\d+)/); 
+    if (match) {
+      existingEpisodes.push(parseInt(match[1]));
+    }
+  }
+  
+  // 폴더 방식(v0.8.0 시절) 데이터도 스캔
+  const folders = seriesFolder.getFolders();
+  while (folders.hasNext()) {
+    const name = folders.next().getName();
+    const match = name.match(/^(\d+)/); 
+    if (match) {
+      existingEpisodes.push(parseInt(match[1]));
+    }
+  }
+
+  // 중복 제거 및 정렬
+  const uniqueEpisodes = [...new Set(existingEpisodes)].sort((a, b) => a - b);
+  
+  return createRes("success", uniqueEpisodes);
+}
+
+// -------------------------------------------------------
+// 📝 기능 2: 작품 정보 저장 (기존 유지)
+// -------------------------------------------------------
+function saveSeriesInfo(data) {
+  const root = DriveApp.getFolderById(ROOT_FOLDER_ID);
+  // 여기도 ID 기반 검색 적용
+  const idMatch = data.folderName.match(/^\[(\d+)\]/);
+  let seriesFolder;
+
+  if (idMatch) {
+    const search = root.searchFolders(`title contains '[${idMatch[1]}]' and trashed = false`);
+    if (search.hasNext()) seriesFolder = search.next();
+  }
+  
+  if (!seriesFolder) {
+     // 없으면 새로 생성 (클라이언트가 보낸 이름 그대로)
+     seriesFolder = root.createFolder(data.folderName);
+  }
+
+  const fileName = "info.json";
+  const files = seriesFolder.getFilesByName(fileName);
+  
+  const infoData = {
+    id: data.id,
+    title: data.title,
+    author: data.author || "Unknown",
+    category: data.category || "Unknown",
+    status: data.status || "Unknown",
+    thumbnail: data.thumbnail || "",
+    url: data.url,
+    site: data.site,
+    last_updated: new Date().toISOString()
+  };
+  
+  const jsonString = JSON.stringify(infoData, null, 2);
+  if (files.hasNext()) files.next().setContent(jsonString);
+  else seriesFolder.createFile(fileName, jsonString, MimeType.PLAIN_TEXT);
+
+  return createRes("success", "Info saved");
+}
+
+// -------------------------------------------------------
+// ☁️ 기능 3: 이어 올리기 (기존 유지 + ID기반 폴더찾기 적용)
+// -------------------------------------------------------
 function initResumableUpload(data) {
   const folderId = getFolderId(data.folderName); 
   const url = "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable";
@@ -38,7 +130,7 @@ function initResumableUpload(data) {
   const metadata = {
     name: data.fileName,
     parents: [folderId],
-    mimeType: "application/zip" // CBZ도 ZIP 기반
+    mimeType: "application/zip"
   };
 
   const params = {
@@ -50,102 +142,51 @@ function initResumableUpload(data) {
   };
 
   const response = UrlFetchApp.fetch(url, params);
-  if (response.getResponseCode() === 200) {
-    // 업로드 세션 URL 반환
-    return createRes("success", response.getHeaders()["Location"]);
-  } else {
-    return createRes("error", response.getContentText());
-  }
+  if (response.getResponseCode() === 200) return createRes("success", response.getHeaders()["Location"]);
+  else return createRes("error", response.getContentText());
 }
 
 function uploadChunk(data) {
   const uploadUrl = data.uploadUrl;
   const chunkData = Utilities.base64Decode(data.chunkData);
-  const start = data.start;
-  const total = data.total;
-  
   const blob = Utilities.newBlob(chunkData);
+  const start = data.start;
   const size = blob.getBytes().length;
   const end = start + size - 1;
-
+  const total = data.total;
   const rangeHeader = `bytes ${start}-${end}/${total}`;
 
   const params = {
-    method: "put",
-    payload: blob,
-    headers: { "Content-Range": rangeHeader },
-    muteHttpExceptions: true
+    method: "put", payload: blob,
+    headers: { "Content-Range": rangeHeader }, muteHttpExceptions: true
   };
 
   const response = UrlFetchApp.fetch(uploadUrl, params);
   const code = response.getResponseCode();
 
-  // 308: 아직 덜 끝남(정상), 200/201: 완료(정상)
-  if (code === 308 || code === 200 || code === 201) {
-    return createRes("success", "Chunk uploaded");
-  } else {
-    return createRes("error", `Drive API Error: ${code}`);
-  }
+  if (code === 308 || code === 200 || code === 201) return createRes("success", "Chunk uploaded");
+  else return createRes("error", `Drive API Error: ${code}`);
 }
 
+// ⭐️ ID 기반 폴더 찾기 헬퍼 함수 (중요!)
 function getFolderId(folderName) {
   const root = DriveApp.getFolderById(ROOT_FOLDER_ID);
+  
+  // [ID] 추출
+  const idMatch = folderName.match(/^\[(\d+)\]/);
+  if (idMatch) {
+    const id = idMatch[1];
+    // ID가 포함된 폴더 검색
+    const search = root.searchFolders(`title contains '[${id}]' and trashed = false`);
+    if (search.hasNext()) return search.next().getId();
+  }
+  
+  // 검색 실패 시 이름으로 찾거나 생성
   const folders = root.getFoldersByName(folderName);
   if (folders.hasNext()) return folders.next().getId();
   else return root.createFolder(folderName).getId();
 }
 
-// =======================================================
-// 📝 기능 2: 기록 관리 (기존 코드 유지)
-// =======================================================
-function handleHistoryGet(data) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  const textFinder = sheet.getRange("A:A").createTextFinder(String(data.id)).matchEntireCell(true);
-  const found = textFinder.findNext();
-  if (found) {
-    return createRes("success", sheet.getRange(found.getRow(), 3).getValue());
-  }
-  return createRes("success", "[]");
-}
-
-function handleHistoryPost(data) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  const id = String(data.id);
-  let textFinder = sheet.getRange("A:A").createTextFinder(id).matchEntireCell(true);
-  let found = textFinder.findNext();
-  let currentRow = found ? found.getRow() : sheet.getLastRow() + 1;
-
-  if (!found) {
-    sheet.getRange(currentRow, 1).setValue(id);
-    sheet.getRange(currentRow, 2).setValue(data.title);
-  } else {
-    // 제목 업데이트 (선택)
-    sheet.getRange(currentRow, 2).setValue(data.title);
-  }
-  
-  let currentData = [];
-  const cell = sheet.getRange(currentRow, 3);
-  if (cell.getValue()) currentData = JSON.parse(cell.getValue());
-  
-  const merged = Array.from(new Set([...currentData, ...data.episodes])).sort((a,b)=>a-b);
-  cell.setValue(JSON.stringify(merged));
-  
-  return createRes("success", "Updated");
-}
-
 function createRes(status, body) {
   return ContentService.createTextOutput(JSON.stringify({status: status, body: body})).setMimeType(ContentService.MimeType.JSON);
-}
-// ▼ 권한 승인용 함수 (Code.gs 맨 아래에 추가하세요)
-function authorizeCheck() {
-  // 1. 드라이브 접근 권한 요청
-  DriveApp.getRootFolder();
-  
-  // 2. 스프레드시트 접근 권한 요청
-  SpreadsheetApp.getActiveSpreadsheet();
-  
-  // 3. 외부 통신(UrlFetchApp) 권한 요청 (이게 이번에 추가된 핵심입니다)
-  UrlFetchApp.fetch("https://www.google.com");
-  
-  console.log("✅ 모든 권한(Drive, Sheet, External)이 승인되었습니다!");
 }
