@@ -1,0 +1,154 @@
+// =====================================================
+// 📊 TokiView Dashboard v1.0.0
+// ⚙️ 설정 (스크립트 속성 사용 권장)
+// =====================================================
+const scriptProperties = PropertiesService.getScriptProperties();
+
+// Project A와 동일한 ROOT_FOLDER_ID를 입력해야 합니다.
+const ROOT_FOLDER_ID = scriptProperties.getProperty('ROOT_FOLDER_ID');
+const INDEX_FILE_NAME = "library_index.json";
+// =====================================================
+
+// 🖥️ [GET] 대시보드 페이지 로드 (SSR 적용)
+function doGet(e) {
+  const template = HtmlService.createTemplateFromFile('Index');
+  
+  try {
+    // 설정 확인
+    if (!ROOT_FOLDER_ID) throw new Error("ROOT_FOLDER_ID가 설정되지 않았습니다.");
+
+    // 데이터를 미리 가져와서 HTML에 주입 (SSR)
+    const data = getLibraryData(); 
+    template.initialData = JSON.stringify(data);
+
+  } catch (err) {
+    template.initialData = "[]";
+    Logger.log("Dashboard Load Error: " + err);
+  }
+
+  return template.evaluate()
+      .setTitle('TokiLibrary - 내 서재')
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+// =======================================================
+// 🚀 라이브러리 데이터 가져오기 (캐시 우선)
+// =======================================================
+function getLibraryData() {
+  const root = DriveApp.getFolderById(ROOT_FOLDER_ID);
+  const files = root.getFilesByName(INDEX_FILE_NAME);
+  
+  if (files.hasNext()) {
+    // 캐시 파일이 있으면 읽어서 반환 (Fast)
+    const file = files.next();
+    const content = file.getBlob().getDataAsString();
+    
+    if (!content || content.trim() === "") return rebuildLibraryIndex();
+    
+    try { 
+      return JSON.parse(content); 
+    } catch (e) { 
+      return rebuildLibraryIndex(); 
+    }
+  } else {
+    // 없으면 전체 스캔 (Slow)
+    return rebuildLibraryIndex();
+  }
+}
+
+// =======================================================
+// 🔄 전체 폴더 스캔 및 캐시 생성 (갱신용)
+// =======================================================
+function rebuildLibraryIndex() {
+  const root = DriveApp.getFolderById(ROOT_FOLDER_ID);
+  const seriesFolders = root.getFolders();
+  const library = [];
+
+  while (seriesFolders.hasNext()) {
+    const folder = seriesFolders.next();
+    const folderName = folder.getName();
+    
+    let info = { 
+      id: '', title: folderName, author: '미상', category: '기타', 
+      status: '', thumbnail: '', url: '', last_updated: ''
+    };
+
+    // info.json 읽기
+    const infoFiles = folder.getFilesByName('info.json');
+    if (infoFiles.hasNext()) {
+      try {
+        const jsonContent = infoFiles.next().getBlob().getDataAsString();
+        const parsed = JSON.parse(jsonContent);
+        info = { ...info, ...parsed };
+      } catch (e) {}
+    } else {
+      const match = folderName.match(/^\[(\d+)\]\s*(.+)/);
+      if (match) { info.id = match[1]; info.title = match[2]; }
+    }
+
+    // 회차 카운트
+    let maxEpisode = 0;
+    let fileCount = 0;
+
+    // ⚡️ 최적화: info.json에 데이터가 있으면 파일 스캔 건너뜀
+    if (info.last_episode && info.file_count) {
+      maxEpisode = info.last_episode;
+      fileCount = info.file_count;
+    } else {
+      // 데이터가 없으면 직접 스캔 (느림)
+      const files = folder.getFiles();
+      while(files.hasNext()) {
+         const f = files.next();
+         if(f.getName() === 'info.json') continue;
+         const match = f.getName().match(/^(\d+)/);
+         if(match) {
+           const n = parseInt(match[1]);
+           if(n > maxEpisode) maxEpisode = n;
+           fileCount++;
+         }
+      }
+      
+      const subFolders = folder.getFolders();
+      while(subFolders.hasNext()) {
+         const sub = subFolders.next();
+         const match = sub.getName().match(/^(\d+)/);
+         if(match) {
+           const n = parseInt(match[1]);
+           if(n > maxEpisode) maxEpisode = n;
+           fileCount++;
+         }
+      }
+    }
+
+    library.push({
+      ...info,
+      fileCount: fileCount,
+      lastEpisode: maxEpisode,
+      driveUrl: folder.getUrl()
+    });
+  }
+  
+  // 정렬 (최신순)
+  library.sort((a, b) => {
+     if (a.last_updated && b.last_updated) return new Date(b.last_updated) - new Date(a.last_updated);
+     return parseInt(b.id || 0) - parseInt(a.id || 0);
+  });
+
+  // 캐시 파일 저장
+  const jsonString = JSON.stringify(library);
+  const indexFiles = root.getFilesByName(INDEX_FILE_NAME);
+  if (indexFiles.hasNext()) {
+    indexFiles.next().setContent(jsonString);
+  } else {
+    root.createFile(INDEX_FILE_NAME, jsonString, MimeType.PLAIN_TEXT);
+  }
+  
+  return library;
+}
+
+// 권한 승인용
+function authorizeCheck() {
+  DriveApp.getRootFolder();
+  console.log("✅ 권한 승인 완료!");
+}

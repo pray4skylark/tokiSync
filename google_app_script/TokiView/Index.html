@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <base target="_top">
+    <title>TokiLibrary</title>
+    <meta charset="utf-8">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #141414;
+            --card: #1f1f1f;
+            --text: #e5e5e5;
+            --sub: #a3a3a3;
+            --accent: #00d084;
+            --input-bg: #333;
+        }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text);
+            font-family: 'Noto Sans KR', sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+
+        header {
+            position: sticky;
+            top: 0;
+            background: rgba(20, 20, 20, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 15px 30px;
+            border-bottom: 1px solid #333;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 24px;
+            color: var(--accent);
+            letter-spacing: -1px;
+            cursor: pointer;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .search-box {
+            background: var(--input-bg);
+            border: none;
+            padding: 10px 15px;
+            border-radius: 20px;
+            color: white;
+            width: 250px;
+            font-size: 14px;
+            outline: none;
+            transition: 0.2s;
+        }
+
+        .search-box:focus {
+            background: #444;
+            width: 300px;
+        }
+
+        .btn-icon {
+            background: var(--input-bg);
+            color: var(--text);
+            border: none;
+            padding: 10px;
+            border-radius: 50%;
+            cursor: pointer;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: 0.2s;
+        }
+
+        .btn-icon:hover {
+            background: #444;
+            color: white;
+        }
+
+        .btn-refresh {
+            color: var(--accent);
+        }
+
+        .spin-anim {
+            animation: spin 1s linear infinite;
+        }
+
+        #domainPanel {
+            display: none;
+            background: #252525;
+            padding: 15px;
+            border-radius: 10px;
+            border: 1px solid #444;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .domain-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+        }
+
+        .domain-label {
+            width: 80px;
+            font-weight: bold;
+            color: var(--sub);
+        }
+
+        .domain-input {
+            flex-grow: 1;
+            background: #111;
+            border: 1px solid #444;
+            color: var(--accent);
+            padding: 8px;
+            border-radius: 5px;
+            outline: none;
+        }
+
+        .container {
+            padding: 30px;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 25px;
+        }
+
+        .card {
+            background: var(--card);
+            border-radius: 8px;
+            overflow: hidden;
+            transition: transform 0.2s, box-shadow 0.2s;
+            position: relative;
+            cursor: pointer;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .thumb-wrapper {
+            position: relative;
+            padding-top: 140%;
+            background: #2a2a2a;
+            overflow: hidden;
+        }
+
+        .thumb {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: 0.3s;
+        }
+
+        .card:hover .thumb {
+            transform: scale(1.05);
+            opacity: 0.4;
+        }
+
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            opacity: 0;
+            transition: 0.2s;
+            gap: 10px;
+            z-index: 10;
+        }
+
+        .card:hover .overlay {
+            opacity: 1;
+        }
+
+        .btn {
+            padding: 8px 20px;
+            border-radius: 20px;
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: bold;
+            transition: 0.2s;
+            width: 70%;
+            text-align: center;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .btn-drive {
+            background: white;
+            color: black;
+        }
+
+        .btn-site {
+            background: var(--accent);
+            color: black;
+        }
+
+        .btn:hover {
+            transform: scale(1.05);
+        }
+
+        .info {
+            padding: 15px;
+            position: relative;
+            z-index: 20;
+            background: var(--card);
+        }
+
+        .title {
+            font-size: 15px;
+            font-weight: 700;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-bottom: 5px;
+        }
+
+        .author {
+            font-size: 12px;
+            color: var(--sub);
+            margin-bottom: 10px;
+            display: block;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            color: var(--sub);
+            border-top: 1px solid #333;
+            padding-top: 10px;
+        }
+
+        .badge {
+            background: #333;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            color: white;
+        }
+
+        .count {
+            color: var(--accent);
+            font-weight: bold;
+        }
+
+        .no-data {
+            grid-column: 1/-1;
+            text-align: center;
+            color: #666;
+            padding: 50px;
+        }
+
+        .page-loader {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--bg);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            z-index: 999;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid #333;
+            border-top: 5px solid var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div id="pageLoader" class="page-loader">
+        <div class="spinner"></div>
+        <div id="loaderMsg" style="color:var(--sub)">내 서재를 불러오는 중입니다...</div>
+    </div>
+
+    <header>
+        <div class="header-top">
+            <h1 onclick="location.reload()">📚 TokiLibrary</h1>
+            <div class="controls">
+                <input type="text" id="search" class="search-box" placeholder="제목, 작가 검색..." onkeyup="filterData()">
+                <button id="refreshBtn" class="btn-icon btn-refresh" onclick="refreshDB()"
+                    title="DB 갱신 (스캔)">🔄</button>
+                <button class="btn-icon" onclick="toggleSettings()" title="도메인 설정">⚙️</button>
+            </div>
+        </div>
+        <div id="domainPanel">
+            <div class="domain-row">
+                <span class="domain-label">뉴토끼:</span>
+                <input type="text" id="url_newtoki" class="domain-input" placeholder="예: https://newtoki469.com"
+                    onchange="saveDomains()">
+            </div>
+            <div class="domain-row">
+                <span class="domain-label">마나토끼:</span>
+                <input type="text" id="url_manatoki" class="domain-input" placeholder="예: https://manatoki469.net"
+                    onchange="saveDomains()">
+            </div>
+            <div class="domain-row">
+                <span class="domain-label">북토끼:</span>
+                <input type="text" id="url_booktoki" class="domain-input" placeholder="예: https://booktoki469.com"
+                    onchange="saveDomains()">
+            </div>
+            <div style="font-size: 12px; color: #888; margin-top: 5px;">※ 도메인이 변경되면 여기서 수정하세요. 링크가 즉시 반영됩니다.</div>
+        </div>
+    </header>
+
+    <div class="container">
+        <div id="grid" class="grid"></div>
+    </div>
+
+    <script>
+        let allData = [];
+        const NO_IMAGE_SVG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='280' viewBox='0 0 200 280'%3E%3Crect width='200' height='280' fill='%23333'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%23666' font-size='20'%3ENo Image%3C/text%3E%3C/svg%3E";
+
+        window.onload = function () {
+            loadDomains();
+            try {
+                const rawData = <?!= initialData ?>;
+                renderGrid(rawData);
+                document.getElementById('pageLoader').style.display = 'none';
+            } catch (e) {
+                document.getElementById('pageLoader').innerHTML = `<span style="color:red">오류: ${e.message}</span>`;
+            }
+        };
+
+        function refreshDB() {
+            if (!confirm("전체 폴더를 스캔하여 정보를 갱신합니다.\n작품 수에 따라 시간이 소요됩니다.")) return;
+
+            const btn = document.getElementById('refreshBtn');
+            btn.classList.add('spin-anim');
+            document.getElementById('loaderMsg').innerText = "드라이브 스캔 중... (잠시만 기다려주세요)";
+            document.getElementById('pageLoader').style.display = 'flex';
+
+            google.script.run
+                .withSuccessHandler((data) => {
+                    renderGrid(data);
+                    btn.classList.remove('spin-anim');
+                    document.getElementById('pageLoader').style.display = 'none';
+                    alert("✅ 갱신 완료!");
+                })
+                .withFailureHandler((e) => {
+                    document.getElementById('pageLoader').innerHTML = `<span style="color:red">오류: ${e.message}</span>`;
+                    btn.classList.remove('spin-anim');
+                })
+                .rebuildLibraryIndex();
+        }
+
+        function toggleSettings() { document.getElementById('domainPanel').style.display = document.getElementById('domainPanel').style.display === 'block' ? 'none' : 'block'; }
+        function saveDomains() { localStorage.setItem('url_newtoki', document.getElementById('url_newtoki').value.trim()); localStorage.setItem('url_manatoki', document.getElementById('url_manatoki').value.trim()); localStorage.setItem('url_booktoki', document.getElementById('url_booktoki').value.trim()); renderGrid(allData); }
+        function loadDomains() { document.getElementById('url_newtoki').value = localStorage.getItem('url_newtoki') || 'https://newtoki469.com'; document.getElementById('url_manatoki').value = localStorage.getItem('url_manatoki') || 'https://manatoki469.net'; document.getElementById('url_booktoki').value = localStorage.getItem('url_booktoki') || 'https://booktoki469.com'; }
+
+        function getDynamicLink(item) {
+            const site = (item.site || "").toLowerCase();
+            let baseUrl = "";
+            let path = "";
+            if (site.includes("뉴토끼")) { baseUrl = document.getElementById('url_newtoki').value; path = "/webtoon/"; }
+            else if (site.includes("마나토끼")) { baseUrl = document.getElementById('url_manatoki').value; path = "/comic/"; }
+            else if (site.includes("북토끼")) { baseUrl = document.getElementById('url_booktoki').value; path = "/novel/"; }
+            else { baseUrl = document.getElementById('url_manatoki').value; path = "/comic/"; }
+            if (baseUrl.endsWith("/")) baseUrl = baseUrl.slice(0, -1);
+            return item.id ? (baseUrl + path + item.id) : "#";
+        }
+
+        function renderGrid(data) {
+            allData = data;
+            const grid = document.getElementById('grid');
+            grid.innerHTML = '';
+
+            if (!data || data.length === 0) {
+                grid.innerHTML = '<div class="no-data">저장된 작품이 없습니다.</div>';
+                return;
+            }
+
+            data.forEach(item => {
+                const card = document.createElement('div');
+                card.className = 'card';
+                const thumb = item.thumbnail && item.thumbnail.startsWith("data:image") ? item.thumbnail : NO_IMAGE_SVG;
+                const dynamicUrl = getDynamicLink(item);
+
+                card.innerHTML = `
+          <div class="thumb-wrapper">
+            <img src="${thumb}" class="thumb" onerror="this.src='${NO_IMAGE_SVG}'">
+            <div class="overlay">
+              <a href="${item.driveUrl}" target="_blank" class="btn btn-drive">📂 드라이브</a>
+              ${item.id ? `<a href="${dynamicUrl}" target="_blank" class="btn btn-site">🌐 사이트 이동</a>` : ''}
+            </div>
+          </div>
+          <div class="info">
+            <div class="title" title="${item.title}">${item.title}</div>
+            <span class="author" title="${item.author}">${item.author || '작가 미상'}</span>
+            <div class="meta">
+              <span class="badge">${item.status || 'ID기반'}</span>
+              <span class="count">${item.lastEpisode || 0}화 / ${item.fileCount}건</span>
+            </div>
+          </div>
+        `;
+                grid.appendChild(card);
+            });
+        }
+
+        function filterData() {
+            const query = document.getElementById('search').value.toLowerCase();
+            const cards = document.querySelectorAll('.card');
+            cards.forEach((card, index) => {
+                const item = allData[index];
+                const text = (item.title + item.author + item.id).toLowerCase();
+                card.style.display = text.includes(query) ? 'flex' : 'none';
+            });
+        }
+    </script>
+</body>
+
+</html>
