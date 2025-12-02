@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Loader)
 // @namespace    https://github.com/pray4skylark/tokiSync
-// @version      2.0.4 (Loader Scope Fix)
+// @version      2.0.5 (JSZip Fix)
 // @description  TokiSync Core Script Loader (GitHub CDN)
 // @author       pray4skylark
 // @match        https://*.com/webtoon/*
@@ -29,7 +29,7 @@
     // ⭐️ 핵심: GitHub 사용자명, 레포지토리명, 버전 설정
     const GITHUB_USER = "pray4skylark";
     const GITHUB_REPO = "tokiSync";
-    const CORE_VERSION = "2.0.3"; // 로드할 코어 버전 (Tag)
+    const CORE_VERSION = "2.0.4"; // 로드할 코어 버전 (Tag)
     const CORE_FILENAME = "tokiSyncCore.js";
 
     const apiUrl = GM_getValue(CFG_URL_KEY, "");
@@ -82,7 +82,10 @@
                                 GM_registerMenuCommand: GM_registerMenuCommand,
                                 GM_xmlhttpRequest: GM_xmlhttpRequest,
                                 GM_setValue: GM_setValue,
-                                GM_getValue: GM_getValue
+                                GM_xmlhttpRequest: GM_xmlhttpRequest,
+                                GM_setValue: GM_setValue,
+                                GM_getValue: GM_getValue,
+                                JSZip: JSZip // JSZip 객체 전달
                             });
                         } else {
                             throw new Error("window.TokiSyncCore is not defined. Core script might be outdated.");
