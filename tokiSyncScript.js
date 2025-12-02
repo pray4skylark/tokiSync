@@ -29,7 +29,7 @@
     // ⭐️ 핵심: GitHub 사용자명, 레포지토리명, 버전 설정
     const GITHUB_USER = "pray4skylark";
     const GITHUB_REPO = "tokiSync";
-    const CORE_VERSION = "2.0.0"; // 로드할 코어 버전 (Tag)
+    const CORE_VERSION = "2.0.2"; // 로드할 코어 버전 (Tag)
     const CORE_FILENAME = "tokiSyncCore.js";
 
     const apiUrl = GM_getValue(CFG_URL_KEY, "");
