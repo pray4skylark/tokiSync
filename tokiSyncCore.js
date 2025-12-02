@@ -1,4 +1,4 @@
-// 🚀 TokiSync Core Logic v2.0.3
+// 🚀 TokiSync Core Logic v2.0.4
 // This script is loaded dynamically by the Loader.
 
 window.TokiSyncCore = function (GM_context) {
@@ -9,8 +9,9 @@ window.TokiSyncCore = function (GM_context) {
     const GM_xmlhttpRequest = GM_context.GM_xmlhttpRequest;
     const GM_setValue = GM_context.GM_setValue;
     const GM_getValue = GM_context.GM_getValue;
+    const JSZip = GM_context.JSZip;
 
-    console.log("🚀 TokiSync Core v2.0.3 Loaded (Remote)");
+    console.log("🚀 TokiSync Core v2.0.4 Loaded (Remote)");
 
     // #region [1. 설정 및 상수] ====================================================
     const CFG_URL_KEY = "TOKI_GAS_URL";
