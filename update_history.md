@@ -2,6 +2,13 @@
 
 ## 📥 Client (Tampermonkey)
 
+### v2.0.4 (Scope Fix) - 2025.12.02
+*   **[Fix]** `new Function` 실행 시 `window` 객체 스코프 문제 해결 (명시적 전달).
+
+### v2.0.3 (Cache Fix) - 2025.12.02
+*   **[Fix]** jsDelivr 캐시 문제로 구버전 스크립트가 로드되는 현상 해결 (Cache Busting 추가).
+*   **[Fix]** 스크립트 내용 검증 로직 추가.
+
 ### v2.0.2 (Safe Loader) - 2025.12.02
 *   **[Refactor]** `eval` 사용을 제거하고 `new Function` + `window` 전역 변수 방식으로 변경.
 *   **[Breaking]** 코어 스크립트(`tokiSyncCore.js`) 구조 변경 (`window.TokiSyncCore` 할당 필수).

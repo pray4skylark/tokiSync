@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Loader)
 // @namespace    https://github.com/pray4skylark/tokiSync
-// @version      2.0.2 (Remote Loader Safe)
+// @version      2.0.4 (Loader Scope Fix)
 // @description  TokiSync Core Script Loader (GitHub CDN)
 // @author       pray4skylark
 // @match        https://*.com/webtoon/*
@@ -49,8 +49,8 @@
     // -----------------------------------------------------------
 
     function loadCoreScript() {
-        // jsDelivr URL 생성
-        const cdnUrl = `https://cdn.jsdelivr.net/gh/${GITHUB_USER}/${GITHUB_REPO}@${CORE_VERSION}/${CORE_FILENAME}`;
+        // jsDelivr URL 생성 (캐시 방지 파라미터 추가)
+        const cdnUrl = `https://cdn.jsdelivr.net/gh/${GITHUB_USER}/${GITHUB_REPO}@${CORE_VERSION}/${CORE_FILENAME}?t=${Date.now()}`;
 
         console.log(`☁️ Fetching Core Script from: ${cdnUrl}`);
 
@@ -65,9 +65,17 @@
                         // 3. Core 스크립트 실행 (GM 컨텍스트 전달)
                         // 3. Core 스크립트 실행 (GM 컨텍스트 전달)
                         // Core 스크립트는 window.TokiSyncCore = function(...) {...} 형태여야 합니다.
+
+                        // 내용 검증
+                        if (!scriptContent.includes("window.TokiSyncCore")) {
+                            console.error("❌ Invalid Script Content:", scriptContent.substring(0, 100));
+                            throw new Error("불러온 스크립트가 구버전(v2.0.0)으로 보입니다. 캐시 문제일 수 있습니다.");
+                        }
+
                         // new Function으로 스크립트를 실행하여 전역 변수에 함수를 등록합니다.
-                        const runScript = new Function(scriptContent);
-                        runScript();
+                        // window 객체를 명시적으로 전달하여 스코프 문제를 방지합니다.
+                        const runScript = new Function("window", scriptContent);
+                        runScript(window);
 
                         if (typeof window.TokiSyncCore === 'function') {
                             window.TokiSyncCore({
