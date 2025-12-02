@@ -1,4 +1,4 @@
-// 🚀 TokiSync Core Logic v2.0.2
+// 🚀 TokiSync Core Logic v2.0.3
 // This script is loaded dynamically by the Loader.
 
 window.TokiSyncCore = function (GM_context) {
@@ -10,7 +10,7 @@ window.TokiSyncCore = function (GM_context) {
     const GM_setValue = GM_context.GM_setValue;
     const GM_getValue = GM_context.GM_getValue;
 
-    console.log("🚀 TokiSync Core v2.0.0 Loaded (Remote)");
+    console.log("🚀 TokiSync Core v2.0.3 Loaded (Remote)");
 
     // #region [1. 설정 및 상수] ====================================================
     const CFG_URL_KEY = "TOKI_GAS_URL";
@@ -629,7 +629,17 @@ window.TokiSyncCore = function (GM_context) {
         finally { stopSilentAudio(); setTimeout(() => document.getElementById('tokiStatusDisplay')?.remove(), 5000); }
     }
 
-    window.addEventListener('load', () => { markDownloadedItems(); fetchHistoryFromCloud(); });
+    // 초기화 함수
+    function init() {
+        markDownloadedItems();
+        fetchHistoryFromCloud();
+    }
+
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+        init();
+    } else {
+        window.addEventListener('load', init);
+    }
 
     GM_registerMenuCommand('⚙️ 설정 (URL/Key)', openSettings);
     GM_registerMenuCommand('🐞 디버그 모드', toggleDebugMode);
