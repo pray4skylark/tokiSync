@@ -1,4 +1,4 @@
-// 🚀 TokiSync Core Logic v2.0.0
+// 🚀 TokiSync Core Logic v2.0.2
 // This script is loaded dynamically by the Loader.
 
 window.TokiSyncCore = function (GM_context) {
