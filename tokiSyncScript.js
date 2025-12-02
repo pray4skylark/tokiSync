@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Loader)
 // @namespace    https://github.com/pray4skylark/tokiSync
-// @version      2.0.0 (Remote Loader)
+// @version      2.0.2 (Remote Loader Safe)
 // @description  TokiSync Core Script Loader (GitHub CDN)
 // @author       pray4skylark
 // @match        https://*.com/webtoon/*
@@ -63,13 +63,22 @@
                         const scriptContent = response.responseText;
 
                         // 3. Core 스크립트 실행 (GM 컨텍스트 전달)
-                        const runCore = new Function("GM_context", scriptContent);
-                        runCore({
-                            GM_registerMenuCommand: GM_registerMenuCommand,
-                            GM_xmlhttpRequest: GM_xmlhttpRequest,
-                            GM_setValue: GM_setValue,
-                            GM_getValue: GM_getValue
-                        });
+                        // 3. Core 스크립트 실행 (GM 컨텍스트 전달)
+                        // Core 스크립트는 window.TokiSyncCore = function(...) {...} 형태여야 합니다.
+                        // new Function으로 스크립트를 실행하여 전역 변수에 함수를 등록합니다.
+                        const runScript = new Function(scriptContent);
+                        runScript();
+
+                        if (typeof window.TokiSyncCore === 'function') {
+                            window.TokiSyncCore({
+                                GM_registerMenuCommand: GM_registerMenuCommand,
+                                GM_xmlhttpRequest: GM_xmlhttpRequest,
+                                GM_setValue: GM_setValue,
+                                GM_getValue: GM_getValue
+                            });
+                        } else {
+                            throw new Error("window.TokiSyncCore is not defined. Core script might be outdated.");
+                        }
 
                     } catch (e) {
                         console.error("❌ Core Script Execution Failed:", e);

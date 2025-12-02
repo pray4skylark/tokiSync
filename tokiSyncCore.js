@@ -1,7 +1,7 @@
 // 🚀 TokiSync Core Logic v2.0.0
 // This script is loaded dynamically by the Loader.
 
-(function (GM_context) {
+window.TokiSyncCore = function (GM_context) {
     'use strict';
 
     // GM functions mapping (passed from Loader)
@@ -647,4 +647,4 @@
         });
     });
     // #endregion
-})
+};

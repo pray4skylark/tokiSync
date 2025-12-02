@@ -2,6 +2,14 @@
 
 ## 📥 Client (Tampermonkey)
 
+### v2.0.2 (Safe Loader) - 2025.12.02
+*   **[Refactor]** `eval` 사용을 제거하고 `new Function` + `window` 전역 변수 방식으로 변경.
+*   **[Breaking]** 코어 스크립트(`tokiSyncCore.js`) 구조 변경 (`window.TokiSyncCore` 할당 필수).
+
+### v2.0.1 (Loader Fix) - 2025.12.02
+*   **[Fix]** 로더가 코어 스크립트를 실행하지 못하는 버그 수정 (`eval` 적용).
+*   **[Note]** GitHub에 있는 `v2.0.0` 코어 파일은 그대로 사용 가능 (로더만 업데이트하면 됨).
+
 ### v2.0.0 (Remote Loader) - 2025.12.02
 *   **[New] Remote Loader Architecture**:
     *   클라이언트 스크립트(`tokiSyncScript.js`)를 경량화된 **Loader**로 변경.
