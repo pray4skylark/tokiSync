@@ -1,4 +1,4 @@
-// 🚀 TokiSync Core Logic v2.0.4
+// 🚀 TokiSync Core Logic v2.2.14
 // This script is loaded dynamically by the Loader.
 
 window.TokiSyncCore = function (GM_context) {
@@ -11,7 +11,7 @@ window.TokiSyncCore = function (GM_context) {
     const GM_getValue = GM_context.GM_getValue;
     const JSZip = GM_context.JSZip;
 
-    console.log("🚀 TokiSync Core v2.0.4 Loaded (Remote)");
+    console.log("🚀 TokiSync Core v2.2.1 Loaded (Remote)");
 
     // #region [1. 설정 및 상수] ====================================================
     const CFG_URL_KEY = "TOKI_GAS_URL";
@@ -634,6 +634,18 @@ window.TokiSyncCore = function (GM_context) {
     function init() {
         markDownloadedItems();
         fetchHistoryFromCloud();
+
+        // ⚡️ 원격 실행 감지 (TokiView -> Client)
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('toki_action') === 'sync') {
+            console.log("⚡️ Remote Action Detected: Auto Sync");
+            // 페이지 로드 완료 후 실행 보장
+            if (document.readyState === 'complete') {
+                autoSyncDownloadManager();
+            } else {
+                window.addEventListener('load', () => autoSyncDownloadManager());
+            }
+        }
     }
 
     if (document.readyState === 'complete' || document.readyState === 'interactive') {
