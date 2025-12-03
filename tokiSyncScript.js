@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Loader)
 // @namespace    https://github.com/pray4skylark/tokiSync
-// @version      2.0.5 (JSZip Fix)
+// @version      2.2.0 (Manual Update)
 // @description  TokiSync Core Script Loader (GitHub CDN)
 // @author       pray4skylark
 // @match        https://*.com/webtoon/*
@@ -29,8 +29,13 @@
     // ⭐️ 핵심: GitHub 사용자명, 레포지토리명, 버전 설정
     const GITHUB_USER = "pray4skylark";
     const GITHUB_REPO = "tokiSync";
-    const CORE_VERSION = "2.0.4"; // 로드할 코어 버전 (Tag)
     const CORE_FILENAME = "tokiSyncCore.js";
+
+    // 캐시 및 버전 설정
+    const CACHE_DURATION = 60 * 60 * 1000;
+    const CACHE_VER_KEY = "TOKI_CACHE_VERSION";
+    const CACHE_TIME_KEY = "TOKI_CACHE_TIME";
+    const PINNED_VER_KEY = "TOKI_PINNED_VERSION";
 
     const apiUrl = GM_getValue(CFG_URL_KEY, "");
     const secretKey = GM_getValue(CFG_SECRET_KEY, "");
@@ -43,14 +48,90 @@
         return;
     }
 
-    // 2. GitHub CDN에서 Core 스크립트 로드
-    loadCoreScript();
+    // 2. 최신 버전 확인 및 Core 로드 (수동 업데이트 로직)
+    checkAndLoadCore();
 
     // -----------------------------------------------------------
 
-    function loadCoreScript() {
+    // -----------------------------------------------------------
+
+    async function checkAndLoadCore() {
+        const pinnedVer = GM_getValue(PINNED_VER_KEY);
+        const latestVer = await fetchLatestVersion();
+
+        // 1. 최초 실행이거나 핀된 버전이 없으면 최신 버전으로 고정
+        if (!pinnedVer) {
+            console.log(`📌 First run: Pinning to ${latestVer}`);
+            GM_setValue(PINNED_VER_KEY, latestVer);
+            loadCoreScript(latestVer);
+            return;
+        }
+
+        // 2. 업데이트 감지 (핀된 버전과 최신 버전이 다르면)
+        if (pinnedVer !== latestVer) {
+            console.log(`✨ Update Available: ${pinnedVer} -> ${latestVer}`);
+            GM_registerMenuCommand(`✨ 업데이트 가능 (${latestVer})`, () => {
+                if (confirm(`새 버전(${latestVer})으로 업데이트하시겠습니까?`)) {
+                    GM_setValue(PINNED_VER_KEY, latestVer);
+                    alert("업데이트가 적용되었습니다. 페이지를 새로고침합니다.");
+                    location.reload();
+                }
+            });
+        } else {
+            console.log("✅ You are using the latest version.");
+        }
+
+        // 3. 항상 핀된(고정된) 버전 로드
+        loadCoreScript(pinnedVer);
+    }
+
+    function fetchLatestVersion() {
+        return new Promise((resolve) => {
+            const cachedVer = GM_getValue(CACHE_VER_KEY);
+            const cachedTime = GM_getValue(CACHE_TIME_KEY, 0);
+            const now = Date.now();
+
+            // 캐시 유효하면 바로 반환
+            if (cachedVer && (now - cachedTime < CACHE_DURATION)) {
+                resolve(cachedVer);
+                return;
+            }
+
+            // GitHub API로 최신 태그 조회
+            GM_xmlhttpRequest({
+                method: "GET",
+                url: `https://api.github.com/repos/${GITHUB_USER}/${GITHUB_REPO}/tags`,
+                onload: (res) => {
+                    if (res.status === 200) {
+                        try {
+                            const tags = JSON.parse(res.responseText);
+                            if (tags.length > 0) {
+                                const latestVer = tags[0].name;
+                                GM_setValue(CACHE_VER_KEY, latestVer);
+                                GM_setValue(CACHE_TIME_KEY, now);
+                                resolve(latestVer);
+                            } else {
+                                resolve(cachedVer || "v2.0.5"); // Fallback
+                            }
+                        } catch (e) {
+                            console.error("❌ Failed to parse tags:", e);
+                            resolve(cachedVer || "v2.0.5");
+                        }
+                    } else {
+                        console.error("❌ GitHub API Error:", res.status);
+                        resolve(cachedVer || "v2.0.5");
+                    }
+                },
+                onerror: () => {
+                    resolve(cachedVer || "v2.0.5");
+                }
+            });
+        });
+    }
+
+    function loadCoreScript(version) {
         // jsDelivr URL 생성 (캐시 방지 파라미터 추가)
-        const cdnUrl = `https://cdn.jsdelivr.net/gh/${GITHUB_USER}/${GITHUB_REPO}@${CORE_VERSION}/${CORE_FILENAME}?t=${Date.now()}`;
+        const cdnUrl = `https://cdn.jsdelivr.net/gh/${GITHUB_USER}/${GITHUB_REPO}@${version}/${CORE_FILENAME}?t=${Date.now()}`;
 
         console.log(`☁️ Fetching Core Script from: ${cdnUrl}`);
 
