@@ -437,7 +437,10 @@
             <img src="${thumb}" class="thumb" onerror="this.src='${NO_IMAGE_SVG}'">
             <div class="overlay">
               <a href="${item.driveUrl}" target="_blank" class="btn btn-drive">📂 드라이브</a>
-              ${item.id ? `<a href="${dynamicUrl}" target="_blank" class="btn btn-site">🌐 사이트 이동</a>` : ''}
+              ${item.id ? `
+                  <a href="${dynamicUrl}" target="_blank" class="btn btn-site">🌐 사이트 이동</a>
+                  <a href="${dynamicUrl}?toki_action=sync" target="_blank" class="btn" style="background:#ff9800; color:black;">⚡️ 자동 동기화</a>
+              ` : ''}
             </div>
           </div>
           <div class="info">
