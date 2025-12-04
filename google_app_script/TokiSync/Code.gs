@@ -1,8 +1,8 @@
 // =====================================================
-// ⚙️ TokiSync API Server v3.0.0
+// ⚙️ TokiSync API Server v3.0.0-BETA
 // -----------------------------------------------------
 // 🤝 Compatibility:
-//    - Client v3.0.0+ (User Execution Mode)
+//    - Client v3.0.0-BETA+ (User Execution Mode)
 // -----------------------------------------------------
 // ⚙️ 설정 (사용자 속성 사용)
 // =====================================================
@@ -82,7 +82,7 @@ function backupSecretKeyToDrive(folderId, secretKey) {
 
 // [GET] 서버 상태 확인용
 function doGet(e) {
-  return ContentService.createTextOutput("✅ TokiSync API Server v3.0 is Running...");
+  return ContentService.createTextOutput("✅ TokiSync API Server v3.0-BETA is Running...");
 }
 
 // [POST] Tampermonkey 요청 처리 (핵심 로직)
