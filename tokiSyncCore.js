@@ -1,4 +1,4 @@
-// 🚀 TokiSync Core Logic v3.0.0-BETA
+// 🚀 TokiSync Core Logic v3.0.0-BETA3
 // This script is loaded dynamically by the Loader.
 
 window.TokiSyncCore = function (GM_context) {
@@ -11,7 +11,7 @@ window.TokiSyncCore = function (GM_context) {
     const GM_getValue = GM_context.GM_getValue;
     const JSZip = GM_context.JSZip;
 
-    console.log("🚀 TokiSync Core v3.0.0-BETA Loaded (Remote)");
+    console.log("🚀 TokiSync Core v3.0.0-BETA3 Loaded (Remote)");
 
     // #region [1. 설정 및 상수] ====================================================
     const CFG_URL_KEY = "TOKI_GAS_URL";
@@ -19,8 +19,10 @@ window.TokiSyncCore = function (GM_context) {
     const CFG_SECRET_KEY = "TOKI_SECRET_KEY";
     const CFG_DEBUG_KEY = "TOKI_DEBUG_MODE";
     const CFG_FOLDER_ID = "TOKI_FOLDER_ID"; // [NEW] 폴더 ID 저장용
+    const CFG_CONFIG_VER = "TOKI_CONFIG_VER"; // [NEW] 설정 버전 관리
+    const CURRENT_CONFIG_VER = 1; // v3.0.0 초기 버전
 
-    // 🚀 v3.0.0-BETA New Deployment URLs
+    // 🚀 v3.0.0-BETA3 New Deployment URLs
     const DEFAULT_API_URL = "https://script.google.com/macros/s/AKfycbyPN2DmWIC92T_MotbHv9Ky-8bIH0Y8QiYmrlgmBbz2H41km8W6afasZkJcbMa6_P5C/exec";
     const DEFAULT_DASH_URL = "https://script.google.com/macros/s/AKfycbwMmR80ia-kCNOiwKiYV3yCncG7_XuEWcx-fIgqSVlhCRxO7zRrb4EfLSrL8zcEnKEN/exec";
 
@@ -33,6 +35,24 @@ window.TokiSyncCore = function (GM_context) {
             debug: GM_getValue(CFG_DEBUG_KEY, false)
         };
     }
+
+    function migrateConfig() {
+        const savedVer = GM_getValue(CFG_CONFIG_VER, 0);
+        if (savedVer < CURRENT_CONFIG_VER) {
+            console.log(`♻️ Migrating config from v${savedVer} to v${CURRENT_CONFIG_VER}`);
+
+            // v3.0.0 Migration: Clear old API URL & Key to force new defaults
+            GM_context.GM_deleteValue(CFG_URL_KEY);
+            GM_context.GM_deleteValue(CFG_SECRET_KEY);
+            GM_context.GM_deleteValue(CFG_FOLDER_ID);
+
+            GM_setValue(CFG_CONFIG_VER, CURRENT_CONFIG_VER);
+
+            alert("TokiSync v3.0 업데이트: 설정을 초기화했습니다.\n새로운 서버 연결을 위해 설정을 다시 진행해주세요.");
+            location.reload();
+        }
+    }
+    migrateConfig();
 
     const MAX_UPLOAD_CONCURRENCY = 2;
     const MAX_IMG_CONCURRENCY = 5;

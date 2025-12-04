@@ -54,7 +54,7 @@ function doGet(e) {
   template.initialData = JSON.stringify(initialData);
   
   return template.evaluate()
-      .setTitle('TokiView v3.0-BETA')
+      .setTitle('TokiView v3.0-BETA3')
       .addMetaTag('viewport', 'width=device-width, initial-scale=1')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }

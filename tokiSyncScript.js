@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Loader)
 // @namespace    https://github.com/pray4skylark/tokiSync
-// @version      2.2.0 (Manual Update)
+// @version      3.0.0-BETA3
 // @description  TokiSync Core Script Loader (GitHub CDN)
 // @author       pray4skylark
 // @match        https://*.com/webtoon/*
@@ -37,16 +37,8 @@
     const CACHE_TIME_KEY = "TOKI_CACHE_TIME";
     const PINNED_VER_KEY = "TOKI_PINNED_VERSION";
 
-    const apiUrl = GM_getValue(CFG_URL_KEY, "");
-    const secretKey = GM_getValue(CFG_SECRET_KEY, "");
-
-    // 1. 설정이 없으면 설정 메뉴만 등록
-    if (!apiUrl || !secretKey) {
-        console.warn("⚠️ TokiSync 설정이 필요합니다.");
-        GM_registerMenuCommand('⚙️ 설정 (URL/Key)', openSettings);
-        alert("TokiSync 설정을 완료해주세요. (Tampermonkey 메뉴)");
-        return;
-    }
+    // 1. 설정 검사 제거 (v3.0.0부터 Core에서 자동 설정 수행)
+    // if (!apiUrl || !secretKey) { ... }
 
     // 2. 최신 버전 확인 및 Core 로드 (수동 업데이트 로직)
     checkAndLoadCore();
@@ -111,19 +103,19 @@
                                 GM_setValue(CACHE_TIME_KEY, now);
                                 resolve(latestVer);
                             } else {
-                                resolve(cachedVer || "v2.0.5"); // Fallback
+                                resolve(cachedVer || "v3.0.0-BETA3"); // Fallback
                             }
                         } catch (e) {
                             console.error("❌ Failed to parse tags:", e);
-                            resolve(cachedVer || "v2.0.5");
+                            resolve(cachedVer || "v3.0.0-BETA3");
                         }
                     } else {
                         console.error("❌ GitHub API Error:", res.status);
-                        resolve(cachedVer || "v2.0.5");
+                        resolve(cachedVer || "v3.0.0-BETA3");
                     }
                 },
                 onerror: () => {
-                    resolve(cachedVer || "v2.0.5");
+                    resolve(cachedVer || "v3.0.0-BETA3");
                 }
             });
         });
@@ -188,23 +180,6 @@
         });
     }
 
-    function openSettings() {
-        const currentUrl = GM_getValue(CFG_URL_KEY, "");
-        const currentKey = GM_getValue(CFG_SECRET_KEY, "");
-
-        const apiUrlInput = prompt("1. [API 서버] URL (TokiSync-Server):", currentUrl);
-        if (apiUrlInput === null) return;
-        let finalApiUrl = apiUrlInput.trim();
-        if (!finalApiUrl.startsWith("http") && finalApiUrl.length > 10) finalApiUrl = `https://script.google.com/macros/s/${finalApiUrl}/exec`;
-
-        const newKey = prompt("2. 보안 키 (Secret Key):", currentKey);
-        if (newKey === null) return;
-
-        GM_setValue(CFG_URL_KEY, finalApiUrl);
-        GM_setValue(CFG_SECRET_KEY, newKey.trim());
-
-        alert("✅ 설정 저장 완료! 새로고침 해주세요.");
-        location.reload();
-    }
+    // Legacy openSettings removed. Core handles settings now.
 
 })();
