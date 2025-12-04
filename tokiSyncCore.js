@@ -9,6 +9,7 @@ window.TokiSyncCore = function (GM_context) {
     const GM_xmlhttpRequest = GM_context.GM_xmlhttpRequest;
     const GM_setValue = GM_context.GM_setValue;
     const GM_getValue = GM_context.GM_getValue;
+    const GM_deleteValue = GM_context.GM_deleteValue;
     const JSZip = GM_context.JSZip;
 
     console.log("🚀 TokiSync Core v3.0.0-BETA3 Loaded (Remote)");
@@ -42,9 +43,9 @@ window.TokiSyncCore = function (GM_context) {
             console.log(`♻️ Migrating config from v${savedVer} to v${CURRENT_CONFIG_VER}`);
 
             // v3.0.0 Migration: Clear old API URL & Key to force new defaults
-            GM_context.GM_deleteValue(CFG_URL_KEY);
-            GM_context.GM_deleteValue(CFG_SECRET_KEY);
-            GM_context.GM_deleteValue(CFG_FOLDER_ID);
+            GM_deleteValue(CFG_URL_KEY);
+            GM_deleteValue(CFG_SECRET_KEY);
+            GM_deleteValue(CFG_FOLDER_ID);
 
             GM_setValue(CFG_CONFIG_VER, CURRENT_CONFIG_VER);
 

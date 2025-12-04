@@ -12,6 +12,7 @@
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
 // @grant        GM_getValue
+// @grant        GM_deleteValue
 // @require      https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js
 // @require      https://cdnjs.cloudflare.com/ajax/libs/jszip-utils/0.1.0/jszip-utils.js
 // @run-at       document-end
@@ -171,6 +172,7 @@
                                 GM_xmlhttpRequest: GM_xmlhttpRequest,
                                 GM_setValue: GM_setValue,
                                 GM_getValue: GM_getValue,
+                                GM_deleteValue: GM_deleteValue,
                                 JSZip: JSZip // JSZip 객체 전달
                             });
                         } else {
