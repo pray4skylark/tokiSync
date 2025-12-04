@@ -380,6 +380,43 @@
             width: 100%;
         }
 
+        .btn-pwa {
+            background: #444;
+            color: #ccc;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            font-size: 12px;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 10px;
+        }
+
+        .btn-pwa:hover {
+            background: #555;
+            color: white;
+        }
+
+        .pwa-guide {
+            display: none;
+            text-align: left;
+            background: #222;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 15px;
+            font-size: 13px;
+            color: #ddd;
+        }
+
+        .pwa-guide ol {
+            padding-left: 20px;
+            margin: 10px 0;
+        }
+
+        .pwa-guide li {
+            margin-bottom: 5px;
+        }
+
         .btn-save:hover {
             opacity: 0.9;
         }
@@ -398,10 +435,22 @@
             <div class="modal-title">⚙️ 초기 설정</div>
             <div class="modal-desc">
                 TokiSync 라이브러리 폴더의 ID를 입력해주세요.<br>
-                (구글 드라이브 폴더 URL의 뒷부분 ID)
+                (구글 드라이브 폴더 URL의 뒷부분)
             </div>
-            <input type="text" id="folderIdInput" class="config-input" placeholder="Folder ID 입력 (예: 1AbCdEfG...)">
-            <button class="btn-save" onclick="saveConfig()">저장하고 시작하기</button>
+            <input type="text" id="configFolderId" class="config-input" placeholder="Folder ID">
+            <button class="btn-save" onclick="saveConfig()">저장하기</button>
+
+            <button class="btn-pwa" onclick="togglePwaGuide()">📱 앱 설치 가이드 (다중 로그인 해결)</button>
+
+            <div id="pwaGuide" class="pwa-guide">
+                <strong>💡 다중 계정 로그인 문제 해결법</strong><br>
+                여러 구글 계정을 사용 중이라면 설정이 자꾸 풀릴 수 있습니다. 앱으로 설치하여 해결하세요.<br><br>
+                1. 원하는 계정으로 로그인된 크롬 창 열기<br>
+                2. 우측 상단 <strong>메뉴(⋮)</strong> 클릭<br>
+                3. <strong>도구 더보기</strong> > <strong>바로가기 만들기</strong><br>
+                4. <strong>"창으로 열기"</strong> 체크 후 [만들기]<br>
+                5. 바탕화면에 생긴 아이콘으로 실행하세요!
+            </div>
         </div>
     </div>
 
@@ -451,7 +500,11 @@
                 if (rawData.needsConfig) {
                     document.getElementById('pageLoader').style.display = 'none';
                     document.getElementById('configModal').style.display = 'flex';
-                    if (rawData.error) alert(rawData.error);
+                    if (rawData.error) {
+                        let msg = rawData.error;
+                        if (rawData.debugInfo) msg += "\n\n[Debug Info]\n" + rawData.debugInfo;
+                        alert(msg);
+                    }
                 } else {
                     renderGrid(rawData.library);
                     document.getElementById('pageLoader').style.display = 'none';
@@ -462,7 +515,7 @@
         };
 
         function saveConfig() {
-            const id = document.getElementById('folderIdInput').value.trim();
+            const id = document.getElementById('configFolderId').value.trim();
             if (!id) return alert("폴더 ID를 입력해주세요.");
 
             const btn = document.querySelector('.btn-save');
@@ -568,6 +621,14 @@
                 const text = (item.title + item.author + item.id).toLowerCase();
                 card.style.display = text.includes(query) ? 'flex' : 'none';
             });
+        }
+        function togglePwaGuide() {
+            const guide = document.getElementById('pwaGuide');
+            if (guide.style.display === 'block') {
+                guide.style.display = 'none';
+            } else {
+                guide.style.display = 'block';
+            }
         }
     </script>
 </body>
