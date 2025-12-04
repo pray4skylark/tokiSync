@@ -36,9 +36,18 @@
     const CACHE_VER_KEY = "TOKI_CACHE_VERSION";
     const CACHE_TIME_KEY = "TOKI_CACHE_TIME";
     const PINNED_VER_KEY = "TOKI_PINNED_VERSION";
+    const CFG_DEBUG_KEY = "TOKI_DEBUG_MODE"; // Core와 공유하는 디버그 설정
 
     // 1. 설정 검사 제거 (v3.0.0부터 Core에서 자동 설정 수행)
     // if (!apiUrl || !secretKey) { ... }
+
+    // [Debug] 강제 업데이트 확인 메뉴 등록
+    GM_registerMenuCommand('⚡️ 강제 업데이트 확인', () => {
+        GM_setValue(CACHE_TIME_KEY, 0); // 캐시 만료 처리
+        GM_setValue(PINNED_VER_KEY, ""); // 핀된 버전 해제 (선택 사항)
+        alert("캐시를 초기화했습니다. 최신 버전을 확인합니다.");
+        location.reload();
+    });
 
     // 2. 최신 버전 확인 및 Core 로드 (수동 업데이트 로직)
     checkAndLoadCore();
@@ -81,10 +90,14 @@
         return new Promise((resolve) => {
             const cachedVer = GM_getValue(CACHE_VER_KEY);
             const cachedTime = GM_getValue(CACHE_TIME_KEY, 0);
+            const isDebug = GM_getValue(CFG_DEBUG_KEY, false);
             const now = Date.now();
 
-            // 캐시 유효하면 바로 반환
-            if (cachedVer && (now - cachedTime < CACHE_DURATION)) {
+            // 디버그 모드면 캐시 무시
+            if (isDebug) {
+                console.log("🐛 Debug Mode: Skipping Update Cache");
+            } else if (cachedVer && (now - cachedTime < CACHE_DURATION)) {
+                // 캐시 유효하면 바로 반환
                 resolve(cachedVer);
                 return;
             }
