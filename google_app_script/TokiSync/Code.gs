@@ -1,8 +1,8 @@
 // =====================================================
-// ⚙️ TokiSync API Server v3.0.0-BETA
+// ⚙️ TokiSync API Server v3.0.0-BETA3
 // -----------------------------------------------------
 // 🤝 Compatibility:
-//    - Client v3.0.0-BETA+ (User Execution Mode)
+//    - Client v3.0.0-BETA3+ (User Execution Mode)
 // -----------------------------------------------------
 // ⚙️ 설정 (사용자 속성 사용)
 // =====================================================
@@ -59,6 +59,7 @@ function backupSecretKeyToDrive(folderId, secretKey) {
     file = files.next();
     try {
       data = JSON.parse(file.getBlob().getDataAsString());
+      if (!Array.isArray(data)) data = [];
     } catch (e) { data = []; }
   } else {
     file = root.createFile(fileName, "[]", MimeType.PLAIN_TEXT);
@@ -82,7 +83,7 @@ function backupSecretKeyToDrive(folderId, secretKey) {
 
 // [GET] 서버 상태 확인용
 function doGet(e) {
-  return ContentService.createTextOutput("✅ TokiSync API Server v3.0-BETA is Running...");
+  return ContentService.createTextOutput("✅ TokiSync API Server v3.0-BETA3 is Running...");
 }
 
 // [POST] Tampermonkey 요청 처리 (핵심 로직)
@@ -108,7 +109,9 @@ function doPost(e) {
     }
 
     // 2. 보안 검사
-    if (data.key !== config.secretKey) return createRes("error", "Unauthorized");
+    if (data.key !== config.secretKey) {
+      return createRes("error", `Unauthorized (Type: ${data.type}, Key: ${data.key ? 'Provided' : 'Missing'})`);
+    }
 
     // 전역 변수 대신 config 객체 전달을 위해 래퍼 함수 사용 필요
     // 하지만 기존 구조 유지를 위해 각 함수에 config를 전달하는 방식으로 변경하거나
@@ -242,6 +245,7 @@ function updateLibraryStatus(data, rootFolderId) {
   let library = [];
   try {
     library = JSON.parse(file.getBlob().getDataAsString());
+    if (!Array.isArray(library)) library = [];
   } catch (e) { return createRes("error", "Invalid JSON"); }
 
   // 업데이트 반영
