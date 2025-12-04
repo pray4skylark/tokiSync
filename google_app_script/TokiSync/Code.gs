@@ -1,51 +1,131 @@
 // =====================================================
-// ⚙️ TokiSync API Server v1.1.0
+// ⚙️ TokiSync API Server v3.0.0
 // -----------------------------------------------------
 // 🤝 Compatibility:
-//    - Client v2.0.0+ (Remote Loader)
-//    - Client v1.6.x (Legacy)
+//    - Client v3.0.0+ (User Execution Mode)
 // -----------------------------------------------------
-// ⚙️ 설정 (스크립트 속성 사용 권장)
-// =====================================================
-const scriptProperties = PropertiesService.getScriptProperties();
-
-// 프로젝트 설정(Project Settings) -> 스크립트 속성에서 입력하세요.
-// 1. ROOT_FOLDER_ID: 만화가 저장될 구글 드라이브 폴더 ID
-// 2. SECRET_KEY: Tampermonkey와 공유할 비밀번호
-const ROOT_FOLDER_ID = scriptProperties.getProperty('ROOT_FOLDER_ID');
-const SECRET_KEY = scriptProperties.getProperty('SECRET_KEY');
+// ⚙️ 설정 (사용자 속성 사용)
 // =====================================================
 
-// [GET] 서버 상태 확인용 (브라우저 접속 시)
+/**
+ * 사용자 설정(폴더 ID, 시크릿 키)을 저장합니다.
+ * 클라이언트에서 'save_config' 요청 시 실행됩니다.
+ */
+function saveUserConfig(folderId) {
+  const userProps = PropertiesService.getUserProperties();
+  
+  // 1. 시크릿 키 자동 생성 (UUID)
+  const secretKey = Utilities.getUuid();
+  
+  // 2. UserProperties에 저장
+  userProps.setProperties({
+    'ROOT_FOLDER_ID': folderId,
+    'SECRET_KEY': secretKey
+  });
+  
+  // 3. 라이브러리 인덱스 파일에 백업 (분실 대비)
+  try {
+    backupSecretKeyToDrive(folderId, secretKey);
+  } catch (e) {
+    return { success: false, error: "Drive Backup Failed: " + e.message };
+  }
+  
+  return { success: true, secretKey: secretKey };
+}
+
+/**
+ * 사용자 설정을 가져옵니다.
+ */
+function getUserConfig() {
+  const userProps = PropertiesService.getUserProperties();
+  return {
+    rootFolderId: userProps.getProperty('ROOT_FOLDER_ID'),
+    secretKey: userProps.getProperty('SECRET_KEY')
+  };
+}
+
+/**
+ * 시크릿 키를 드라이브(library_index.json)에 백업합니다.
+ */
+function backupSecretKeyToDrive(folderId, secretKey) {
+  const root = DriveApp.getFolderById(folderId);
+  const fileName = "library_index.json";
+  const files = root.getFilesByName(fileName);
+  
+  let data = [];
+  let file;
+  
+  if (files.hasNext()) {
+    file = files.next();
+    try {
+      data = JSON.parse(file.getBlob().getDataAsString());
+    } catch (e) { data = []; }
+  } else {
+    file = root.createFile(fileName, "[]", MimeType.PLAIN_TEXT);
+  }
+  
+  // 메타데이터 객체 찾기 (id가 'metadata'인 항목)
+  let metadata = data.find(item => item.id === 'metadata');
+  if (!metadata) {
+    metadata = { id: 'metadata', type: 'system' };
+    data.unshift(metadata); // 맨 앞에 추가
+  }
+  
+  // 키 업데이트
+  metadata.secret_key_backup = secretKey;
+  metadata.updated_at = new Date().toISOString();
+  
+  file.setContent(JSON.stringify(data));
+}
+
+// =====================================================
+
+// [GET] 서버 상태 확인용
 function doGet(e) {
-  return ContentService.createTextOutput("✅ TokiSync Server is Running...");
+  return ContentService.createTextOutput("✅ TokiSync API Server v3.0 is Running...");
 }
 
 // [POST] Tampermonkey 요청 처리 (핵심 로직)
 function doPost(e) {
   try {
-    // 설정 확인
-    if (!ROOT_FOLDER_ID || !SECRET_KEY) {
-      return createRes("error", "Server Configuration Missing (ROOT_FOLDER_ID or SECRET_KEY)");
-    }
-
     const data = JSON.parse(e.postData.contents);
 
-    // 1. 보안 검사
-    if (data.key !== SECRET_KEY) return createRes("error", "Unauthorized");
+    // 0. 설정 저장 요청 (인증 불필요)
+    if (data.type === 'save_config') {
+      if (!data.folderId) return createRes("error", "Missing folderId");
+      const result = saveUserConfig(data.folderId);
+      if (result.success) {
+        return createRes("success", { secretKey: result.secretKey });
+      } else {
+        return createRes("error", result.error);
+      }
+    }
 
-    // 2. 요청 타입 분기
-    if (data.type === "init") return initResumableUpload(data);
+    // 1. 설정 로드 및 인증
+    const config = getUserConfig();
+    if (!config.rootFolderId || !config.secretKey) {
+      return createRes("error", "Server Config Missing. Please run 'save_config' first.");
+    }
+
+    // 2. 보안 검사
+    if (data.key !== config.secretKey) return createRes("error", "Unauthorized");
+
+    // 전역 변수 대신 config 객체 전달을 위해 래퍼 함수 사용 필요
+    // 하지만 기존 구조 유지를 위해 각 함수에 config를 전달하는 방식으로 변경하거나
+    // 여기서 전역 변수처럼 동작하도록 인자를 넘겨줘야 함.
+    // -> 각 함수가 ROOT_FOLDER_ID를 참조하므로, 인자로 넘겨주도록 리팩토링 필요.
+    
+    // 3. 요청 타입 분기
+    if (data.type === "init") return initResumableUpload(data, config.rootFolderId);
     if (data.type === "upload") return uploadChunk(data);
-    if (data.type === "check_history") return checkDownloadHistory(data);
-    if (data.type === "save_info") return saveSeriesInfo(data);
-    if (data.type === "get_library") return getLibraryIndex();
-    if (data.type === "update_library_status") return updateLibraryStatus(data); // 🆕 상태 업데이트
+    if (data.type === "check_history") return checkDownloadHistory(data, config.rootFolderId);
+    if (data.type === "save_info") return saveSeriesInfo(data, config.rootFolderId);
+    if (data.type === "get_library") return getLibraryIndex(config.rootFolderId);
+    if (data.type === "update_library_status") return updateLibraryStatus(data, config.rootFolderId);
 
     // 구버전 호환
-    if (data.type === "history_get") return checkDownloadHistory(data); 
-    if (data.type === "history_save") return createRes("success", "Old method ignored");
-
+    if (data.type === "history_get") return checkDownloadHistory(data, config.rootFolderId); 
+    
     return createRes("error", "Unknown type");
 
   } catch (error) {
@@ -56,9 +136,9 @@ function doPost(e) {
 // -------------------------------------------------------
 // 📂 기능 1: 다운로드 기록 확인 (폴더/파일 스캔)
 // -------------------------------------------------------
-function checkDownloadHistory(data) {
-  const root = DriveApp.getFolderById(ROOT_FOLDER_ID);
-  const folderId = findFolderId(data.folderName);
+function checkDownloadHistory(data, rootFolderId) {
+  const root = DriveApp.getFolderById(rootFolderId);
+  const folderId = findFolderId(data.folderName, rootFolderId);
   
   if (!folderId) {
     return createRes("success", []); // 폴더 없으면 기록 없음
@@ -71,7 +151,6 @@ function checkDownloadHistory(data) {
   const files = seriesFolder.getFiles();
   while (files.hasNext()) {
     const name = files.next().getName();
-    // "0001 - " 등 숫자로 시작하는 파일 파싱
     const match = name.match(/^(\d+)/); 
     if (match) existingEpisodes.push(parseInt(match[1]));
   }
@@ -93,11 +172,11 @@ function checkDownloadHistory(data) {
 // -------------------------------------------------------
 // 📝 기능 2: 작품 정보(info.json) 저장
 // -------------------------------------------------------
-function saveSeriesInfo(data) {
-  const root = DriveApp.getFolderById(ROOT_FOLDER_ID);
+function saveSeriesInfo(data, rootFolderId) {
+  const root = DriveApp.getFolderById(rootFolderId);
   let seriesFolder;
   
-  const folderId = findFolderId(data.folderName);
+  const folderId = findFolderId(data.folderName, rootFolderId);
   if (folderId) {
     seriesFolder = DriveApp.getFolderById(folderId);
   } else {
@@ -135,8 +214,8 @@ function saveSeriesInfo(data) {
 // -------------------------------------------------------
 // 📚 기능 4: 라이브러리 인덱스 조회 (TokiView 캐시 공유)
 // -------------------------------------------------------
-function getLibraryIndex() {
-  const root = DriveApp.getFolderById(ROOT_FOLDER_ID);
+function getLibraryIndex(rootFolderId) {
+  const root = DriveApp.getFolderById(rootFolderId);
   const files = root.getFilesByName("library_index.json");
   
   if (files.hasNext()) {
@@ -153,8 +232,8 @@ function getLibraryIndex() {
 // -------------------------------------------------------
 // 🔄 기능 5: 라이브러리 상태 업데이트 (클라이언트 결과 저장)
 // -------------------------------------------------------
-function updateLibraryStatus(data) {
-  const root = DriveApp.getFolderById(ROOT_FOLDER_ID);
+function updateLibraryStatus(data, rootFolderId) {
+  const root = DriveApp.getFolderById(rootFolderId);
   const files = root.getFilesByName("library_index.json");
   
   if (!files.hasNext()) return createRes("error", "Index not found");
@@ -166,7 +245,7 @@ function updateLibraryStatus(data) {
   } catch (e) { return createRes("error", "Invalid JSON"); }
 
   // 업데이트 반영
-  const updates = data.updates; // [{id: '...', latestEpisode: 123}, ...]
+  const updates = data.updates; 
   let changedCount = 0;
 
   updates.forEach(u => {
@@ -188,9 +267,9 @@ function updateLibraryStatus(data) {
 // -------------------------------------------------------
 // ☁️ 기능 3: 대용량 이어 올리기 (Resumable Upload)
 // -------------------------------------------------------
-function initResumableUpload(data) {
-  const root = DriveApp.getFolderById(ROOT_FOLDER_ID);
-  let folderId = findFolderId(data.folderName);
+function initResumableUpload(data, rootFolderId) {
+  const root = DriveApp.getFolderById(rootFolderId);
+  let folderId = findFolderId(data.folderName, rootFolderId);
   if (!folderId) {
     folderId = root.createFolder(data.folderName).getId();
   }
@@ -252,8 +331,8 @@ function uploadChunk(data) {
 // -------------------------------------------------------
 // 🛠 헬퍼 함수
 // -------------------------------------------------------
-function findFolderId(folderName) {
-  const root = DriveApp.getFolderById(ROOT_FOLDER_ID);
+function findFolderId(folderName, rootFolderId) {
+  const root = DriveApp.getFolderById(rootFolderId);
   
   // 1. [ID] 포함된 폴더 검색 (제목 변경 대응)
   const idMatch = folderName.match(/^\[(\d+)\]/);

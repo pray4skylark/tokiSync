@@ -1,4 +1,4 @@
-// 🚀 TokiSync Core Logic v2.2.14
+// 🚀 TokiSync Core Logic v3.0.0
 // This script is loaded dynamically by the Loader.
 
 window.TokiSyncCore = function (GM_context) {
@@ -11,19 +11,25 @@ window.TokiSyncCore = function (GM_context) {
     const GM_getValue = GM_context.GM_getValue;
     const JSZip = GM_context.JSZip;
 
-    console.log("🚀 TokiSync Core v2.2.1 Loaded (Remote)");
+    console.log("🚀 TokiSync Core v3.0.0 Loaded (Remote)");
 
     // #region [1. 설정 및 상수] ====================================================
     const CFG_URL_KEY = "TOKI_GAS_URL";
     const CFG_DASH_KEY = "TOKI_DASH_URL";
     const CFG_SECRET_KEY = "TOKI_SECRET_KEY";
     const CFG_DEBUG_KEY = "TOKI_DEBUG_MODE";
+    const CFG_FOLDER_ID = "TOKI_FOLDER_ID"; // [NEW] 폴더 ID 저장용
+
+    // 🚀 v3.0.0 New Deployment URLs
+    const DEFAULT_API_URL = "https://script.google.com/macros/s/AKfycbzSB8kkb3yD9yMShGp8uQzsOgCYuaDLK2HBJEYp95V6wwtTHl98WpRT-3bpUx7fpT7o/exec";
+    const DEFAULT_DASH_URL = "https://script.google.com/macros/s/AKfycbwMmR80ia-kCNOiwKiYV3yCncG7_XuEWcx-fIgqSVlhCRxO7zRrb4EfLSrL8zcEnKEN/exec";
 
     function getConfig() {
         return {
-            url: GM_getValue(CFG_URL_KEY, ""),
-            dashUrl: GM_getValue(CFG_DASH_KEY, ""),
+            url: GM_getValue(CFG_URL_KEY, DEFAULT_API_URL),
+            dashUrl: GM_getValue(CFG_DASH_KEY, DEFAULT_DASH_URL),
             key: GM_getValue(CFG_SECRET_KEY, ""),
+            folderId: GM_getValue(CFG_FOLDER_ID, ""),
             debug: GM_getValue(CFG_DEBUG_KEY, false)
         };
     }
@@ -129,26 +135,79 @@ window.TokiSyncCore = function (GM_context) {
 
     function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
     function getDynamicWait(base) { return Math.floor(Math.random() * (base * 0.2 + 1)) + base; }
+
+    function checkAuthRequired(responseText) {
+        if (responseText && responseText.trim().startsWith("<") && (responseText.includes("google.com") || responseText.includes("Google Accounts"))) {
+            alert("⚠️ 구글 권한 승인이 필요합니다.\n확인을 누르면 새 창이 열립니다.\n권한을 승인(로그인 -> 허용)한 뒤, 다시 시도해주세요.");
+            window.open(getConfig().url, '_blank');
+            return true;
+        }
+        return false;
+    }
     // #endregion
 
 
     // #region [3. UI 및 상태 관리] ==================================================
-    function openSettings() {
+    function fetchSecretKey(folderId) {
+        return new Promise((resolve, reject) => {
+            const config = getConfig();
+            updateStatus("🔑 시크릿 키 발급 중...");
+            GM_xmlhttpRequest({
+                method: "POST",
+                url: config.url,
+                data: JSON.stringify({ type: 'save_config', folderId: folderId }),
+                headers: { "Content-Type": "text/plain" },
+                onload: (res) => {
+                    if (checkAuthRequired(res.responseText)) {
+                        reject(new Error("권한 승인 필요"));
+                        return;
+                    }
+                    try {
+                        const json = JSON.parse(res.responseText);
+                        if (json.status === 'success' && json.body.secretKey) {
+                            resolve(json.body.secretKey);
+                        } else {
+                            reject(new Error(json.body || "키 발급 실패"));
+                        }
+                    } catch (e) { reject(new Error("서버 응답 오류")); }
+                },
+                onerror: () => reject(new Error("네트워크 오류"))
+            });
+        });
+    }
+
+    async function openSettings() {
         const currentConfig = getConfig();
-        const apiUrlInput = prompt("1. [API 서버] URL (TokiSync-Server):", currentConfig.url);
-        if (apiUrlInput === null) return;
-        let finalApiUrl = apiUrlInput.trim();
-        if (!finalApiUrl.startsWith("http") && finalApiUrl.length > 10) finalApiUrl = `https://script.google.com/macros/s/${finalApiUrl}/exec`;
-        const dashUrlInput = prompt("2. [대시보드] URL (TokiLibrary-View):", currentConfig.dashUrl);
-        if (dashUrlInput === null) return;
-        let finalDashUrl = dashUrlInput.trim();
-        if (!finalDashUrl.startsWith("http") && finalDashUrl.length > 10) finalDashUrl = `https://script.google.com/macros/s/${finalDashUrl}/exec`;
-        const newKey = prompt("3. 보안 키 (Secret Key):", currentConfig.key);
-        if (newKey === null) return;
-        GM_setValue(CFG_URL_KEY, finalApiUrl);
-        GM_setValue(CFG_DASH_KEY, finalDashUrl);
-        GM_setValue(CFG_SECRET_KEY, newKey.trim());
-        alert("✅ 설정 저장 완료!");
+
+        // 1. 폴더 ID 입력 (가장 중요)
+        const folderIdInput = prompt("1. 구글 드라이브 폴더 ID 입력 (필수):", currentConfig.folderId);
+        if (folderIdInput === null) return;
+        const folderId = folderIdInput.trim();
+
+        if (!folderId) {
+            alert("폴더 ID는 필수입니다.");
+            return;
+        }
+
+        // 2. 키 발급 시도
+        try {
+            const newKey = await fetchSecretKey(folderId);
+            GM_setValue(CFG_FOLDER_ID, folderId);
+            GM_setValue(CFG_SECRET_KEY, newKey);
+            alert(`✅ 설정 완료!\n시크릿 키가 자동 발급되었습니다.\nKey: ${newKey}`);
+        } catch (e) {
+            alert(`❌ 설정 실패: ${e.message}\n다시 시도해주세요.`);
+            return;
+        }
+
+        // 3. 고급 설정 (URL 변경 - 선택 사항)
+        if (confirm("고급 설정(API URL 변경)을 하시겠습니까? (보통은 불필요)")) {
+            const apiUrlInput = prompt("API 서버 URL:", currentConfig.url);
+            if (apiUrlInput) GM_setValue(CFG_URL_KEY, apiUrlInput.trim());
+
+            const dashUrlInput = prompt("대시보드 URL:", currentConfig.dashUrl);
+            if (dashUrlInput) GM_setValue(CFG_DASH_KEY, dashUrlInput.trim());
+        }
     }
 
     function toggleDebugMode() {
@@ -158,10 +217,15 @@ window.TokiSyncCore = function (GM_context) {
         alert(`🐞 디버그 모드: ${next ? "ON" : "OFF"}\n(ON일 경우 에러 발생 시 멈춥니다)`);
     }
 
-    function checkConfig() {
+    async function checkConfig() {
         const config = getConfig();
-        if (!config.url || !config.key) {
-            alert("⚠️ 설정이 필요합니다! 메뉴에서 [⚙️ 설정]을 진행해주세요.");
+
+        // 키가 없으면 설정 유도
+        if (!config.key) {
+            if (confirm("⚠️ 초기 설정이 필요합니다.\n구글 드라이브 폴더 ID를 입력하시겠습니까?")) {
+                await openSettings();
+                return !!getConfig().key; // 설정 후 다시 확인
+            }
             return false;
         }
         return true;
@@ -304,6 +368,7 @@ window.TokiSyncCore = function (GM_context) {
                 method: "POST", url: config.url, data: JSON.stringify(payload), headers: { "Content-Type": "text/plain" },
                 onload: (res) => {
                     if (res.status === 200) {
+                        if (checkAuthRequired(res.responseText)) { resolve([]); return; }
                         try {
                             const json = JSON.parse(res.responseText);
                             const cloudHistory = Array.isArray(json.body) ? json.body : [];
@@ -325,6 +390,12 @@ window.TokiSyncCore = function (GM_context) {
             if (!config.url) { resolve(); return; }
             const info = getSeriesInfo();
 
+            // [NEW] 메타데이터 계산 (최종 회차, 파일 수)
+            const historyKey = `history_${info.id}`;
+            const history = GM_getValue(historyKey, []);
+            const lastEpisode = history.length > 0 ? Math.max(...history) : 0;
+            const fileCount = history.length;
+
             let thumbnailBase64 = "";
             if (info.thumbnail && info.thumbnail.startsWith("http")) {
                 updateStatus("🖼️ 썸네일 처리 중...");
@@ -333,11 +404,17 @@ window.TokiSyncCore = function (GM_context) {
             const payload = {
                 key: config.key, type: 'save_info', folderName: `[${info.id}] ${info.cleanTitle}`,
                 id: info.id, title: info.fullTitle, url: document.URL, site: site,
-                author: info.author, category: info.category, status: info.status, thumbnail: thumbnailBase64 || info.thumbnail
+                author: info.author, category: info.category, status: info.status, thumbnail: thumbnailBase64 || info.thumbnail,
+                last_episode: lastEpisode,
+                file_count: fileCount
             };
             GM_xmlhttpRequest({
                 method: "POST", url: config.url, data: JSON.stringify(payload), headers: { "Content-Type": "text/plain" },
-                onload: () => resolve(), onerror: () => resolve()
+                onload: (res) => {
+                    if (!checkAuthRequired(res.responseText)) resolve();
+                    else resolve(); // Auth required but resolve to not block flow, user will retry
+                },
+                onerror: () => resolve()
             });
         });
     }
@@ -365,6 +442,10 @@ window.TokiSyncCore = function (GM_context) {
                 data: JSON.stringify({ key: config.key, type: "init", folderName: folderName, fileName: fileName }),
                 headers: { "Content-Type": "text/plain" },
                 onload: (res) => {
+                    if (checkAuthRequired(res.responseText)) {
+                        reject(new Error("권한 승인 필요"));
+                        return;
+                    }
                     try {
                         const json = JSON.parse(res.responseText);
                         if (json.status === 'success') { uploadUrl = json.body; resolve(); }
@@ -391,6 +472,10 @@ window.TokiSyncCore = function (GM_context) {
                     data: JSON.stringify({ key: config.key, type: "upload", uploadUrl: uploadUrl, chunkData: chunkBase64, start: start, end: end, total: totalSize }),
                     headers: { "Content-Type": "text/plain" },
                     onload: (res) => {
+                        if (checkAuthRequired(res.responseText)) {
+                            reject(new Error("권한 승인 필요"));
+                            return;
+                        }
                         try { const json = JSON.parse(res.responseText); if (json.status === 'success') resolve(); else reject(new Error(json.body)); } catch (e) { reject(e); }
                     },
                     onerror: (e) => reject(e)
@@ -597,7 +682,7 @@ window.TokiSyncCore = function (GM_context) {
 
     // ... (메뉴 및 자동실행 코드) ...
     async function autoSyncDownloadManager() {
-        if (!checkConfig()) return;
+        if (!await checkConfig()) return;
         startSilentAudio(); initStatusUI();
 
         await saveInfoJson();
@@ -621,7 +706,7 @@ window.TokiSyncCore = function (GM_context) {
     }
 
     async function batchDownloadManager() {
-        if (!checkConfig()) return;
+        if (!await checkConfig()) return;
         startSilentAudio(); initStatusUI();
         await saveInfoJson();
         const s = prompt('시작?'); if (!s) return;
@@ -660,8 +745,8 @@ window.TokiSyncCore = function (GM_context) {
     GM_registerMenuCommand('☁️ 자동 동기화', autoSyncDownloadManager);
     GM_registerMenuCommand('🔢 범위 다운로드', batchDownloadManager);
 
-    GM_registerMenuCommand('1회성 다운로드', () => {
-        if (!checkConfig()) return;
+    GM_registerMenuCommand('1회성 다운로드', async () => {
+        if (!await checkConfig()) return;
         startSilentAudio(); initStatusUI();
         saveInfoJson().then(() => {
             const s = prompt('시작?', 1); if (!s) return;

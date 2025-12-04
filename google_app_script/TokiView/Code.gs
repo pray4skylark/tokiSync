@@ -2,32 +2,59 @@
 // 📊 TokiView Dashboard v1.0.0
 // ⚙️ 설정 (스크립트 속성 사용 권장)
 // =====================================================
-const scriptProperties = PropertiesService.getScriptProperties();
-
-// Project A와 동일한 ROOT_FOLDER_ID를 입력해야 합니다.
-const ROOT_FOLDER_ID = scriptProperties.getProperty('ROOT_FOLDER_ID');
+// [1. 설정 및 상수] ==========================================================
+// 배포 방식 변경(Execute as User)에 따라 ROOT_FOLDER_ID는 이제 사용자별로 설정됩니다.
 const INDEX_FILE_NAME = "library_index.json";
+
+/**
+ * 사용자 설정(폴더 ID)을 저장합니다.
+ * 클라이언트(Index.html)에서 google.script.run.saveUserConfig(id)로 호출합니다.
+ */
+function saveUserConfig(folderId) {
+  const userProps = PropertiesService.getUserProperties();
+  userProps.setProperty('ROOT_FOLDER_ID', folderId);
+  return { success: true };
+}
+
+/**
+ * 사용자 설정을 가져옵니다.
+ */
+function getUserConfig() {
+  const userProps = PropertiesService.getUserProperties();
+  return {
+    rootFolderId: userProps.getProperty('ROOT_FOLDER_ID')
+  };
+}
 // =====================================================
 
 // 🖥️ [GET] 대시보드 페이지 로드 (SSR 적용)
+// 🖥️ [GET] 대시보드 페이지 로드 (SSR 적용)
 function doGet(e) {
-  const template = HtmlService.createTemplateFromFile('Index');
+  const config = getUserConfig();
   
-  try {
-    // 설정 확인
-    if (!ROOT_FOLDER_ID) throw new Error("ROOT_FOLDER_ID가 설정되지 않았습니다.");
+  // 폴더 ID가 설정되지 않은 경우, 설정이 필요함을 클라이언트에 알림
+  const initialData = {
+    needsConfig: !config.rootFolderId,
+    library: []
+  };
 
-    // 데이터를 미리 가져와서 HTML에 주입 (SSR)
-    const data = getLibraryData(); 
-    template.initialData = JSON.stringify(data);
-
-  } catch (err) {
-    template.initialData = "[]";
-    Logger.log("Dashboard Load Error: " + err);
+  if (config.rootFolderId) {
+    try {
+      // 설정이 있다면 라이브러리 데이터를 로드
+      initialData.library = getLibraryData(config.rootFolderId);
+    } catch (err) {
+      // 폴더 ID가 잘못되었거나 접근 권한이 없는 경우
+      initialData.error = "폴더에 접근할 수 없습니다. ID를 확인해주세요.";
+      initialData.needsConfig = true;
+      Logger.log("Dashboard Load Error: " + err);
+    }
   }
 
+  const template = HtmlService.createTemplateFromFile('Index');
+  template.initialData = JSON.stringify(initialData);
+  
   return template.evaluate()
-      .setTitle('TokiLibrary - 내 서재')
+      .setTitle('TokiView v3.0')
       .addMetaTag('viewport', 'width=device-width, initial-scale=1')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
@@ -35,8 +62,8 @@ function doGet(e) {
 // =======================================================
 // 🚀 라이브러리 데이터 가져오기 (캐시 우선)
 // =======================================================
-function getLibraryData() {
-  const root = DriveApp.getFolderById(ROOT_FOLDER_ID);
+function getLibraryData(folderId) {
+  const root = DriveApp.getFolderById(folderId);
   const files = root.getFilesByName(INDEX_FILE_NAME);
   
   if (files.hasNext()) {
@@ -44,24 +71,24 @@ function getLibraryData() {
     const file = files.next();
     const content = file.getBlob().getDataAsString();
     
-    if (!content || content.trim() === "") return rebuildLibraryIndex();
+    if (!content || content.trim() === "") return rebuildLibraryIndex(folderId);
     
     try { 
       return JSON.parse(content); 
     } catch (e) { 
-      return rebuildLibraryIndex(); 
+      return rebuildLibraryIndex(folderId); 
     }
   } else {
     // 없으면 전체 스캔 (Slow)
-    return rebuildLibraryIndex();
+    return rebuildLibraryIndex(folderId);
   }
 }
 
 // =======================================================
 // 🔄 전체 폴더 스캔 및 캐시 생성 (갱신용)
 // =======================================================
-function rebuildLibraryIndex() {
-  const root = DriveApp.getFolderById(ROOT_FOLDER_ID);
+function rebuildLibraryIndex(folderId) {
+  const root = DriveApp.getFolderById(folderId);
   const seriesFolders = root.getFolders();
   const library = [];
 
