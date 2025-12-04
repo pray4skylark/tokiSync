@@ -1,4 +1,4 @@
-// 🚀 TokiSync Core Logic v3.0.0
+// 🚀 TokiSync Core Logic v3.0.0-BETA
 // This script is loaded dynamically by the Loader.
 
 window.TokiSyncCore = function (GM_context) {
@@ -11,7 +11,7 @@ window.TokiSyncCore = function (GM_context) {
     const GM_getValue = GM_context.GM_getValue;
     const JSZip = GM_context.JSZip;
 
-    console.log("🚀 TokiSync Core v3.0.0 Loaded (Remote)");
+    console.log("🚀 TokiSync Core v3.0.0-BETA Loaded (Remote)");
 
     // #region [1. 설정 및 상수] ====================================================
     const CFG_URL_KEY = "TOKI_GAS_URL";
@@ -20,7 +20,7 @@ window.TokiSyncCore = function (GM_context) {
     const CFG_DEBUG_KEY = "TOKI_DEBUG_MODE";
     const CFG_FOLDER_ID = "TOKI_FOLDER_ID"; // [NEW] 폴더 ID 저장용
 
-    // 🚀 v3.0.0 New Deployment URLs
+    // 🚀 v3.0.0-BETA New Deployment URLs
     const DEFAULT_API_URL = "https://script.google.com/macros/s/AKfycbzSB8kkb3yD9yMShGp8uQzsOgCYuaDLK2HBJEYp95V6wwtTHl98WpRT-3bpUx7fpT7o/exec";
     const DEFAULT_DASH_URL = "https://script.google.com/macros/s/AKfycbwMmR80ia-kCNOiwKiYV3yCncG7_XuEWcx-fIgqSVlhCRxO7zRrb4EfLSrL8zcEnKEN/exec";
 
