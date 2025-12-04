@@ -21,7 +21,7 @@ window.TokiSyncCore = function (GM_context) {
     const CFG_FOLDER_ID = "TOKI_FOLDER_ID"; // [NEW] 폴더 ID 저장용
 
     // 🚀 v3.0.0-BETA New Deployment URLs
-    const DEFAULT_API_URL = "https://script.google.com/macros/s/AKfycbzSB8kkb3yD9yMShGp8uQzsOgCYuaDLK2HBJEYp95V6wwtTHl98WpRT-3bpUx7fpT7o/exec";
+    const DEFAULT_API_URL = "https://script.google.com/macros/s/AKfycbyPN2DmWIC92T_MotbHv9Ky-8bIH0Y8QiYmrlgmBbz2H41km8W6afasZkJcbMa6_P5C/exec";
     const DEFAULT_DASH_URL = "https://script.google.com/macros/s/AKfycbwMmR80ia-kCNOiwKiYV3yCncG7_XuEWcx-fIgqSVlhCRxO7zRrb4EfLSrL8zcEnKEN/exec";
 
     function getConfig() {
