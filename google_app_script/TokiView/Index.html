@@ -655,10 +655,7 @@
         <!-- Install Button -->
         <button id="installBtn">📲 앱으로 설치하기</button>
 
-        <div id="pageLoader" class="page-loader">
-            <div class="spinner"></div>
-            <div id="loaderMsg" style="color:var(--sub)">내 서재를 불러오는 중입니다...</div>
-        </div>
+
 
         <!-- Episode Modal -->
         <div id="episodeModal" class="modal-overlay">
@@ -709,39 +706,7 @@
             </div>
         </div>
 
-        <header>
-            <div class="header-top">
-                <h1 onclick="location.reload()">📚 TokiLibrary</h1>
-                <div class="controls">
-                    <input type="text" id="search" class="search-box" placeholder="제목, 작가 검색..." onkeyup="filterData()">
-                    <button id="refreshBtn" class="btn-icon btn-refresh sync-feature" onclick="refreshDB()"
-                        title="DB 갱신 (스캔)">🔄</button>
-                    <button class="btn-icon" onclick="toggleSettings()" title="도메인 설정">⚙️</button>
-                </div>
-            </div>
-            <div id="domainPanel">
-                <div class="domain-row">
-                    <span class="domain-label">뉴토끼:</span>
-                    <input type="text" id="url_newtoki" class="domain-input" placeholder="예: https://newtoki469.com"
-                        onchange="saveDomains()">
-                </div>
-                <div class="domain-row">
-                    <span class="domain-label">마나토끼:</span>
-                    <input type="text" id="url_manatoki" class="domain-input" placeholder="예: https://manatoki469.net"
-                        onchange="saveDomains()">
-                </div>
-                <div class="domain-row">
-                    <span class="domain-label">북토끼:</span>
-                    <input type="text" id="url_booktoki" class="domain-input" placeholder="예: https://booktoki469.com"
-                        onchange="saveDomains()">
-                </div>
-                <div style="font-size: 12px; color: #888; margin-top: 5px;">※ 도메인이 변경되면 여기서 수정하세요. 링크가 즉시 반영됩니다.</div>
-            </div>
-        </header>
 
-        <div class="container">
-            <div id="grid" class="grid"></div>
-        </div>
 
         <script>
             let allData = [];
@@ -749,8 +714,14 @@
 
             // [Client-Side Config]
             const STORAGE_KEY = 'TOKIVIEW_FOLDER_ID';
+
+            // [Domain Constants]
+            const URL_NEWTOKI = 'https://newtoki469.com';
+            const URL_MANATOKI = 'https://manatoki469.net';
+            const URL_BOOKTOKI = 'https://booktoki469.com';
+
             let deferredPrompt;
-            let isScriptActive = false; // Feature Gating Flag
+            let isScriptActive = true; // Default to TRUE for better UX
 
             window.onload = function () {
                 loadDomains();
@@ -829,16 +800,46 @@
             }
 
             function loadLibrary(folderId) {
-                document.getElementById('loaderMsg').innerText = "내 서재를 불러오는 중입니다...";
-                document.getElementById('pageLoader').style.display = 'flex';
+                const loader = document.getElementById('pageLoader');
+                const msg = document.getElementById('loaderMsg');
+                const spinner = document.querySelector('.spinner');
+
+                msg.innerText = "내 서재를 불러오는 중입니다...";
+                spinner.style.display = 'block'; // Reset spinner
+                loader.style.display = 'flex';
+
+                // [Safety Timeout] 30초 후에도 응답 없으면 타임아웃 처리
+                const timeoutId = setTimeout(() => {
+                    if (loader.style.display === 'flex') {
+                        spinner.style.display = 'none'; // Stop spinning
+                        msg.innerHTML = `<span style="color:orange">응답이 지연되고 있습니다. (약 30초 경과)</span><br><br>
+                            <button onclick="location.reload()" style="padding:10px; background:#333; color:white; border:none; cursor:pointer; margin-right:10px;">새로고침</button>
+                            <button onclick="document.getElementById('pageLoader').style.display='none'" style="padding:10px; background:#555; color:white; border:none; cursor:pointer;">강제 닫기</button>`;
+                    }
+                }, 30000);
 
                 google.script.run
                     .withSuccessHandler((data) => {
-                        renderGrid(data);
-                        document.getElementById('pageLoader').style.display = 'none';
+                        clearTimeout(timeoutId);
+                        try {
+                            console.log("Data received:", data);
+                            renderGrid(data);
+                        } catch (e) {
+                            console.error("Render Error:", e);
+                            spinner.style.display = 'none'; // Stop spinning
+                            msg.innerHTML = `<span style="color:red">렌더링 오류: ${e.message}</span><br><br>
+                                <button onclick="document.getElementById('pageLoader').style.display='none'" style="padding:10px; background:#555; color:white; border:none; cursor:pointer;">닫기</button>`;
+                            return;
+                        }
+
+                        // 성공 시 로더 숨김
+                        console.log("Hiding loader...");
+                        loader.style.display = 'none';
                     })
                     .withFailureHandler((e) => {
-                        document.getElementById('pageLoader').innerHTML = `<span style="color:red">오류: ${e.message}</span><br><br><button onclick="location.reload()" style="padding:10px; background:#333; color:white; border:none; cursor:pointer;">새로고침</button>`;
+                        clearTimeout(timeoutId);
+                        spinner.style.display = 'none'; // Stop spinning
+                        msg.innerHTML = `<span style="color:red">서버 오류: ${e.message}</span><br><br><button onclick="location.reload()" style="padding:10px; background:#333; color:white; border:none; cursor:pointer;">새로고침</button>`;
                     })
                     .getLibraryData(folderId);
             }
@@ -900,16 +901,14 @@
                 renderGrid(allData);
             }
 
-            const DEFAULT_DOMAINS = {
-                newtoki: 'https://newtoki469.com',
-                manatoki: 'https://manatoki469.net',
-                booktoki: 'https://booktoki469.com'
-            };
-
             function loadDomains() {
-                document.getElementById('url_newtoki').value = localStorage.getItem('url_newtoki') || DEFAULT_DOMAINS.newtoki;
-                document.getElementById('url_manatoki').value = localStorage.getItem('url_manatoki') || DEFAULT_DOMAINS.manatoki;
-                document.getElementById('url_booktoki').value = localStorage.getItem('url_booktoki') || DEFAULT_DOMAINS.booktoki;
+                const n = localStorage.getItem('url_newtoki');
+                const m = localStorage.getItem('url_manatoki');
+                const b = localStorage.getItem('url_booktoki');
+
+                document.getElementById('url_newtoki').value = n ? n : URL_NEWTOKI;
+                document.getElementById('url_manatoki').value = m ? m : URL_MANATOKI;
+                document.getElementById('url_booktoki').value = b ? b : URL_BOOKTOKI;
             }
 
             function getDynamicLink(item) {
@@ -931,39 +930,45 @@
 
                 if (!data || data.length === 0) {
                     grid.innerHTML = '<div class="no-data">저장된 작품이 없습니다.</div>';
+                    document.getElementById('pageLoader').style.display = 'none';
                     return;
                 }
 
-                data.forEach(item => {
-                    const card = document.createElement('div');
-                    card.className = 'card';
-                    const thumb = item.thumbnail && item.thumbnail.startsWith("data:image") ? item.thumbnail : NO_IMAGE_SVG;
-                    const dynamicUrl = getDynamicLink(item);
+                data.forEach((item, index) => {
+                    try {
+                        const card = document.createElement('div');
+                        card.className = 'card';
+                        const thumb = item.thumbnail && item.thumbnail.startsWith("data:image") ? item.thumbnail : NO_IMAGE_SVG;
+                        const dynamicUrl = getDynamicLink(item);
 
-                    card.innerHTML = `
-          <div class="thumb-wrapper">
-            <img src="${thumb}" class="thumb" onerror="this.src='${NO_IMAGE_SVG}'">
-            <div class="overlay">
-              <a href="${item.driveUrl}" target="_blank" class="btn btn-drive">📂 드라이브</a>
-              <button onclick="openEpisodeList('${item.driveUrl.split('/').pop()}', '${item.title}')" class="btn" style="background:#444; color:white;">📄 목록</button>
-              ${item.id ? `
-                  <a href="${dynamicUrl}" target="_blank" class="btn btn-site">🌐 사이트</a>
-                  <a href="${dynamicUrl}?toki_action=sync" target="_blank" class="btn sync-feature" style="background:#ff9800; color:black;">⚡️ 동기화</a>
-              ` : ''}
-            </div>
-          </div>
-          <div class="info">
-            <div class="title" title="${item.title}">${item.title}</div>
-            <span class="author" title="${item.author}">${item.author || '작가 미상'}</span>
-            <div class="meta">
-              <span class="badge">${item.status || 'ID기반'}</span>
-              <span class="count">${item.lastEpisode || 0}화 / ${item.fileCount}건</span>
-            </div>
-          </div>
-        `;
-                    grid.appendChild(card);
+                        card.innerHTML = `
+              <div class="thumb-wrapper">
+                <img src="${thumb}" class="thumb" onerror="this.src='${NO_IMAGE_SVG}'">
+                <div class="overlay">
+                  <a href="${item.driveUrl}" target="_blank" class="btn btn-drive">📂 드라이브</a>
+                  <button onclick="openEpisodeList('${item.driveUrl.split('/').pop()}', '${item.title}')" class="btn" style="background:#444; color:white;">📄 목록</button>
+                  ${item.id ? `
+                      <a href="${dynamicUrl}" target="_blank" class="btn btn-site">🌐 사이트</a>
+                      <a href="${dynamicUrl}?toki_action=sync" target="_blank" class="btn sync-feature" style="background:#ff9800; color:black;">⚡️ 동기화</a>
+                  ` : ''}
+                </div>
+              </div>
+              <div class="info">
+                <div class="title" title="${item.title}">${item.title}</div>
+                <span class="author" title="${item.author}">${item.author || '작가 미상'}</span>
+                <div class="meta">
+                  <span class="badge">${item.status || 'ID기반'}</span>
+                  <span class="count">${item.lastEpisode || 0}화 / ${item.fileCount}건</span>
+                </div>
+              </div>
+            `;
+                        grid.appendChild(card);
+                    } catch (err) {
+                        console.error("Error rendering item index " + index, err);
+                    }
                 });
                 updateFeatureUI(); // 렌더링 후 버튼 상태 업데이트
+                document.getElementById('pageLoader').style.display = 'none';
             }
 
             function filterData() {
@@ -1017,15 +1022,15 @@
                     div.className = 'episode-item';
 
                     let icon = '📁';
-                    let action = `window.open('${item.url}', '_blank')`;
                     let meta = '폴더';
+                    let clickHandler = () => window.open(item.url, '_blank');
 
                     if (item.type === 'file') {
                         icon = '📦';
                         meta = formatSize(item.size);
                         if (item.name.endsWith('.cbz') || item.name.endsWith('.zip')) {
                             icon = '📖';
-                            action = `loadCBZ('${item.id}', '${item.name}')`;
+                            clickHandler = () => loadCBZ(item.id, item.name);
                         }
                     }
 
@@ -1036,7 +1041,7 @@
                         </div>
                         <span class="ep-meta">${meta}</span>
                     `;
-                    div.onclick = () => eval(action);
+                    div.onclick = clickHandler;
                     listEl.appendChild(div);
                 });
             }
@@ -1063,9 +1068,10 @@
                 content.innerHTML = '<div style="color:white; margin-top:50px;">파일 다운로드 중... (0%)</div>';
 
                 try {
-                    // 1. Download Chunks
+                    // 1. Download Chunks & Decode Immediately
                     const chunks = [];
                     let offset = 0;
+                    let totalLength = 0;
                     const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB
 
                     while (true) {
@@ -1078,7 +1084,17 @@
 
                         if (!response) break;
 
-                        chunks.push(response.data);
+                        // Decode Base64 Chunk -> Uint8Array
+                        const binaryString = atob(response.data);
+                        const len = binaryString.length;
+                        const bytes = new Uint8Array(len);
+                        for (let i = 0; i < len; i++) {
+                            bytes[i] = binaryString.charCodeAt(i);
+                        }
+
+                        chunks.push(bytes);
+                        totalLength += len;
+
                         offset = response.nextOffset;
 
                         const percent = Math.round((offset / response.totalSize) * 100);
@@ -1087,18 +1103,16 @@
                         if (!response.hasMore) break;
                     }
 
-                    // 2. Reassemble & Unzip
-                    content.innerHTML = '<div style="color:white; margin-top:50px;">압축 해제 중...</div>';
-
-                    // Base64 -> Uint8Array
-                    const combinedBase64 = chunks.join('');
-                    const binaryString = atob(combinedBase64);
-                    const bytes = new Uint8Array(binaryString.length);
-                    for (let i = 0; i < binaryString.length; i++) {
-                        bytes[i] = binaryString.charCodeAt(i);
+                    // 2. Merge Chunks
+                    content.innerHTML = '<div style="color:white; margin-top:50px;">데이터 병합 중...</div>';
+                    const combinedBytes = new Uint8Array(totalLength);
+                    let position = 0;
+                    for (const chunk of chunks) {
+                        combinedBytes.set(chunk, position);
+                        position += chunk.length;
                     }
 
-                    const zip = await JSZip.loadAsync(bytes);
+                    const zip = await JSZip.loadAsync(combinedBytes);
                     content.innerHTML = ''; // Clear loader
 
                     // 3. Render Images
