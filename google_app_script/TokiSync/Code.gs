@@ -1,89 +1,15 @@
 // =====================================================
-// ⚙️ TokiSync API Server v3.0.0-BETA3
+// ⚙️ TokiSync API Server v3.0.0-BETA3 (Stateless)
 // -----------------------------------------------------
 // 🤝 Compatibility:
 //    - Client v3.0.0-BETA3+ (User Execution Mode)
 // -----------------------------------------------------
-// ⚙️ 설정 (사용자 속성 사용)
-// =====================================================
-
-/**
- * 사용자 설정(폴더 ID, 시크릿 키)을 저장합니다.
- * 클라이언트에서 'save_config' 요청 시 실행됩니다.
- */
-function saveUserConfig(folderId) {
-  const userProps = PropertiesService.getUserProperties();
-  
-  // 1. 시크릿 키 자동 생성 (UUID)
-  const secretKey = Utilities.getUuid();
-  
-  // 2. UserProperties에 저장
-  userProps.setProperties({
-    'ROOT_FOLDER_ID': folderId,
-    'SECRET_KEY': secretKey
-  });
-  
-  // 3. 라이브러리 인덱스 파일에 백업 (분실 대비)
-  try {
-    backupSecretKeyToDrive(folderId, secretKey);
-  } catch (e) {
-    return { success: false, error: "Drive Backup Failed: " + e.message };
-  }
-  
-  return { success: true, secretKey: secretKey };
-}
-
-/**
- * 사용자 설정을 가져옵니다.
- */
-function getUserConfig() {
-  const userProps = PropertiesService.getUserProperties();
-  return {
-    rootFolderId: userProps.getProperty('ROOT_FOLDER_ID'),
-    secretKey: userProps.getProperty('SECRET_KEY')
-  };
-}
-
-/**
- * 시크릿 키를 드라이브(library_index.json)에 백업합니다.
- */
-function backupSecretKeyToDrive(folderId, secretKey) {
-  const root = DriveApp.getFolderById(folderId);
-  const fileName = "library_index.json";
-  const files = root.getFilesByName(fileName);
-  
-  let data = [];
-  let file;
-  
-  if (files.hasNext()) {
-    file = files.next();
-    try {
-      data = JSON.parse(file.getBlob().getDataAsString());
-      if (!Array.isArray(data)) data = [];
-    } catch (e) { data = []; }
-  } else {
-    file = root.createFile(fileName, "[]", MimeType.PLAIN_TEXT);
-  }
-  
-  // 메타데이터 객체 찾기 (id가 'metadata'인 항목)
-  let metadata = data.find(item => item.id === 'metadata');
-  if (!metadata) {
-    metadata = { id: 'metadata', type: 'system' };
-    data.unshift(metadata); // 맨 앞에 추가
-  }
-  
-  // 키 업데이트
-  metadata.secret_key_backup = secretKey;
-  metadata.updated_at = new Date().toISOString();
-  
-  file.setContent(JSON.stringify(data));
-}
-
+// ⚙️ 설정 (Stateless - 클라이언트 주도)
 // =====================================================
 
 // [GET] 서버 상태 확인용
 function doGet(e) {
-  return ContentService.createTextOutput("✅ TokiSync API Server v3.0-BETA3 is Running...");
+  return ContentService.createTextOutput("✅ TokiSync API Server v3.0-BETA3 (Stateless) is Running...");
 }
 
 // [POST] Tampermonkey 요청 처리 (핵심 로직)
@@ -91,43 +17,24 @@ function doPost(e) {
   try {
     const data = JSON.parse(e.postData.contents);
 
-    // 0. 설정 저장 요청 (인증 불필요)
-    if (data.type === 'save_config') {
-      if (!data.folderId) return createRes("error", "Missing folderId");
-      const result = saveUserConfig(data.folderId);
-      if (result.success) {
-        return createRes("success", { secretKey: result.secretKey });
-      } else {
-        return createRes("error", result.error);
-      }
+    // 1. 필수 파라미터 검증 (folderId)
+    // Stateless 방식이므로 클라이언트가 반드시 folderId를 보내야 함
+    if (!data.folderId) {
+      return createRes("error", "Missing folderId in request payload");
     }
 
-    // 1. 설정 로드 및 인증
-    const config = getUserConfig();
-    if (!config.rootFolderId || !config.secretKey) {
-      return createRes("error", "Server Config Missing. Please run 'save_config' first.");
-    }
+    const rootFolderId = data.folderId;
 
-    // 2. 보안 검사
-    if (data.key !== config.secretKey) {
-      return createRes("error", `Unauthorized (Type: ${data.type}, Key: ${data.key ? 'Provided' : 'Missing'})`);
-    }
-
-    // 전역 변수 대신 config 객체 전달을 위해 래퍼 함수 사용 필요
-    // 하지만 기존 구조 유지를 위해 각 함수에 config를 전달하는 방식으로 변경하거나
-    // 여기서 전역 변수처럼 동작하도록 인자를 넘겨줘야 함.
-    // -> 각 함수가 ROOT_FOLDER_ID를 참조하므로, 인자로 넘겨주도록 리팩토링 필요.
-    
-    // 3. 요청 타입 분기
-    if (data.type === "init") return initResumableUpload(data, config.rootFolderId);
+    // 2. 요청 타입 분기
+    if (data.type === "init") return initResumableUpload(data, rootFolderId);
     if (data.type === "upload") return uploadChunk(data);
-    if (data.type === "check_history") return checkDownloadHistory(data, config.rootFolderId);
-    if (data.type === "save_info") return saveSeriesInfo(data, config.rootFolderId);
-    if (data.type === "get_library") return getLibraryIndex(config.rootFolderId);
-    if (data.type === "update_library_status") return updateLibraryStatus(data, config.rootFolderId);
+    if (data.type === "check_history") return checkDownloadHistory(data, rootFolderId);
+    if (data.type === "save_info") return saveSeriesInfo(data, rootFolderId);
+    if (data.type === "get_library") return getLibraryIndex(rootFolderId);
+    if (data.type === "update_library_status") return updateLibraryStatus(data, rootFolderId);
 
     // 구버전 호환
-    if (data.type === "history_get") return checkDownloadHistory(data, config.rootFolderId); 
+    if (data.type === "history_get") return checkDownloadHistory(data, rootFolderId); 
     
     return createRes("error", "Unknown type");
 

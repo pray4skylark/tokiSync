@@ -33,7 +33,8 @@
         if (document.title.includes('TokiView') || document.title.includes('TokiLibrary')) {
             console.log("📂 TokiView detected. Preparing to inject config...");
 
-            const folderId = GM_getValue('ROOT_FOLDER_ID');
+            // Core와 동일한 키 사용 (TOKI_FOLDER_ID)
+            const folderId = GM_getValue('TOKI_FOLDER_ID');
             if (folderId) {
                 // 페이지 로딩 대기 후 주입
                 setTimeout(() => {
@@ -46,14 +47,14 @@
                     window.top.postMessage({ type: 'SET_CONFIG', folderId: folderId }, '*');
                 }
             } else {
-                console.log("⚠️ No Folder ID found in script storage.");
+                console.log("⚠️ No Folder ID found in script storage (TOKI_FOLDER_ID).");
             }
             return; // Core 스크립트 로드 중단
         }
     }
 
     const CFG_URL_KEY = "TOKI_GAS_URL";
-    const CFG_SECRET_KEY = "TOKI_SECRET_KEY";
+    // const CFG_SECRET_KEY = "TOKI_SECRET_KEY"; // Removed
 
     // ⭐️ 핵심: GitHub 사용자명, 레포지토리명, 버전 설정
     const GITHUB_USER = "pray4skylark";

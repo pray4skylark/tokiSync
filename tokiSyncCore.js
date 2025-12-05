@@ -17,7 +17,7 @@ window.TokiSyncCore = function (GM_context) {
     // #region [1. 설정 및 상수] ====================================================
     const CFG_URL_KEY = "TOKI_GAS_URL";
     const CFG_DASH_KEY = "TOKI_DASH_URL";
-    const CFG_SECRET_KEY = "TOKI_SECRET_KEY";
+    // const CFG_SECRET_KEY = "TOKI_SECRET_KEY"; // Removed
     const CFG_DEBUG_KEY = "TOKI_DEBUG_MODE";
     const CFG_FOLDER_ID = "TOKI_FOLDER_ID"; // [NEW] 폴더 ID 저장용
     const CFG_CONFIG_VER = "TOKI_CONFIG_VER"; // [NEW] 설정 버전 관리
@@ -31,7 +31,7 @@ window.TokiSyncCore = function (GM_context) {
         return {
             url: GM_getValue(CFG_URL_KEY, DEFAULT_API_URL),
             dashUrl: GM_getValue(CFG_DASH_KEY, DEFAULT_DASH_URL),
-            key: GM_getValue(CFG_SECRET_KEY, ""),
+            // key: GM_getValue(CFG_SECRET_KEY, ""), // Removed
             folderId: GM_getValue(CFG_FOLDER_ID, ""),
             debug: GM_getValue(CFG_DEBUG_KEY, false)
         };
@@ -44,7 +44,7 @@ window.TokiSyncCore = function (GM_context) {
 
             // v3.0.0 Migration: Clear old API URL & Key to force new defaults
             GM_deleteValue(CFG_URL_KEY);
-            GM_deleteValue(CFG_SECRET_KEY);
+            // GM_deleteValue(CFG_SECRET_KEY); // Removed
             GM_deleteValue(CFG_FOLDER_ID);
 
             GM_setValue(CFG_CONFIG_VER, CURRENT_CONFIG_VER);
@@ -169,33 +169,7 @@ window.TokiSyncCore = function (GM_context) {
 
 
     // #region [3. UI 및 상태 관리] ==================================================
-    function fetchSecretKey(folderId) {
-        return new Promise((resolve, reject) => {
-            const config = getConfig();
-            updateStatus("🔑 시크릿 키 발급 중...");
-            GM_xmlhttpRequest({
-                method: "POST",
-                url: config.url,
-                data: JSON.stringify({ type: 'save_config', folderId: folderId }),
-                headers: { "Content-Type": "text/plain" },
-                onload: (res) => {
-                    if (checkAuthRequired(res.responseText)) {
-                        reject(new Error("권한 승인 필요"));
-                        return;
-                    }
-                    try {
-                        const json = JSON.parse(res.responseText);
-                        if (json.status === 'success' && json.body.secretKey) {
-                            resolve(json.body.secretKey);
-                        } else {
-                            reject(new Error(json.body || "키 발급 실패"));
-                        }
-                    } catch (e) { reject(new Error("서버 응답 오류")); }
-                },
-                onerror: () => reject(new Error("네트워크 오류"))
-            });
-        });
-    }
+    // function fetchSecretKey(folderId) { ... } // Removed
 
     async function openSettings() {
         const currentConfig = getConfig();
@@ -210,18 +184,10 @@ window.TokiSyncCore = function (GM_context) {
             return;
         }
 
-        // 2. 키 발급 시도
-        try {
-            const newKey = await fetchSecretKey(folderId);
-            GM_setValue(CFG_FOLDER_ID, folderId);
-            GM_setValue(CFG_SECRET_KEY, newKey);
-            alert(`✅ 설정 완료!\n시크릿 키가 자동 발급되었습니다.\nKey: ${newKey}`);
-        } catch (e) {
-            alert(`❌ 설정 실패: ${e.message}\n다시 시도해주세요.`);
-            return;
-        }
+        GM_setValue(CFG_FOLDER_ID, folderId);
+        alert(`✅ 설정 완료!\nFolder ID: ${folderId}`);
 
-        // 3. 고급 설정 (URL 변경 - 선택 사항)
+        // 2. 고급 설정 (URL 변경 - 선택 사항)
         if (confirm("고급 설정(API URL 변경)을 하시겠습니까? (보통은 불필요)")) {
             const apiUrlInput = prompt("API 서버 URL:", currentConfig.url);
             if (apiUrlInput) GM_setValue(CFG_URL_KEY, apiUrlInput.trim());
@@ -241,11 +207,11 @@ window.TokiSyncCore = function (GM_context) {
     async function checkConfig() {
         const config = getConfig();
 
-        // 키가 없으면 설정 유도
-        if (!config.key) {
+        // 키가 없으면 설정 유도 -> 폴더 ID가 없으면 설정 유도
+        if (!config.folderId) {
             if (confirm("⚠️ 초기 설정이 필요합니다.\n구글 드라이브 폴더 ID를 입력하시겠습니까?")) {
                 await openSettings();
-                return !!getConfig().key; // 설정 후 다시 확인
+                return !!getConfig().folderId; // 설정 후 다시 확인
             }
             return false;
         }
@@ -383,7 +349,7 @@ window.TokiSyncCore = function (GM_context) {
             const config = getConfig();
             if (!config.url) { markDownloadedItems(); resolve([]); return; }
             const info = getSeriesInfo();
-            const payload = { key: config.key, type: 'check_history', folderName: `[${info.id}] ${info.cleanTitle}` };
+            const payload = { folderId: config.folderId, type: 'check_history', folderName: `[${info.id}] ${info.cleanTitle}` };
             updateStatus("☁️ 드라이브 파일 스캔 중...");
             GM_xmlhttpRequest({
                 method: "POST", url: config.url, data: JSON.stringify(payload), headers: { "Content-Type": "text/plain" },
@@ -423,7 +389,7 @@ window.TokiSyncCore = function (GM_context) {
                 thumbnailBase64 = await urlToBase64(info.thumbnail);
             }
             const payload = {
-                key: config.key, type: 'save_info', folderName: `[${info.id}] ${info.cleanTitle}`,
+                folderId: config.folderId, type: 'save_info', folderName: `[${info.id}] ${info.cleanTitle}`,
                 id: info.id, title: info.fullTitle, url: document.URL, site: site,
                 author: info.author, category: info.category, status: info.status, thumbnail: thumbnailBase64 || info.thumbnail,
                 last_episode: lastEpisode,
@@ -460,7 +426,7 @@ window.TokiSyncCore = function (GM_context) {
         await new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method: "POST", url: config.url,
-                data: JSON.stringify({ key: config.key, type: "init", folderName: folderName, fileName: fileName }),
+                data: JSON.stringify({ folderId: config.folderId, type: "init", folderName: folderName, fileName: fileName }),
                 headers: { "Content-Type": "text/plain" },
                 onload: (res) => {
                     if (checkAuthRequired(res.responseText)) {
@@ -490,7 +456,7 @@ window.TokiSyncCore = function (GM_context) {
             await new Promise((resolve, reject) => {
                 GM_xmlhttpRequest({
                     method: "POST", url: config.url,
-                    data: JSON.stringify({ key: config.key, type: "upload", uploadUrl: uploadUrl, chunkData: chunkBase64, start: start, end: end, total: totalSize }),
+                    data: JSON.stringify({ folderId: config.folderId, type: "upload", uploadUrl: uploadUrl, chunkData: chunkBase64, start: start, end: end, total: totalSize }),
                     headers: { "Content-Type": "text/plain" },
                     onload: (res) => {
                         if (checkAuthRequired(res.responseText)) {
