@@ -492,51 +492,88 @@
         let allData = [];
         const NO_IMAGE_SVG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='280' viewBox='0 0 200 280'%3E%3Crect width='200' height='280' fill='%23333'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%23666' font-size='20'%3ENo Image%3C/text%3E%3C/svg%3E";
 
+        // [Client-Side Config]
+        const STORAGE_KEY = 'TOKIVIEW_FOLDER_ID';
+
         window.onload = function () {
             loadDomains();
-            try {
-                const rawData = <?!= initialData ?>;
+            setupScriptListener();
 
-                if (rawData.needsConfig) {
-                    document.getElementById('pageLoader').style.display = 'none';
-                    document.getElementById('configModal').style.display = 'flex';
-                    if (rawData.error) {
-                        let msg = rawData.error;
-                        if (rawData.debugInfo) msg += "\n\n[Debug Info]\n" + rawData.debugInfo;
-                        alert(msg);
+            // 1. LocalStorage 확인
+            const savedId = localStorage.getItem(STORAGE_KEY);
+            if (savedId) {
+                loadLibrary(savedId);
+            } else {
+                // 2. 없으면 스크립트 통신 대기 (잠시 후 모달 표시)
+                setTimeout(() => {
+                    if (!localStorage.getItem(STORAGE_KEY)) {
+                        showConfigModal();
                     }
-                } else {
-                    renderGrid(rawData.library);
-                    document.getElementById('pageLoader').style.display = 'none';
-                }
-            } catch (e) {
-                document.getElementById('pageLoader').innerHTML = `<span style="color:red">오류: ${e.message}</span>`;
+                }, 1500);
             }
         };
+
+        function setupScriptListener() {
+            window.addEventListener('message', (event) => {
+                // 보안: 신뢰할 수 있는 출처 확인 (필요 시 추가)
+                const data = event.data;
+                if (data && data.type === 'SET_CONFIG' && data.folderId) {
+                    console.log("Received config from script:", data.folderId);
+                    localStorage.setItem(STORAGE_KEY, data.folderId);
+
+                    // 모달이 열려있으면 닫기
+                    document.getElementById('configModal').style.display = 'none';
+
+                    // 데이터 로드 시작
+                    loadLibrary(data.folderId);
+                }
+            });
+        }
+
+        function loadLibrary(folderId) {
+            document.getElementById('loaderMsg').innerText = "내 서재를 불러오는 중입니다...";
+            document.getElementById('pageLoader').style.display = 'flex';
+
+            google.script.run
+                .withSuccessHandler((data) => {
+                    renderGrid(data);
+                    document.getElementById('pageLoader').style.display = 'none';
+                })
+                .withFailureHandler((e) => {
+                    document.getElementById('pageLoader').innerHTML = `<span style="color:red">오류: ${e.message}</span><br><br><button onclick="location.reload()" style="padding:10px; background:#333; color:white; border:none; cursor:pointer;">새로고침</button>`;
+                })
+                .getLibraryData(folderId);
+        }
+
+        function showConfigModal() {
+            document.getElementById('pageLoader').style.display = 'none';
+            document.getElementById('configModal').style.display = 'flex';
+            // 모달 내 텍스트 업데이트
+            const desc = document.querySelector('.modal-desc');
+            desc.innerHTML = `
+                TokiSync 스크립트가 감지되지 않았습니다.<br>
+                폴더 ID를 직접 입력하거나, 스크립트를 설치해주세요.<br>
+                <span style="font-size:12px; color:#888;">(ID는 브라우저에 저장됩니다)</span>
+            `;
+        }
 
         function saveConfig() {
             const id = document.getElementById('configFolderId').value.trim();
             if (!id) return alert("폴더 ID를 입력해주세요.");
 
-            const btn = document.querySelector('.btn-save');
-            btn.innerText = "저장 중...";
-            btn.disabled = true;
+            // LocalStorage에 저장
+            localStorage.setItem(STORAGE_KEY, id);
 
-            google.script.run
-                .withSuccessHandler(() => {
-                    alert("✅ 설정이 저장되었습니다. 페이지를 새로고침합니다.");
-                    location.reload();
-                })
-                .withFailureHandler((e) => {
-                    alert("오류 발생: " + e.message);
-                    btn.innerText = "저장하고 시작하기";
-                    btn.disabled = false;
-                })
-                .saveUserConfig(id);
+            alert("✅ 설정이 저장되었습니다.");
+            document.getElementById('configModal').style.display = 'none';
+            loadLibrary(id);
         }
 
         function refreshDB() {
             if (!confirm("전체 폴더를 스캔하여 정보를 갱신합니다.\n작품 수에 따라 시간이 소요됩니다.")) return;
+
+            const folderId = localStorage.getItem(STORAGE_KEY);
+            if (!folderId) return alert("폴더 ID 설정이 필요합니다.");
 
             const btn = document.getElementById('refreshBtn');
             btn.classList.add('spin-anim');
@@ -554,7 +591,7 @@
                     document.getElementById('pageLoader').innerHTML = `<span style="color:red">오류: ${e.message}</span>`;
                     btn.classList.remove('spin-anim');
                 })
-                .rebuildLibraryIndex();
+                .rebuildLibraryIndex(folderId);
         }
 
         function toggleSettings() { document.getElementById('domainPanel').style.display = document.getElementById('domainPanel').style.display === 'block' ? 'none' : 'block'; }

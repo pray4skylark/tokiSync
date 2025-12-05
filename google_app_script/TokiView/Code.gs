@@ -6,55 +6,13 @@
 // 배포 방식 변경(Execute as User)에 따라 ROOT_FOLDER_ID는 이제 사용자별로 설정됩니다.
 const INDEX_FILE_NAME = "library_index.json";
 
-/**
- * 사용자 설정(폴더 ID)을 저장합니다.
- * 클라이언트(Index.html)에서 google.script.run.saveUserConfig(id)로 호출합니다.
- */
-function saveUserConfig(folderId) {
-  const userProps = PropertiesService.getUserProperties();
-  userProps.setProperty('ROOT_FOLDER_ID', folderId);
-  return { success: true };
-}
-
-/**
- * 사용자 설정을 가져옵니다.
- */
-function getUserConfig() {
-  const userProps = PropertiesService.getUserProperties();
-  return {
-    rootFolderId: userProps.getProperty('ROOT_FOLDER_ID')
-  };
-}
 // =====================================================
-
-// 🖥️ [GET] 대시보드 페이지 로드 (SSR 적용)
+// 🖥️ [GET] 대시보드 페이지 로드 (CSR 방식)
+// =====================================================
 function doGet(e) {
-  const initialData = {
-    needsConfig: false,
-    library: []
-  };
-
-  try {
-    const config = getUserConfig();
-    
-    // 폴더 ID가 설정되지 않은 경우
-    if (!config.rootFolderId) {
-      initialData.needsConfig = true;
-    } else {
-      // 설정이 있다면 라이브러리 데이터를 로드
-      initialData.library = getLibraryData(config.rootFolderId);
-    }
-  } catch (err) {
-    // 모든 에러 포착 (PropertiesService 접근 불가 등)
-    initialData.error = "서버 오류가 발생했습니다.";
-    initialData.debugInfo = err.toString() + "\n" + (err.stack || "");
-    initialData.needsConfig = true; // 설정 모달을 띄워서 에러를 보여줌
-    Logger.log("Dashboard Load Error: " + err);
-  }
-
+  // 서버에서는 더 이상 데이터를 미리 로드하지 않음 (Stateless)
+  // 클라이언트가 localStorage 또는 스크립트 주입을 통해 ID를 확보하고 요청해야 함
   const template = HtmlService.createTemplateFromFile('Index');
-  template.initialData = JSON.stringify(initialData);
-  
   return template.evaluate()
       .setTitle('TokiView v3.0-BETA3')
       .addMetaTag('viewport', 'width=device-width, initial-scale=1')
@@ -65,6 +23,8 @@ function doGet(e) {
 // 🚀 라이브러리 데이터 가져오기 (캐시 우선)
 // =======================================================
 function getLibraryData(folderId) {
+  if (!folderId) throw new Error("Folder ID is required");
+
   const root = DriveApp.getFolderById(folderId);
   const files = root.getFilesByName(INDEX_FILE_NAME);
   
@@ -90,7 +50,8 @@ function getLibraryData(folderId) {
 // 🔄 전체 폴더 스캔 및 캐시 생성 (갱신용)
 // =======================================================
 function rebuildLibraryIndex(folderId) {
-  if (!folderId) throw new Error("Folder ID is missing");
+  if (!folderId) throw new Error("Folder ID is required");
+  
   const root = DriveApp.getFolderById(folderId);
   const seriesFolders = root.getFolders();
   const library = [];
