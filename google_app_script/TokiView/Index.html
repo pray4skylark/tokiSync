@@ -6,6 +6,7 @@
     <title>TokiLibrary</title>
     <meta charset="utf-8">
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;500;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <style>
         :root {
             --bg: #141414;
@@ -488,152 +489,450 @@
         <div id="grid" class="grid"></div>
     </div>
 
+    <!-- PWA Meta Tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#1a1a1a">
+    <link rel="apple-touch-icon" href="https://github.com/user-attachments/assets/99f5bb36-4ef8-40cc-8ae5-e3bf1c7952ad">
+    <link rel="icon" type="image/png"
+        href="https://github.com/user-attachments/assets/99f5bb36-4ef8-40cc-8ae5-e3bf1c7952ad">
+
+    <!-- Dynamic Manifest Injection -->
     <script>
-        let allData = [];
-        const NO_IMAGE_SVG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='280' viewBox='0 0 200 280'%3E%3Crect width='200' height='280' fill='%23333'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%23666' font-size='20'%3ENo Image%3C/text%3E%3C/svg%3E";
-
-        // [Client-Side Config]
-        const STORAGE_KEY = 'TOKIVIEW_FOLDER_ID';
-
-        window.onload = function () {
-            loadDomains();
-            setupScriptListener();
-
-            // 1. LocalStorage 확인
-            const savedId = localStorage.getItem(STORAGE_KEY);
-            if (savedId) {
-                loadLibrary(savedId);
-            } else {
-                // 2. 없으면 스크립트 통신 대기 (잠시 후 모달 표시)
-                setTimeout(() => {
-                    if (!localStorage.getItem(STORAGE_KEY)) {
-                        showConfigModal();
-                    }
-                }, 1500);
-            }
+        const manifest = {
+            "name": "TokiView",
+            "short_name": "TokiView",
+            "start_url": ".",
+            "display": "standalone",
+            "background_color": "#1a1a1a",
+            "theme_color": "#1a1a1a",
+            "icons": [{
+                "src": "https://github.com/user-attachments/assets/99f5bb36-4ef8-40cc-8ae5-e3bf1c7952ad",
+                "sizes": "192x192",
+                "type": "image/png"
+            }]
         };
+        const stringManifest = JSON.stringify(manifest);
+        const blob = new Blob([stringManifest], { type: 'application/json' });
+        const manifestURL = URL.createObjectURL(blob);
+        const link = document.createElement('link');
+        link.rel = 'manifest';
+        link.href = manifestURL;
+        document.head.appendChild(link);
+    </script>
 
-        function setupScriptListener() {
-            window.addEventListener('message', (event) => {
-                // 보안: 신뢰할 수 있는 출처 확인 (필요 시 추가)
-                const data = event.data;
-                if (data && data.type === 'SET_CONFIG' && data.folderId) {
-                    console.log("Received config from script:", data.folderId);
-                    localStorage.setItem(STORAGE_KEY, data.folderId);
+    <style>
+        /* ... existing styles ... */
+        /* PWA Install Button */
+        #installBtn {
+            display: none;
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #007bff;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 25px;
+            font-weight: bold;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            z-index: 1000;
+            cursor: pointer;
+            border: none;
+        }
 
-                    // 모달이 열려있으면 닫기
-                    document.getElementById('configModal').style.display = 'none';
+        /* Feature Gating UI */
+        .script-required {
+            opacity: 0.5;
+            pointer-events: none;
+            position: relative;
+        }
 
-                    // 데이터 로드 시작
-                    loadLibrary(data.folderId);
+        .script-required::after {
+            content: "🔒 Script Required";
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 10px;
+            color: white;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 2px 5px;
+            border-radius: 4px;
+            white-space: nowrap;
+        }
+
+        /* Episode List Modal */
+        .episode-list {
+            max-height: 400px;
+            overflow-y: auto;
+            text-align: left;
+            margin-top: 20px;
+            border: 1px solid #444;
+            border-radius: 5px;
+            background: #1a1a1a;
+        }
+
+        .episode-item {
+            padding: 12px;
+            border-bottom: 1px solid #333;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: 0.2s;
+        }
+
+        .episode-item:last-child {
+            border-bottom: none;
+        }
+
+        .episode-item:hover {
+            background: #333;
+        }
+
+        .ep-name {
+            font-size: 14px;
+            color: #eee;
+        }
+
+        .ep-meta {
+            font-size: 11px;
+            color: #888;
+        }
+
+        /* Viewer Overlay */
+        #viewerOverlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: black;
+            z-index: 3000;
+            flex-direction: column;
+        }
+
+        .viewer-header {
+            padding: 10px 20px;
+            background: rgba(20, 20, 20, 0.9);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: white;
+            border-bottom: 1px solid #333;
+        }
+
+        .viewer-content {
+            flex-grow: 1;
+            overflow-y: auto;
+            text-align: center;
+            padding: 20px 0;
+        }
+
+        .viewer-image {
+            max-width: 100%;
+            height: auto;
+            margin-bottom: 10px;
+            display: block;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .btn-close-viewer {
+            background: transparent;
+            border: 1px solid #555;
+            color: white;
+            padding: 5px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+    </style>
+    </head>
+
+    <body>
+        <!-- Install Button -->
+        <button id="installBtn">📲 앱으로 설치하기</button>
+
+        <div id="pageLoader" class="page-loader">
+            <div class="spinner"></div>
+            <div id="loaderMsg" style="color:var(--sub)">내 서재를 불러오는 중입니다...</div>
+        </div>
+
+        <!-- Episode Modal -->
+        <div id="episodeModal" class="modal-overlay">
+            <div class="modal-box" style="width: 500px;">
+                <div class="modal-title">📄 회차 목록</div>
+                <div id="episodeList" class="episode-list">
+                    <!-- Dynamic Content -->
+                    <div style="padding:20px; color:#888;">로딩 중...</div>
+                </div>
+                <button class="btn-save" onclick="closeEpisodeModal()"
+                    style="margin-top:20px; background:#444;">닫기</button>
+            </div>
+        </div>
+
+        <!-- Viewer Overlay -->
+        <div id="viewerOverlay">
+            <div class="viewer-header">
+                <span id="viewerTitle">제목</span>
+                <button class="btn-close-viewer" onclick="closeViewer()">닫기 (ESC)</button>
+            </div>
+            <div id="viewerContent" class="viewer-content">
+                <!-- Images go here -->
+            </div>
+        </div>
+
+        <!-- Config Modal -->
+        <div id="configModal" class="modal-overlay">
+            <div class="modal-box">
+                <div class="modal-title">⚙️ 초기 설정</div>
+                <div class="modal-desc">
+                    TokiSync 라이브러리 폴더의 ID를 입력해주세요.<br>
+                    (구글 드라이브 폴더 URL의 뒷부분)
+                </div>
+                <input type="text" id="configFolderId" class="config-input" placeholder="Folder ID">
+                <button class="btn-save" onclick="saveConfig()">저장하기</button>
+
+                <button class="btn-pwa" onclick="togglePwaGuide()">📱 앱 설치 가이드 (다중 로그인 해결)</button>
+
+                <div id="pwaGuide" class="pwa-guide">
+                    <strong>💡 다중 계정 로그인 문제 해결법</strong><br>
+                    여러 구글 계정을 사용 중이라면 설정이 자꾸 풀릴 수 있습니다. 앱으로 설치하여 해결하세요.<br><br>
+                    1. 원하는 계정으로 로그인된 크롬 창 열기<br>
+                    2. 우측 상단 <strong>메뉴(⋮)</strong> 클릭<br>
+                    3. <strong>도구 더보기</strong> > <strong>바로가기 만들기</strong><br>
+                    4. <strong>"창으로 열기"</strong> 체크 후 [만들기]<br>
+                    5. 바탕화면에 생긴 아이콘으로 실행하세요!
+                </div>
+            </div>
+        </div>
+
+        <header>
+            <div class="header-top">
+                <h1 onclick="location.reload()">📚 TokiLibrary</h1>
+                <div class="controls">
+                    <input type="text" id="search" class="search-box" placeholder="제목, 작가 검색..." onkeyup="filterData()">
+                    <button id="refreshBtn" class="btn-icon btn-refresh sync-feature" onclick="refreshDB()"
+                        title="DB 갱신 (스캔)">🔄</button>
+                    <button class="btn-icon" onclick="toggleSettings()" title="도메인 설정">⚙️</button>
+                </div>
+            </div>
+            <div id="domainPanel">
+                <div class="domain-row">
+                    <span class="domain-label">뉴토끼:</span>
+                    <input type="text" id="url_newtoki" class="domain-input" placeholder="예: https://newtoki469.com"
+                        onchange="saveDomains()">
+                </div>
+                <div class="domain-row">
+                    <span class="domain-label">마나토끼:</span>
+                    <input type="text" id="url_manatoki" class="domain-input" placeholder="예: https://manatoki469.net"
+                        onchange="saveDomains()">
+                </div>
+                <div class="domain-row">
+                    <span class="domain-label">북토끼:</span>
+                    <input type="text" id="url_booktoki" class="domain-input" placeholder="예: https://booktoki469.com"
+                        onchange="saveDomains()">
+                </div>
+                <div style="font-size: 12px; color: #888; margin-top: 5px;">※ 도메인이 변경되면 여기서 수정하세요. 링크가 즉시 반영됩니다.</div>
+            </div>
+        </header>
+
+        <div class="container">
+            <div id="grid" class="grid"></div>
+        </div>
+
+        <script>
+            let allData = [];
+            const NO_IMAGE_SVG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='280' viewBox='0 0 200 280'%3E%3Crect width='200' height='280' fill='%23333'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%23666' font-size='20'%3ENo Image%3C/text%3E%3C/svg%3E";
+
+            // [Client-Side Config]
+            const STORAGE_KEY = 'TOKIVIEW_FOLDER_ID';
+            let deferredPrompt;
+            let isScriptActive = false; // Feature Gating Flag
+
+            window.onload = function () {
+                loadDomains();
+                setupScriptListener();
+                setupPWA();
+
+                // 1. LocalStorage 확인
+                const savedId = localStorage.getItem(STORAGE_KEY);
+                if (savedId) {
+                    loadLibrary(savedId);
+                } else {
+                    // 2. 없으면 스크립트 통신 대기 (잠시 후 모달 표시)
+                    setTimeout(() => {
+                        if (!localStorage.getItem(STORAGE_KEY)) {
+                            showConfigModal();
+                        }
+                    }, 1500);
                 }
-            });
-        }
 
-        function loadLibrary(folderId) {
-            document.getElementById('loaderMsg').innerText = "내 서재를 불러오는 중입니다...";
-            document.getElementById('pageLoader').style.display = 'flex';
+                // 초기 상태: 스크립트 미감지 시 버튼 비활성화
+                updateFeatureUI();
+            };
 
-            google.script.run
-                .withSuccessHandler((data) => {
-                    renderGrid(data);
-                    document.getElementById('pageLoader').style.display = 'none';
-                })
-                .withFailureHandler((e) => {
-                    document.getElementById('pageLoader').innerHTML = `<span style="color:red">오류: ${e.message}</span><br><br><button onclick="location.reload()" style="padding:10px; background:#333; color:white; border:none; cursor:pointer;">새로고침</button>`;
-                })
-                .getLibraryData(folderId);
-        }
+            function setupPWA() {
+                window.addEventListener('beforeinstallprompt', (e) => {
+                    e.preventDefault();
+                    deferredPrompt = e;
+                    const btn = document.getElementById('installBtn');
+                    btn.style.display = 'block';
 
-        function showConfigModal() {
-            document.getElementById('pageLoader').style.display = 'none';
-            document.getElementById('configModal').style.display = 'flex';
-            // 모달 내 텍스트 업데이트
-            const desc = document.querySelector('.modal-desc');
-            desc.innerHTML = `
+                    btn.addEventListener('click', () => {
+                        btn.style.display = 'none';
+                        deferredPrompt.prompt();
+                        deferredPrompt.userChoice.then((choiceResult) => {
+                            if (choiceResult.outcome === 'accepted') {
+                                console.log('User accepted the install prompt');
+                            }
+                            deferredPrompt = null;
+                        });
+                    });
+                });
+            }
+
+            function setupScriptListener() {
+                window.addEventListener('message', (event) => {
+                    // 보안: 신뢰할 수 있는 출처 확인 (필요 시 추가)
+                    const data = event.data;
+                    if (data && data.type === 'SET_CONFIG' && data.folderId) {
+                        console.log("Received config from script:", data.folderId);
+                        localStorage.setItem(STORAGE_KEY, data.folderId);
+
+                        // 스크립트 활성화 플래그 설정
+                        isScriptActive = true;
+                        updateFeatureUI();
+
+                        // 모달이 열려있으면 닫기
+                        document.getElementById('configModal').style.display = 'none';
+
+                        // 데이터 로드 시작
+                        loadLibrary(data.folderId);
+                    }
+                });
+            }
+
+            function updateFeatureUI() {
+                const syncBtns = document.querySelectorAll('.sync-feature');
+                syncBtns.forEach(btn => {
+                    if (isScriptActive) {
+                        btn.classList.remove('script-required');
+                        btn.title = "";
+                    } else {
+                        btn.classList.add('script-required');
+                        btn.title = "Tampermonkey 스크립트가 필요합니다.";
+                    }
+                });
+            }
+
+            function loadLibrary(folderId) {
+                document.getElementById('loaderMsg').innerText = "내 서재를 불러오는 중입니다...";
+                document.getElementById('pageLoader').style.display = 'flex';
+
+                google.script.run
+                    .withSuccessHandler((data) => {
+                        renderGrid(data);
+                        document.getElementById('pageLoader').style.display = 'none';
+                    })
+                    .withFailureHandler((e) => {
+                        document.getElementById('pageLoader').innerHTML = `<span style="color:red">오류: ${e.message}</span><br><br><button onclick="location.reload()" style="padding:10px; background:#333; color:white; border:none; cursor:pointer;">새로고침</button>`;
+                    })
+                    .getLibraryData(folderId);
+            }
+
+            function showConfigModal() {
+                document.getElementById('pageLoader').style.display = 'none';
+                document.getElementById('configModal').style.display = 'flex';
+                // 모달 내 텍스트 업데이트
+                const desc = document.querySelector('.modal-desc');
+                desc.innerHTML = `
                 TokiSync 스크립트가 감지되지 않았습니다.<br>
                 폴더 ID를 직접 입력하거나, 스크립트를 설치해주세요.<br>
                 <span style="font-size:12px; color:#888;">(ID는 브라우저에 저장됩니다)</span>
             `;
-        }
-
-        function saveConfig() {
-            const id = document.getElementById('configFolderId').value.trim();
-            if (!id) return alert("폴더 ID를 입력해주세요.");
-
-            // LocalStorage에 저장
-            localStorage.setItem(STORAGE_KEY, id);
-
-            alert("✅ 설정이 저장되었습니다.");
-            document.getElementById('configModal').style.display = 'none';
-            loadLibrary(id);
-        }
-
-        function refreshDB() {
-            if (!confirm("전체 폴더를 스캔하여 정보를 갱신합니다.\n작품 수에 따라 시간이 소요됩니다.")) return;
-
-            const folderId = localStorage.getItem(STORAGE_KEY);
-            if (!folderId) return alert("폴더 ID 설정이 필요합니다.");
-
-            const btn = document.getElementById('refreshBtn');
-            btn.classList.add('spin-anim');
-            document.getElementById('loaderMsg').innerText = "드라이브 스캔 중... (잠시만 기다려주세요)";
-            document.getElementById('pageLoader').style.display = 'flex';
-
-            google.script.run
-                .withSuccessHandler((data) => {
-                    renderGrid(data);
-                    btn.classList.remove('spin-anim');
-                    document.getElementById('pageLoader').style.display = 'none';
-                    alert("✅ 갱신 완료!");
-                })
-                .withFailureHandler((e) => {
-                    document.getElementById('pageLoader').innerHTML = `<span style="color:red">오류: ${e.message}</span>`;
-                    btn.classList.remove('spin-anim');
-                })
-                .rebuildLibraryIndex(folderId);
-        }
-
-        function toggleSettings() { document.getElementById('domainPanel').style.display = document.getElementById('domainPanel').style.display === 'block' ? 'none' : 'block'; }
-        function saveDomains() { localStorage.setItem('url_newtoki', document.getElementById('url_newtoki').value.trim()); localStorage.setItem('url_manatoki', document.getElementById('url_manatoki').value.trim()); localStorage.setItem('url_booktoki', document.getElementById('url_booktoki').value.trim()); renderGrid(allData); }
-        function loadDomains() { document.getElementById('url_newtoki').value = localStorage.getItem('url_newtoki') || 'https://newtoki469.com'; document.getElementById('url_manatoki').value = localStorage.getItem('url_manatoki') || 'https://manatoki469.net'; document.getElementById('url_booktoki').value = localStorage.getItem('url_booktoki') || 'https://booktoki469.com'; }
-
-        function getDynamicLink(item) {
-            const site = (item.site || "").toLowerCase();
-            let baseUrl = "";
-            let path = "";
-            if (site.includes("뉴토끼")) { baseUrl = document.getElementById('url_newtoki').value; path = "/webtoon/"; }
-            else if (site.includes("마나토끼")) { baseUrl = document.getElementById('url_manatoki').value; path = "/comic/"; }
-            else if (site.includes("북토끼")) { baseUrl = document.getElementById('url_booktoki').value; path = "/novel/"; }
-            else { baseUrl = document.getElementById('url_manatoki').value; path = "/comic/"; }
-            if (baseUrl.endsWith("/")) baseUrl = baseUrl.slice(0, -1);
-            return item.id ? (baseUrl + path + item.id) : "#";
-        }
-
-        function renderGrid(data) {
-            allData = data;
-            const grid = document.getElementById('grid');
-            grid.innerHTML = '';
-
-            if (!data || data.length === 0) {
-                grid.innerHTML = '<div class="no-data">저장된 작품이 없습니다.</div>';
-                return;
             }
 
-            data.forEach(item => {
-                const card = document.createElement('div');
-                card.className = 'card';
-                const thumb = item.thumbnail && item.thumbnail.startsWith("data:image") ? item.thumbnail : NO_IMAGE_SVG;
-                const dynamicUrl = getDynamicLink(item);
+            function saveConfig() {
+                const id = document.getElementById('configFolderId').value.trim();
+                if (!id) return alert("폴더 ID를 입력해주세요.");
 
-                card.innerHTML = `
+                // LocalStorage에 저장
+                localStorage.setItem(STORAGE_KEY, id);
+
+                alert("✅ 설정이 저장되었습니다.");
+                document.getElementById('configModal').style.display = 'none';
+                loadLibrary(id);
+            }
+
+            function refreshDB() {
+                if (!confirm("전체 폴더를 스캔하여 정보를 갱신합니다.\n작품 수에 따라 시간이 소요됩니다.")) return;
+
+                const folderId = localStorage.getItem(STORAGE_KEY);
+                if (!folderId) return alert("폴더 ID 설정이 필요합니다.");
+
+                const btn = document.getElementById('refreshBtn');
+                btn.classList.add('spin-anim');
+                document.getElementById('loaderMsg').innerText = "드라이브 스캔 중... (잠시만 기다려주세요)";
+                document.getElementById('pageLoader').style.display = 'flex';
+
+                google.script.run
+                    .withSuccessHandler((data) => {
+                        renderGrid(data);
+                        btn.classList.remove('spin-anim');
+                        document.getElementById('pageLoader').style.display = 'none';
+                        alert("✅ 갱신 완료!");
+                    })
+                    .withFailureHandler((e) => {
+                        document.getElementById('pageLoader').innerHTML = `<span style="color:red">오류: ${e.message}</span>`;
+                        btn.classList.remove('spin-anim');
+                    })
+                    .rebuildLibraryIndex(folderId);
+            }
+
+            function toggleSettings() { document.getElementById('domainPanel').style.display = document.getElementById('domainPanel').style.display === 'block' ? 'none' : 'block'; }
+            function saveDomains() { localStorage.setItem('url_newtoki', document.getElementById('url_newtoki').value.trim()); localStorage.setItem('url_manatoki', document.getElementById('url_manatoki').value.trim()); localStorage.setItem('url_booktoki', document.getElementById('url_booktoki').value.trim()); renderGrid(allData); }
+            function loadDomains() { document.getElementById('url_newtoki').value = localStorage.getItem('url_newtoki') || 'https://newtoki469.com'; document.getElementById('url_manatoki').value = localStorage.getItem('url_manatoki') || 'https://manatoki469.net'; document.getElementById('url_booktoki').value = localStorage.getItem('url_booktoki') || 'https://booktoki469.com'; }
+
+            function getDynamicLink(item) {
+                const site = (item.site || "").toLowerCase();
+                let baseUrl = "";
+                let path = "";
+                if (site.includes("뉴토끼")) { baseUrl = document.getElementById('url_newtoki').value; path = "/webtoon/"; }
+                else if (site.includes("마나토끼")) { baseUrl = document.getElementById('url_manatoki').value; path = "/comic/"; }
+                else if (site.includes("북토끼")) { baseUrl = document.getElementById('url_booktoki').value; path = "/novel/"; }
+                else { baseUrl = document.getElementById('url_manatoki').value; path = "/comic/"; }
+                if (baseUrl.endsWith("/")) baseUrl = baseUrl.slice(0, -1);
+                return item.id ? (baseUrl + path + item.id) : "#";
+            }
+
+            function renderGrid(data) {
+                allData = data;
+                const grid = document.getElementById('grid');
+                grid.innerHTML = '';
+
+                if (!data || data.length === 0) {
+                    grid.innerHTML = '<div class="no-data">저장된 작품이 없습니다.</div>';
+                    return;
+                }
+
+                data.forEach(item => {
+                    const card = document.createElement('div');
+                    card.className = 'card';
+                    const thumb = item.thumbnail && item.thumbnail.startsWith("data:image") ? item.thumbnail : NO_IMAGE_SVG;
+                    const dynamicUrl = getDynamicLink(item);
+
+                    card.innerHTML = `
           <div class="thumb-wrapper">
             <img src="${thumb}" class="thumb" onerror="this.src='${NO_IMAGE_SVG}'">
             <div class="overlay">
               <a href="${item.driveUrl}" target="_blank" class="btn btn-drive">📂 드라이브</a>
+              <button onclick="openEpisodeList('${item.driveUrl.split('/').pop()}', '${item.title}')" class="btn" style="background:#444; color:white;">📄 목록</button>
               ${item.id ? `
-                  <a href="${dynamicUrl}" target="_blank" class="btn btn-site">🌐 사이트 이동</a>
-                  <a href="${dynamicUrl}?toki_action=sync" target="_blank" class="btn" style="background:#ff9800; color:black;">⚡️ 자동 동기화</a>
+                  <a href="${dynamicUrl}" target="_blank" class="btn btn-site">🌐 사이트</a>
+                  <a href="${dynamicUrl}?toki_action=sync" target="_blank" class="btn sync-feature" style="background:#ff9800; color:black;">⚡️ 동기화</a>
               ` : ''}
             </div>
           </div>
@@ -646,28 +945,193 @@
             </div>
           </div>
         `;
-                grid.appendChild(card);
-            });
-        }
-
-        function filterData() {
-            const query = document.getElementById('search').value.toLowerCase();
-            const cards = document.querySelectorAll('.card');
-            cards.forEach((card, index) => {
-                const item = allData[index];
-                const text = (item.title + item.author + item.id).toLowerCase();
-                card.style.display = text.includes(query) ? 'flex' : 'none';
-            });
-        }
-        function togglePwaGuide() {
-            const guide = document.getElementById('pwaGuide');
-            if (guide.style.display === 'block') {
-                guide.style.display = 'none';
-            } else {
-                guide.style.display = 'block';
+                    grid.appendChild(card);
+                });
+                updateFeatureUI(); // 렌더링 후 버튼 상태 업데이트
             }
-        }
-    </script>
-</body>
+
+            function filterData() {
+                const query = document.getElementById('search').value.toLowerCase();
+                const cards = document.querySelectorAll('.card');
+                cards.forEach((card, index) => {
+                    const item = allData[index];
+                    const text = (item.title + item.author + item.id).toLowerCase();
+                    card.style.display = text.includes(query) ? 'flex' : 'none';
+                });
+            }
+            function togglePwaGuide() {
+                const guide = document.getElementById('pwaGuide');
+                if (guide.style.display === 'block') {
+                    guide.style.display = 'none';
+                } else {
+                    guide.style.display = 'block';
+                }
+            }
+
+            // [Episode List Logic]
+            function openEpisodeList(folderId, title) {
+                document.getElementById('episodeModal').style.display = 'flex';
+                document.querySelector('#episodeModal .modal-title').innerText = `📄 ${title}`;
+                const listEl = document.getElementById('episodeList');
+                listEl.innerHTML = '<div style="padding:20px; color:#888;">로딩 중...</div>';
+
+                google.script.run
+                    .withSuccessHandler(renderEpisodeList)
+                    .withFailureHandler(e => {
+                        listEl.innerHTML = `<div style="padding:20px; color:red;">오류: ${e.message}</div>`;
+                    })
+                    .getEpisodeList(folderId);
+            }
+
+            function closeEpisodeModal() {
+                document.getElementById('episodeModal').style.display = 'none';
+            }
+
+            function renderEpisodeList(list) {
+                const listEl = document.getElementById('episodeList');
+                listEl.innerHTML = '';
+
+                if (!list || list.length === 0) {
+                    listEl.innerHTML = '<div style="padding:20px; color:#888;">표시할 회차가 없습니다.</div>';
+                    return;
+                }
+
+                list.forEach(item => {
+                    const div = document.createElement('div');
+                    div.className = 'episode-item';
+
+                    let icon = '📁';
+                    let action = `window.open('${item.url}', '_blank')`;
+                    let meta = '폴더';
+
+                    if (item.type === 'file') {
+                        icon = '📦';
+                        meta = formatSize(item.size);
+                        if (item.name.endsWith('.cbz') || item.name.endsWith('.zip')) {
+                            icon = '📖';
+                            action = `loadCBZ('${item.id}', '${item.name}')`;
+                        }
+                    }
+
+                    div.innerHTML = `
+                        <div>
+                            <span style="margin-right:10px;">${icon}</span>
+                            <span class="ep-name">${item.name}</span>
+                        </div>
+                        <span class="ep-meta">${meta}</span>
+                    `;
+                    div.onclick = () => eval(action);
+                    listEl.appendChild(div);
+                });
+            }
+
+            function formatSize(bytes) {
+                if (bytes === 0) return '0 B';
+                const k = 1024;
+                const sizes = ['B', 'KB', 'MB', 'GB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+            }
+
+            // [Viewer Logic]
+            async function loadCBZ(fileId, title) {
+                if (!confirm(`"${title}"\n정주행을 시작하시겠습니까?\n(데이터 소모가 발생할 수 있습니다)`)) return;
+
+                closeEpisodeModal();
+                const viewer = document.getElementById('viewerOverlay');
+                const content = document.getElementById('viewerContent');
+                const titleEl = document.getElementById('viewerTitle');
+
+                viewer.style.display = 'flex';
+                titleEl.innerText = title;
+                content.innerHTML = '<div style="color:white; margin-top:50px;">파일 다운로드 중... (0%)</div>';
+
+                try {
+                    // 1. Download Chunks
+                    const chunks = [];
+                    let offset = 0;
+                    const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB
+
+                    while (true) {
+                        const response = await new Promise((resolve, reject) => {
+                            google.script.run
+                                .withSuccessHandler(resolve)
+                                .withFailureHandler(reject)
+                                .getFileChunk(fileId, offset, CHUNK_SIZE);
+                        });
+
+                        if (!response) break;
+
+                        chunks.push(response.data);
+                        offset = response.nextOffset;
+
+                        const percent = Math.round((offset / response.totalSize) * 100);
+                        content.innerHTML = `<div style="color:white; margin-top:50px;">파일 다운로드 중... (${percent}%)</div>`;
+
+                        if (!response.hasMore) break;
+                    }
+
+                    // 2. Reassemble & Unzip
+                    content.innerHTML = '<div style="color:white; margin-top:50px;">압축 해제 중...</div>';
+
+                    // Base64 -> Uint8Array
+                    const combinedBase64 = chunks.join('');
+                    const binaryString = atob(combinedBase64);
+                    const bytes = new Uint8Array(binaryString.length);
+                    for (let i = 0; i < binaryString.length; i++) {
+                        bytes[i] = binaryString.charCodeAt(i);
+                    }
+
+                    const zip = await JSZip.loadAsync(bytes);
+                    content.innerHTML = ''; // Clear loader
+
+                    // 3. Render Images
+                    const files = Object.keys(zip.files).sort((a, b) => {
+                        return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+                    });
+
+                    for (const filename of files) {
+                        if (filename.match(/\.(jpg|jpeg|png|webp|gif)$/i)) {
+                            const blob = await zip.files[filename].async('blob');
+                            const url = URL.createObjectURL(blob);
+
+                            const img = document.createElement('img');
+                            img.src = url;
+                            img.className = 'viewer-image';
+                            img.loading = 'lazy'; // Lazy load
+                            content.appendChild(img);
+                        }
+                    }
+
+                } catch (e) {
+                    alert("뷰어 로드 실패: " + e.message);
+                    closeViewer();
+                }
+            }
+
+            function closeViewer() {
+                const viewer = document.getElementById('viewerOverlay');
+                const content = document.getElementById('viewerContent');
+
+                // Cleanup Blob URLs to free memory
+                const images = content.querySelectorAll('img');
+                images.forEach(img => URL.revokeObjectURL(img.src));
+
+                content.innerHTML = '';
+                viewer.style.display = 'none';
+            }
+
+            // ESC key to close viewer
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    if (document.getElementById('viewerOverlay').style.display === 'flex') {
+                        closeViewer();
+                    } else if (document.getElementById('episodeModal').style.display === 'flex') {
+                        closeEpisodeModal();
+                    }
+                }
+            });
+        </script>
+    </body>
 
 </html>

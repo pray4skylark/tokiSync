@@ -26,11 +26,12 @@
     - [x] 뷰어 접속 시 저장된 `ROOT_FOLDER_ID` 자동 주입 기능 구현
 
 ## Phase 3: 뷰어 진화 (TokiView)
-- [ ] **PWA(Progressive Web App) 전환** (최우선 목표)
-    - [ ] `manifest.json` 구현 (Data URI 방식)
-    - [ ] Service Worker 등록 및 오프라인 캐싱 전략 수립
-    - [ ] 아이콘 및 메타 태그 최적화
-    - [ ] 다중 로그인 이슈 해결을 위한 "앱 설치" 유도 UI 강화
+- [x] **PWA(Progressive Web App) 전환** (최우선 목표)
+    - [x] `manifest.json` 구현 (Data URI 방식)
+    - [x] Service Worker 대체 (Data URI Manifest & Meta Tags)
+    - [x] 아이콘 및 메타 태그 최적화
+    - [x] 다중 로그인 이슈 해결을 위한 "앱 설치" 유도 UI 강화
+    - [x] **기능 제한(Feature Gating)**: 스크립트 미감지 시 동기화/다운로드 기능 비활성화
 - [ ] **CBZ 뷰어 구현**
     - [ ] TokiView에 `JSZip` 라이브러리 추가 (CDN)
     - [ ] CBZ 파일을 Base64로 가져오는 로직 구현 (필요 시 청크 분할)

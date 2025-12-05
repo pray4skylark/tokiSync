@@ -153,3 +153,79 @@ function authorizeCheck() {
   DriveApp.getRootFolder();
   console.log("✅ 권한 승인 완료!");
 }
+
+// =======================================================
+// 📂 회차 목록 가져오기 (Series Folder -> Episodes)
+// =======================================================
+function getEpisodeList(folderId) {
+  if (!folderId) throw new Error("Folder ID is required");
+  
+  const folder = DriveApp.getFolderById(folderId);
+  const files = folder.getFiles();
+  const folders = folder.getFolders();
+  const list = [];
+
+  // 1. 폴더 (일반 회차)
+  while (folders.hasNext()) {
+    const f = folders.next();
+    if (f.getName() === "info.json") continue;
+    list.push({
+      id: f.getId(),
+      name: f.getName(),
+      type: 'folder',
+      mimeType: 'application/vnd.google-apps.folder',
+      url: f.getUrl()
+    });
+  }
+
+  // 2. 파일 (.cbz, .zip 등)
+  while (files.hasNext()) {
+    const f = files.next();
+    const name = f.getName();
+    const mime = f.getMimeType();
+    
+    // info.json 제외
+    if (name === "info.json") continue;
+
+    // 압축 파일만 포함 (CBZ, ZIP)
+    if (name.endsWith('.cbz') || name.endsWith('.zip') || mime.includes('zip') || mime.includes('archive')) {
+      list.push({
+        id: f.getId(),
+        name: name,
+        type: 'file',
+        size: f.getSize(),
+        mimeType: mime,
+        url: f.getUrl()
+      });
+    }
+  }
+
+  // 정렬 (이름순 - 숫자 포함)
+  list.sort((a, b) => {
+    return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+  });
+
+  return list;
+}
+
+// =======================================================
+// 📦 파일 청크 다운로드 (50MB 제한 우회)
+// =======================================================
+function getFileChunk(fileId, offset, length) {
+  const file = DriveApp.getFileById(fileId);
+  const blob = file.getBlob();
+  const bytes = blob.getBytes();
+  
+  // 범위 체크
+  if (offset >= bytes.length) return null;
+  
+  const end = Math.min(offset + length, bytes.length);
+  const chunk = bytes.slice(offset, end);
+  
+  return {
+    data: Utilities.base64Encode(chunk),
+    hasMore: end < bytes.length,
+    totalSize: bytes.length,
+    nextOffset: end
+  };
+}
