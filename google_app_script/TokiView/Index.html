@@ -900,10 +900,16 @@
                 renderGrid(allData);
             }
 
+            const DEFAULT_DOMAINS = {
+                newtoki: 'https://newtoki469.com',
+                manatoki: 'https://manatoki469.net',
+                booktoki: 'https://booktoki469.com'
+            };
+
             function loadDomains() {
-                document.getElementById('url_newtoki').value = localStorage.getItem('url_newtoki') || 'https://newtoki469.com';
-                document.getElementById('url_manatoki').value = localStorage.getItem('url_manatoki') || 'https://manatoki469.net';
-                document.getElementById('url_booktoki').value = localStorage.getItem('url_booktoki') || 'https://booktoki469.com';
+                document.getElementById('url_newtoki').value = localStorage.getItem('url_newtoki') || DEFAULT_DOMAINS.newtoki;
+                document.getElementById('url_manatoki').value = localStorage.getItem('url_manatoki') || DEFAULT_DOMAINS.manatoki;
+                document.getElementById('url_booktoki').value = localStorage.getItem('url_booktoki') || DEFAULT_DOMAINS.booktoki;
             }
 
             function getDynamicLink(item) {
