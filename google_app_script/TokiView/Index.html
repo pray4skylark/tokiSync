@@ -648,6 +648,41 @@
             border-radius: 5px;
             cursor: pointer;
         }
+
+        /* Toast Notification */
+        .toast-container {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 4000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            pointer-events: none;
+        }
+
+        .toast {
+            background: rgba(30, 30, 30, 0.9);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 25px;
+            font-size: 14px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            opacity: 0;
+            transform: translateY(20px);
+            transition: 0.3s;
+            border: 1px solid #444;
+            text-align: center;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
     </style>
     </head>
 
@@ -708,9 +743,34 @@
 
 
 
+        <!-- Toast Container -->
+        <div id="toastContainer" class="toast-container"></div>
+
         <script>
             let allData = [];
             const NO_IMAGE_SVG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='280' viewBox='0 0 200 280'%3E%3Crect width='200' height='280' fill='%23333'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%23666' font-size='20'%3ENo Image%3C/text%3E%3C/svg%3E";
+
+            // [Toast Helper]
+            function showToast(message, duration = 3000) {
+                const container = document.getElementById('toastContainer');
+                const toast = document.createElement('div');
+                toast.className = 'toast';
+                toast.innerHTML = message;
+
+                container.appendChild(toast);
+
+                // Animation
+                requestAnimationFrame(() => {
+                    toast.classList.add('show');
+                });
+
+                setTimeout(() => {
+                    toast.classList.remove('show');
+                    setTimeout(() => {
+                        toast.remove();
+                    }, 300);
+                }, duration);
+            }
 
             // [Client-Side Config]
             const STORAGE_KEY = 'TOKIVIEW_FOLDER_ID';
@@ -876,19 +936,19 @@
 
                 const btn = document.getElementById('refreshBtn');
                 btn.classList.add('spin-anim');
-                document.getElementById('loaderMsg').innerText = "드라이브 스캔 중... (잠시만 기다려주세요)";
-                document.getElementById('pageLoader').style.display = 'flex';
+
+                // Toast instead of Loader
+                showToast("🔄 드라이브 스캔을 시작합니다... (백그라운드)", 5000);
 
                 google.script.run
                     .withSuccessHandler((data) => {
                         renderGrid(data);
                         btn.classList.remove('spin-anim');
-                        document.getElementById('pageLoader').style.display = 'none';
-                        alert("✅ 갱신 완료!");
+                        showToast("✅ 라이브러리 갱신 완료!");
                     })
                     .withFailureHandler((e) => {
-                        document.getElementById('pageLoader').innerHTML = `<span style="color:red">오류: ${e.message}</span>`;
                         btn.classList.remove('spin-anim');
+                        showToast(`❌ 갱신 실패: ${e.message}`, 5000);
                     })
                     .rebuildLibraryIndex(folderId);
             }
