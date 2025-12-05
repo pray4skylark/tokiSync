@@ -893,8 +893,18 @@
             }
 
             function toggleSettings() { document.getElementById('domainPanel').style.display = document.getElementById('domainPanel').style.display === 'block' ? 'none' : 'block'; }
-            function saveDomains() { localStorage.setItem('url_newtoki', document.getElementById('url_newtoki').value.trim()); localStorage.setItem('url_manatoki', document.getElementById('url_manatoki').value.trim()); localStorage.setItem('url_booktoki', document.getElementById('url_booktoki').value.trim()); renderGrid(allData); }
-            function loadDomains() { document.getElementById('url_newtoki').value = localStorage.getItem('url_newtoki') || 'https://newtoki469.com'; document.getElementById('url_manatoki').value = localStorage.getItem('url_manatoki') || 'https://manatoki469.net'; document.getElementById('url_booktoki').value = localStorage.getItem('url_booktoki') || 'https://booktoki469.com'; }
+            function saveDomains() {
+                localStorage.setItem('url_newtoki', document.getElementById('url_newtoki').value.trim());
+                localStorage.setItem('url_manatoki', document.getElementById('url_manatoki').value.trim());
+                localStorage.setItem('url_booktoki', document.getElementById('url_booktoki').value.trim());
+                renderGrid(allData);
+            }
+
+            function loadDomains() {
+                document.getElementById('url_newtoki').value = localStorage.getItem('url_newtoki') || 'https://newtoki469.com';
+                document.getElementById('url_manatoki').value = localStorage.getItem('url_manatoki') || 'https://manatoki469.net';
+                document.getElementById('url_booktoki').value = localStorage.getItem('url_booktoki') || 'https://booktoki469.com';
+            }
 
             function getDynamicLink(item) {
                 const site = (item.site || "").toLowerCase();
