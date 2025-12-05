@@ -7,6 +7,8 @@
 // @match        https://*.com/webtoon/*
 // @match        https://*.com/novel/*
 // @match        https://*.net/comic/*
+// @match        https://script.google.com/*
+// @match        https://*.googleusercontent.com/*
 // @icon         https://github.com/user-attachments/assets/99f5bb36-4ef8-40cc-8ae5-e3bf1c7952ad
 // @grant        GM_registerMenuCommand
 // @grant        GM_xmlhttpRequest
@@ -23,6 +25,32 @@
     'use strict';
 
     console.log("🚀 TokiSync Loader Initialized (GitHub CDN)");
+
+    // [TokiView Integration]
+    // 구글 스크립트 페이지(TokiView)인 경우 설정을 주입하고 종료합니다.
+    if (location.hostname.includes('google.com') || location.hostname.includes('googleusercontent.com')) {
+        // 타이틀 등으로 TokiView인지 확인 (필요 시 더 정교하게 수정)
+        if (document.title.includes('TokiView') || document.title.includes('TokiLibrary')) {
+            console.log("📂 TokiView detected. Preparing to inject config...");
+
+            const folderId = GM_getValue('ROOT_FOLDER_ID');
+            if (folderId) {
+                // 페이지 로딩 대기 후 주입
+                setTimeout(() => {
+                    window.postMessage({ type: 'SET_CONFIG', folderId: folderId }, '*');
+                    console.log("✅ Config injected to TokiView:", folderId);
+                }, 500);
+
+                // 혹시 iframe 내부라면 부모에게도 전송 (상호 보완)
+                if (window.top !== window.self) {
+                    window.top.postMessage({ type: 'SET_CONFIG', folderId: folderId }, '*');
+                }
+            } else {
+                console.log("⚠️ No Folder ID found in script storage.");
+            }
+            return; // Core 스크립트 로드 중단
+        }
+    }
 
     const CFG_URL_KEY = "TOKI_GAS_URL";
     const CFG_SECRET_KEY = "TOKI_SECRET_KEY";
