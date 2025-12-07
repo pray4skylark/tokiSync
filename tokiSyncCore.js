@@ -25,7 +25,7 @@ window.TokiSyncCore = function (GM_context) {
 
     // 🚀 v3.0.0-BETA3 New Deployment URLs
     const DEFAULT_API_URL = "https://script.google.com/macros/s/AKfycbyPN2DmWIC92T_MotbHv9Ky-8bIH0Y8QiYmrlgmBbz2H41km8W6afasZkJcbMa6_P5C/exec";
-    const DEFAULT_DASH_URL = "https://script.google.com/macros/s/AKfycbwMmR80ia-kCNOiwKiYV3yCncG7_XuEWcx-fIgqSVlhCRxO7zRrb4EfLSrL8zcEnKEN/exec";
+    const DEFAULT_DASH_URL = "https://script.google.com/macros/s/AKfycbxbGiDHQD8yavNA9N3fAzkG95Wikw0b8ku1WjXOwZ0jctXgMLo8kPC7_WuW5K1px5QN/exec";
 
     function getConfig() {
         return {
