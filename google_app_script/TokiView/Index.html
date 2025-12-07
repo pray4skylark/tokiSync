@@ -25,6 +25,10 @@
             padding: 0;
         }
 
+        body.no-scroll {
+            overflow: hidden;
+        }
+
         header {
             position: sticky;
             top: 0;
@@ -633,11 +637,52 @@
 
         .viewer-image {
             max-width: 100%;
-            height: auto;
-            margin-bottom: 10px;
-            display: block;
-            margin-left: auto;
-            margin-right: auto;
+            max-height: 100%;
+            object-fit: contain;
+            user-select: none;
+        }
+
+        .nav-zone {
+            position: absolute;
+            top: 50px;
+            /* Header height */
+            bottom: 0;
+            width: 30%;
+            z-index: 100;
+            opacity: 0;
+            transition: opacity 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 30px;
+            color: rgba(255, 255, 255, 0.5);
+            cursor: pointer;
+        }
+
+        .nav-zone:hover {
+            opacity: 1;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .nav-prev {
+            left: 0;
+        }
+
+        .nav-next {
+            right: 0;
+        }
+
+        .page-counter {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.7);
+            padding: 5px 15px;
+            border-radius: 15px;
+            font-size: 13px;
+            pointer-events: none;
+            z-index: 101;
         }
 
         .btn-close-viewer {
@@ -747,7 +792,14 @@
         <div id="toastContainer" class="toast-container"></div>
 
         <script>
-            let allData = [];
+            let allSeries = [];
+            // [Viewer State]
+            let currentBookList = [];
+            let currentBookIndex = -1; // Index in book list
+            let viewerImages = []; // Array of blob URLs
+            let viewerPageIndex = 0; // Current image index
+            let nextBookPreload = null; // { index: int, images: [] }
+
             const NO_IMAGE_SVG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='280' viewBox='0 0 200 280'%3E%3Crect width='200' height='280' fill='%23333'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%23666' font-size='20'%3ENo Image%3C/text%3E%3C/svg%3E";
 
             // [Toast Helper]
@@ -879,11 +931,11 @@
                 }, 30000);
 
                 google.script.run
-                    .withSuccessHandler((data) => {
+                    .withSuccessHandler((seriesList) => {
                         clearTimeout(timeoutId);
                         try {
-                            console.log("Data received:", data);
-                            renderGrid(data);
+                            console.log("Series List received:", seriesList);
+                            renderGrid(seriesList);
                         } catch (e) {
                             console.error("Render Error:", e);
                             spinner.style.display = 'none'; // Stop spinning
@@ -901,7 +953,7 @@
                         spinner.style.display = 'none'; // Stop spinning
                         msg.innerHTML = `<span style="color:red">서버 오류: ${e.message}</span><br><br><button onclick="location.reload()" style="padding:10px; background:#333; color:white; border:none; cursor:pointer;">새로고침</button>`;
                     })
-                    .getLibraryData(folderId);
+                    .getSeriesList(folderId);
             }
 
             function showConfigModal() {
@@ -941,8 +993,8 @@
                 showToast("🔄 드라이브 스캔을 시작합니다... (백그라운드)", 5000);
 
                 google.script.run
-                    .withSuccessHandler((data) => {
-                        renderGrid(data);
+                    .withSuccessHandler((seriesList) => {
+                        renderGrid(seriesList);
                         btn.classList.remove('spin-anim');
                         showToast("✅ 라이브러리 갱신 완료!");
                     })
@@ -958,7 +1010,7 @@
                 localStorage.setItem('url_newtoki', document.getElementById('url_newtoki').value.trim());
                 localStorage.setItem('url_manatoki', document.getElementById('url_manatoki').value.trim());
                 localStorage.setItem('url_booktoki', document.getElementById('url_booktoki').value.trim());
-                renderGrid(allData);
+                renderGrid(allSeries);
             }
 
             function loadDomains() {
@@ -971,54 +1023,57 @@
                 document.getElementById('url_booktoki').value = b ? b : URL_BOOKTOKI;
             }
 
-            function getDynamicLink(item) {
-                const site = (item.site || "").toLowerCase();
-                let baseUrl = "";
-                let path = "";
+            function getDynamicLink(series) {
+                const contentId = series.sourceId;
+
+                const site = (series.name || "").toLowerCase(); // Simple check from name?
+                let baseUrl = document.getElementById('url_manatoki').value;
+                let path = "/comic/";
+
                 if (site.includes("뉴토끼")) { baseUrl = document.getElementById('url_newtoki').value; path = "/webtoon/"; }
-                else if (site.includes("마나토끼")) { baseUrl = document.getElementById('url_manatoki').value; path = "/comic/"; }
                 else if (site.includes("북토끼")) { baseUrl = document.getElementById('url_booktoki').value; path = "/novel/"; }
-                else { baseUrl = document.getElementById('url_manatoki').value; path = "/comic/"; }
+
                 if (baseUrl.endsWith("/")) baseUrl = baseUrl.slice(0, -1);
-                return item.id ? (baseUrl + path + item.id) : "#";
+                return contentId ? (baseUrl + path + contentId) : "#";
             }
 
-            function renderGrid(data) {
-                allData = data;
+            function renderGrid(seriesList) {
+                allSeries = seriesList;
                 const grid = document.getElementById('grid');
                 grid.innerHTML = '';
 
-                if (!data || data.length === 0) {
+                if (!seriesList || seriesList.length === 0) {
                     grid.innerHTML = '<div class="no-data">저장된 작품이 없습니다.</div>';
                     document.getElementById('pageLoader').style.display = 'none';
                     return;
                 }
 
-                data.forEach((item, index) => {
+                seriesList.forEach((series, index) => {
                     try {
                         const card = document.createElement('div');
                         card.className = 'card';
-                        const thumb = item.thumbnail && item.thumbnail.startsWith("data:image") ? item.thumbnail : NO_IMAGE_SVG;
-                        const dynamicUrl = getDynamicLink(item);
+                        const thumb = series.thumbnail && series.thumbnail.startsWith("data:image") ? series.thumbnail : NO_IMAGE_SVG;
+                        const dynamicUrl = getDynamicLink(series);
+                        const hasContentId = !!series.sourceId;
 
                         card.innerHTML = `
               <div class="thumb-wrapper">
                 <img src="${thumb}" class="thumb" onerror="this.src='${NO_IMAGE_SVG}'">
                 <div class="overlay">
-                  <a href="${item.driveUrl}" target="_blank" class="btn btn-drive">📂 드라이브</a>
-                  <button onclick="openEpisodeList('${item.driveUrl.split('/').pop()}', '${item.title}')" class="btn" style="background:#444; color:white;">📄 목록</button>
-                  ${item.id ? `
+                  <a href="${series.url}" target="_blank" class="btn btn-drive">📂 드라이브</a>
+                  <button onclick="openEpisodeList('${series.id}', '${series.name}', ${index})" class="btn" style="background:#444; color:white;">📄 목록</button>
+                  ${hasContentId ? `
                       <a href="${dynamicUrl}" target="_blank" class="btn btn-site">🌐 사이트</a>
                       <a href="${dynamicUrl}?toki_action=sync" target="_blank" class="btn sync-feature" style="background:#ff9800; color:black;">⚡️ 동기화</a>
                   ` : ''}
                 </div>
               </div>
               <div class="info">
-                <div class="title" title="${item.title}">${item.title}</div>
-                <span class="author" title="${item.author}">${item.author || '작가 미상'}</span>
+                <div class="title" title="${series.name}">${series.name}</div>
+                <span class="author" title="${series.metadata.authors.join(', ')}">${series.metadata.authors.join(', ') || '작가 미상'}</span>
                 <div class="meta">
-                  <span class="badge">${item.status || 'ID기반'}</span>
-                  <span class="count">${item.lastEpisode || 0}화 / ${item.fileCount}건</span>
+                  <span class="badge">${series.metadata.status || '상태 미상'}</span>
+                  <span class="count">${series.booksCount || 0}권</span>
                 </div>
               </div>
             `;
@@ -1035,8 +1090,8 @@
                 const query = document.getElementById('search').value.toLowerCase();
                 const cards = document.querySelectorAll('.card');
                 cards.forEach((card, index) => {
-                    const item = allData[index];
-                    const text = (item.title + item.author + item.id).toLowerCase();
+                    const series = allSeries[index];
+                    const text = (series.name + (series.metadata.authors.join(' '))).toLowerCase();
                     card.style.display = text.includes(query) ? 'flex' : 'none';
                 });
             }
@@ -1050,54 +1105,63 @@
             }
 
             // [Episode List Logic]
-            function openEpisodeList(folderId, title) {
+            function openEpisodeList(seriesId, title, seriesIndex) {
                 document.getElementById('episodeModal').style.display = 'flex';
                 document.querySelector('#episodeModal .modal-title').innerText = `📄 ${title}`;
                 const listEl = document.getElementById('episodeList');
                 listEl.innerHTML = '<div style="padding:20px; color:#888;">로딩 중...</div>';
 
                 google.script.run
-                    .withSuccessHandler(renderEpisodeList)
+                    .withSuccessHandler((books) => renderEpisodeList(books, seriesIndex))
                     .withFailureHandler(e => {
                         listEl.innerHTML = `<div style="padding:20px; color:red;">오류: ${e.message}</div>`;
                     })
-                    .getEpisodeList(folderId);
+                    .getBooks(seriesId);
             }
 
             function closeEpisodeModal() {
                 document.getElementById('episodeModal').style.display = 'none';
             }
 
-            function renderEpisodeList(list) {
+            function renderEpisodeList(books, seriesIndex) {
+                currentBookList = books || [];
                 const listEl = document.getElementById('episodeList');
                 listEl.innerHTML = '';
 
-                if (!list || list.length === 0) {
+                if (!books || books.length === 0) {
                     listEl.innerHTML = '<div style="padding:20px; color:#888;">표시할 회차가 없습니다.</div>';
                     return;
                 }
 
-                list.forEach(item => {
+                books.forEach((book, index) => {
                     const div = document.createElement('div');
                     div.className = 'episode-item';
 
                     let icon = '📁';
                     let meta = '폴더';
-                    let clickHandler = () => window.open(item.url, '_blank');
+                    let clickHandler = () => window.open(book.url, '_blank');
 
-                    if (item.type === 'file') {
+                    if (book.media.mediaType && !book.media.mediaType.includes('folder')) {
                         icon = '📦';
-                        meta = formatSize(item.size);
-                        if (item.name.endsWith('.cbz') || item.name.endsWith('.zip')) {
+                        meta = formatSize(book.size);
+                        // Check extension from name for now as mediaType might be generic binary
+                        if (book.name.endsWith('.cbz') || book.name.endsWith('.zip')) {
                             icon = '📖';
-                            clickHandler = () => loadCBZ(item.id, item.name);
+                            clickHandler = () => {
+                                if (confirm(`"${book.name}"\n정주행을 시작하시겠습니까?`)) {
+                                    loadViewer(index);
+                                }
+                            };
                         }
+                    } else {
+                        // Folder
+                        icon = '📁';
                     }
 
                     div.innerHTML = `
                         <div>
                             <span style="margin-right:10px;">${icon}</span>
-                            <span class="ep-name">${item.name}</span>
+                            <span class="ep-name">${book.name}</span>
                         </div>
                         <span class="ep-meta">${meta}</span>
                     `;
@@ -1115,83 +1179,50 @@
             }
 
             // [Viewer Logic]
-            async function loadCBZ(fileId, title) {
-                if (!confirm(`"${title}"\n정주행을 시작하시겠습니까?\n(데이터 소모가 발생할 수 있습니다)`)) return;
+            async function loadViewer(index) {
+                const book = currentBookList[index];
+                if (!book) return;
 
                 closeEpisodeModal();
+                currentBookIndex = index;
+                viewerPageIndex = 0;
+
                 const viewer = document.getElementById('viewerOverlay');
                 const content = document.getElementById('viewerContent');
                 const titleEl = document.getElementById('viewerTitle');
 
                 viewer.style.display = 'flex';
-                titleEl.innerText = title;
-                content.innerHTML = '<div style="color:white; margin-top:50px;">파일 다운로드 중... (0%)</div>';
+                document.body.classList.add('no-scroll');
+
+                titleEl.innerText = book.name;
+
+                content.innerHTML = `
+                    <div class="nav-zone nav-prev" onclick="navigateViewer(-1)">❮</div>
+                    <div class="nav-zone nav-next" onclick="navigateViewer(1)">❯</div>
+                    <div id="viewerImageContainer" style="width:100%; height:100%; display:flex; justify-content:center; align-items:center;">
+                         <div style="color:white; font-size:14px;">로딩 중... (0%)</div>
+                    </div>
+                    <div id="pageCounter" class="page-counter">- / -</div>
+                `;
 
                 try {
-                    // 1. Download Chunks & Decode Immediately
-                    const chunks = [];
-                    let offset = 0;
-                    let totalLength = 0;
-                    const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB
-
-                    while (true) {
-                        const response = await new Promise((resolve, reject) => {
-                            google.script.run
-                                .withSuccessHandler(resolve)
-                                .withFailureHandler(reject)
-                                .getFileChunk(fileId, offset, CHUNK_SIZE);
+                    let images = [];
+                    // Check Preload
+                    if (nextBookPreload && nextBookPreload.index === index) {
+                        console.log("Using preloaded data!");
+                        images = nextBookPreload.images;
+                        nextBookPreload = null;
+                    } else {
+                        images = await fetchAndUnzip(book.id, (progress) => {
+                            const el = document.querySelector('#viewerImageContainer div');
+                            if (el) el.innerText = progress;
                         });
-
-                        if (!response) break;
-
-                        // Decode Base64 Chunk -> Uint8Array
-                        const binaryString = atob(response.data);
-                        const len = binaryString.length;
-                        const bytes = new Uint8Array(len);
-                        for (let i = 0; i < len; i++) {
-                            bytes[i] = binaryString.charCodeAt(i);
-                        }
-
-                        chunks.push(bytes);
-                        totalLength += len;
-
-                        offset = response.nextOffset;
-
-                        const percent = Math.round((offset / response.totalSize) * 100);
-                        content.innerHTML = `<div style="color:white; margin-top:50px;">파일 다운로드 중... (${percent}%)</div>`;
-
-                        if (!response.hasMore) break;
                     }
 
-                    // 2. Merge Chunks
-                    content.innerHTML = '<div style="color:white; margin-top:50px;">데이터 병합 중...</div>';
-                    const combinedBytes = new Uint8Array(totalLength);
-                    let position = 0;
-                    for (const chunk of chunks) {
-                        combinedBytes.set(chunk, position);
-                        position += chunk.length;
-                    }
+                    if (images.length === 0) throw new Error("이미지를 찾을 수 없습니다.");
 
-                    const zip = await JSZip.loadAsync(combinedBytes);
-                    content.innerHTML = ''; // Clear loader
-
-                    // 3. Render Images
-                    const files = Object.keys(zip.files).sort((a, b) => {
-                        return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
-                    });
-
-                    for (const filename of files) {
-                        if (filename.match(/\.(jpg|jpeg|png|webp|gif)$/i)) {
-                            const blob = await zip.files[filename].async('blob');
-                            const url = URL.createObjectURL(blob);
-
-                            const img = document.createElement('img');
-                            img.src = url;
-                            img.className = 'viewer-image';
-                            img.loading = 'lazy'; // Lazy load
-                            content.appendChild(img);
-                        }
-                    }
+                    viewerImages = images;
+                    renderViewerPage(0);
 
                 } catch (e) {
                     alert("뷰어 로드 실패: " + e.message);
@@ -1199,26 +1230,161 @@
                 }
             }
 
+            async function fetchAndUnzip(fileId, onProgress) {
+                const chunks = [];
+                let offset = 0;
+                let totalLength = 0;
+                const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB
+
+                // 1. Download Chunks
+                while (true) {
+                    const response = await new Promise((resolve, reject) => {
+                        google.script.run
+                            .withSuccessHandler(resolve)
+                            .withFailureHandler(reject)
+                            .getFileChunk(fileId, offset, CHUNK_SIZE);
+                    });
+
+                    if (!response) break;
+
+                    const binaryString = atob(response.data);
+                    const len = binaryString.length;
+                    const bytes = new Uint8Array(len);
+                    for (let i = 0; i < len; i++) {
+                        bytes[i] = binaryString.charCodeAt(i);
+                    }
+
+                    chunks.push(bytes);
+                    totalLength += len;
+                    offset = response.nextOffset;
+
+                    const percent = Math.round((offset / response.totalSize) * 100);
+                    if (onProgress) onProgress(`파일 다운로드 중... (${percent}%)`);
+
+                    if (!response.hasMore) break;
+                }
+
+                // 2. Merge & Unzip
+                if (onProgress) onProgress('이미지 압축 해제 중...');
+                const combinedBytes = new Uint8Array(totalLength);
+                let position = 0;
+                for (const chunk of chunks) {
+                    combinedBytes.set(chunk, position);
+                    position += chunk.length;
+                }
+
+                const zip = await JSZip.loadAsync(combinedBytes);
+
+                // 3. Extract Images
+                const files = Object.keys(zip.files).sort((a, b) => {
+                    return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+                });
+
+                const imageUrls = [];
+                for (const filename of files) {
+                    if (filename.match(/\.(jpg|jpeg|png|webp|gif)$/i)) {
+                        const blob = await zip.files[filename].async('blob');
+                        imageUrls.push(URL.createObjectURL(blob));
+                    }
+                }
+                return imageUrls;
+            }
+
+            function renderViewerPage(pageIndex) {
+                if (pageIndex < 0 || pageIndex >= viewerImages.length) return;
+
+                viewerPageIndex = pageIndex;
+                const container = document.getElementById('viewerImageContainer');
+                const counter = document.getElementById('pageCounter');
+
+                container.innerHTML = '';
+
+                const img = document.createElement('img');
+                img.src = viewerImages[pageIndex];
+                img.className = 'viewer-image';
+                container.appendChild(img);
+
+                counter.innerText = `${pageIndex + 1} / ${viewerImages.length}`;
+
+                // Preload Trigger (Last 5 pages)
+                if (viewerImages.length - pageIndex <= 5) {
+                    preloadNextEpisode();
+                }
+            }
+
+            function navigateViewer(dir) {
+                const nextIndex = viewerPageIndex + dir;
+
+                if (nextIndex >= viewerImages.length) {
+                    // End of episode
+                    if (currentBookIndex < currentBookList.length - 1) {
+                        // Next episode exists
+                        if (confirm("다음 화로 이동하시겠습니까?")) {
+                            loadViewer(currentBookIndex + 1);
+                        }
+                    } else {
+                        showToast("마지막 화입니다.");
+                    }
+                    return;
+                }
+
+                if (nextIndex < 0) {
+                    showToast("첫 페이지입니다.");
+                    return;
+                }
+
+                renderViewerPage(nextIndex);
+            }
+
+            function preloadNextEpisode() {
+                const nextIndex = currentBookIndex + 1;
+                if (nextIndex >= currentBookList.length) return;
+
+                // Check if already preloaded or preloading
+                if (nextBookPreload && nextBookPreload.index === nextIndex) return;
+
+                if (window.isPreloading) return;
+
+                console.log("Preloading next episode:", currentBookList[nextIndex].name);
+                window.isPreloading = true;
+
+                fetchAndUnzip(currentBookList[nextIndex].id, null)
+                    .then(images => {
+                        nextBookPreload = { index: nextIndex, images: images };
+                        console.log("Preload complete");
+                        showToast("📦 다음 화 준비 완료!", 3000);
+                        window.isPreloading = false;
+                    })
+                    .catch(e => {
+                        console.error("Preload failed", e);
+                        window.isPreloading = false;
+                    });
+            }
+
             function closeViewer() {
                 const viewer = document.getElementById('viewerOverlay');
                 const content = document.getElementById('viewerContent');
 
-                // Cleanup Blob URLs to free memory
-                const images = content.querySelectorAll('img');
-                images.forEach(img => URL.revokeObjectURL(img.src));
+                // Cleanup Blob URLs
+                if (viewerImages) {
+                    viewerImages.forEach(url => URL.revokeObjectURL(url));
+                }
+                viewerImages = [];
 
                 content.innerHTML = '';
                 viewer.style.display = 'none';
+                document.body.classList.remove('no-scroll');
             }
 
-            // ESC key to close viewer
+            // Global Keydown Handler
             document.addEventListener('keydown', (e) => {
-                if (e.key === 'Escape') {
-                    if (document.getElementById('viewerOverlay').style.display === 'flex') {
-                        closeViewer();
-                    } else if (document.getElementById('episodeModal').style.display === 'flex') {
-                        closeEpisodeModal();
-                    }
+                if (document.getElementById('viewerOverlay').style.display === 'flex') {
+                    if (e.key === 'Escape') closeViewer();
+                    else if (e.key === 'ArrowLeft') navigateViewer(-1);
+                    else if (e.key === 'ArrowRight') navigateViewer(1);
+                    else if (e.key === ' ' || e.key === 'Enter') navigateViewer(1);
+                } else if (document.getElementById('episodeModal').style.display === 'flex') {
+                    if (e.key === 'Escape') closeEpisodeModal();
                 }
             });
         </script>

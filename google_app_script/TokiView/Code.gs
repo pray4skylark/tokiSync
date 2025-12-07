@@ -20,124 +20,107 @@ function doGet(e) {
 }
 
 // =======================================================
-// 🚀 라이브러리 데이터 가져오기 (캐시 우선)
+// 🚀 라이브러리 (Series 목록) 가져오기
 // =======================================================
-function getLibraryData(folderId) {
+function getSeriesList(folderId) {
   if (!folderId) throw new Error("Folder ID is required");
 
+  // 1. 캐시 확인
   const root = DriveApp.getFolderById(folderId);
   const files = root.getFilesByName(INDEX_FILE_NAME);
   
   if (files.hasNext()) {
-    // 캐시 파일이 있으면 읽어서 반환 (Fast)
     const file = files.next();
     const content = file.getBlob().getDataAsString();
-    
-    if (!content || content.trim() === "") return rebuildLibraryIndex(folderId);
-    
-    try { 
-      return JSON.parse(content); 
-    } catch (e) { 
-      return rebuildLibraryIndex(folderId); 
+    if (content && content.trim() !== "") {
+      try { return JSON.parse(content); } catch (e) {}
     }
-  } else {
-    // 없으면 전체 스캔 (Slow)
-    return rebuildLibraryIndex(folderId);
   }
+
+  // 2. 없으면 재구축
+  return rebuildLibraryIndex(folderId);
 }
 
 // =======================================================
-// 🔄 전체 폴더 스캔 및 캐시 생성 (갱신용)
+// 🔄 전체 폴더 스캔 (Series DTO 생성)
 // =======================================================
 function rebuildLibraryIndex(folderId) {
   if (!folderId) throw new Error("Folder ID is required");
   
   const root = DriveApp.getFolderById(folderId);
   const seriesFolders = root.getFolders();
-  const library = [];
+  const seriesList = [];
 
   while (seriesFolders.hasNext()) {
     try {
       const folder = seriesFolders.next();
       const folderName = folder.getName();
       
-      // [Fix] library_index.json 파일은 건너뜀
+      // index 파일 폴더 제외
       if (folderName === INDEX_FILE_NAME) continue;
 
-      let info = { 
-        id: '', title: folderName, author: '미상', category: '기타', 
-        status: '', thumbnail: '', url: '', last_updated: ''
-      };
+      // 1. 기본 메타데이터 파싱
+      let metadata = { status: 'ONGOING', authors: [], summary: '' };
+      let seriesName = folderName;
+      let thumbnail = '';
+      let sourceId = ''; // [ID] from folder name
 
+      // ID 파싱 (폴더명 기준)
+      const idMatch = folderName.match(/^\[(\d+)\]/);
+      if (idMatch) sourceId = idMatch[1];
+      
       // info.json 읽기
       const infoFiles = folder.getFilesByName('info.json');
       if (infoFiles.hasNext()) {
         try {
           const jsonContent = infoFiles.next().getBlob().getDataAsString();
           const parsed = JSON.parse(jsonContent);
-          info = { ...info, ...parsed };
+          
+          if(parsed.title) seriesName = parsed.title;
+          if(parsed.author) metadata.authors = [parsed.author];
+          if(parsed.thumbnail) thumbnail = parsed.thumbnail;
+          if(parsed.status) metadata.status = parsed.status;
+          if(parsed.id) sourceId = parsed.id; // info.json 우선
+          
         } catch (e) {}
       } else {
+        // 폴더명 파싱: [ID] 제목 (이미 위에서 ID는 땄음)
         const match = folderName.match(/^\[(\d+)\]\s*(.+)/);
-        if (match) { info.id = match[1]; info.title = match[2]; }
-      }
-
-      // [Fix] ID가 없는 폴더(작품 폴더가 아님)는 목록에서 제외
-      if (!info.id) continue;
-
-      // 회차 카운트
-      let maxEpisode = 0;
-      let fileCount = 0;
-
-      // ⚡️ 최적화: info.json에 데이터가 있으면 파일 스캔 건너뜀
-      if (info.last_episode && info.file_count) {
-        maxEpisode = info.last_episode;
-        fileCount = info.file_count;
-      } else {
-        // 데이터가 없으면 직접 스캔 (느림)
-        const files = folder.getFiles();
-        while(files.hasNext()) {
-           const f = files.next();
-           if(f.getName() === 'info.json') continue;
-           const match = f.getName().match(/^(\d+)/);
-           if(match) {
-             const n = parseInt(match[1]);
-             if(n > maxEpisode) maxEpisode = n;
-             fileCount++;
-           }
-        }
-        
-        const subFolders = folder.getFolders();
-        while(subFolders.hasNext()) {
-           const sub = subFolders.next();
-           const match = sub.getName().match(/^(\d+)/);
-           if(match) {
-             const n = parseInt(match[1]);
-             if(n > maxEpisode) maxEpisode = n;
-             fileCount++;
-           }
+        if (match) { 
+           seriesName = match[2];
         }
       }
 
-      library.push({
-        ...info,
-        fileCount: fileCount,
-        lastEpisode: maxEpisode,
-        driveUrl: folder.getUrl()
-      });
+      // 2. Books Count (간이 계산)
+      let booksCount = 0;
+      // ... (생략)
+
+      // Series DTO 생성
+      const series = {
+        id: folder.getId(),
+        sourceId: sourceId,
+        name: seriesName,
+        booksCount: booksCount, // 추후 정확한 로직 필요
+        booksCountCurrent: 0,   // 읽은 수 등 (구현 예정)
+        metadata: metadata,
+        thumbnail: thumbnail,
+        url: folder.getUrl(),
+        created: folder.getDateCreated(),
+        lastModified: folder.getLastUpdated()
+      };
+
+      seriesList.push(series);
+
     } catch (e) {
       Logger.log("Error processing folder: " + e);
     }
   }
   
-  // 정렬 (최신순)
-  library.sort((a, b) => {
-     if (a.last_updated && b.last_updated) return new Date(b.last_updated) - new Date(a.last_updated);
-     return parseInt(b.id || 0) - parseInt(a.id || 0);
-  });
+  // 정렬 (최신 수정순)
+  seriesList.sort((a, b) => new Date(b.lastModified) - new Date(a.lastModified));
 
-  // 캐시 파일 저장
-  const jsonString = JSON.stringify(library);
+  // 캐시 저장
+  const jsonString = JSON.stringify(seriesList);
   const indexFiles = root.getFilesByName(INDEX_FILE_NAME);
   if (indexFiles.hasNext()) {
     indexFiles.next().setContent(jsonString);
@@ -145,7 +128,7 @@ function rebuildLibraryIndex(folderId) {
     root.createFile(INDEX_FILE_NAME, jsonString, MimeType.PLAIN_TEXT);
   }
   
-  return library;
+  return seriesList;
 }
 
 // 권한 승인용
@@ -155,27 +138,45 @@ function authorizeCheck() {
 }
 
 // =======================================================
-// 📂 회차 목록 가져오기 (Series Folder -> Episodes)
+// 📚 회차 (Books) 가져오기
 // =======================================================
-function getEpisodeList(folderId) {
-  if (!folderId) throw new Error("Folder ID is required");
+function getBooks(seriesId) {
+  if (!seriesId) throw new Error("Series ID is required");
   
-  const folder = DriveApp.getFolderById(folderId);
+  const folder = DriveApp.getFolderById(seriesId);
   const files = folder.getFiles();
   const folders = folder.getFolders();
-  const list = [];
+  const books = [];
+
+  // Helper to create Book DTO
+  const createBook = (fileOrFolder, type) => {
+    const name = fileOrFolder.getName();
+    // 번호 파싱 (파일명의 첫 숫자)
+    let number = 0;
+    const match = name.match(/(\d+)/);
+    if(match) number = parseFloat(match[1]);
+
+    return {
+      id: fileOrFolder.getId(),
+      seriesId: seriesId,
+      name: name,
+      number: number,
+      url: fileOrFolder.getUrl(),
+      size: type === 'file' ? fileOrFolder.getSize() : 0,
+      media: { 
+        status: 'READY', 
+        mediaType: type === 'file' ? fileOrFolder.getMimeType() : 'application/folder' 
+      },
+      created: fileOrFolder.getDateCreated(),
+      lastModified: fileOrFolder.getLastUpdated()
+    };
+  };
 
   // 1. 폴더 (일반 회차)
   while (folders.hasNext()) {
     const f = folders.next();
     if (f.getName() === "info.json") continue;
-    list.push({
-      id: f.getId(),
-      name: f.getName(),
-      type: 'folder',
-      mimeType: 'application/vnd.google-apps.folder',
-      url: f.getUrl()
-    });
+    books.push(createBook(f, 'folder'));
   }
 
   // 2. 파일 (.cbz, .zip 등)
@@ -184,28 +185,17 @@ function getEpisodeList(folderId) {
     const name = f.getName();
     const mime = f.getMimeType();
     
-    // info.json 제외
-    if (name === "info.json") continue;
+    if (name === "info.json" || name === INDEX_FILE_NAME) continue;
 
-    // 압축 파일만 포함 (CBZ, ZIP)
     if (name.endsWith('.cbz') || name.endsWith('.zip') || mime.includes('zip') || mime.includes('archive')) {
-      list.push({
-        id: f.getId(),
-        name: name,
-        type: 'file',
-        size: f.getSize(),
-        mimeType: mime,
-        url: f.getUrl()
-      });
+       books.push(createBook(f, 'file'));
     }
   }
 
-  // 정렬 (이름순 - 숫자 포함)
-  list.sort((a, b) => {
-    return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
-  });
+  // 정렬 (회차 번호 순)
+  books.sort((a, b) => a.number - b.number);
 
-  return list;
+  return books;
 }
 
 // =======================================================
