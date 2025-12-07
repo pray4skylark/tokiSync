@@ -99,12 +99,17 @@ function saveSeriesInfo(data, rootFolderId) {
   const infoData = {
     id: data.id,
     title: data.title,
-    author: data.author || "Unknown",
-    category: data.category || "Unknown",
-    status: data.status || "Unknown",
+    metadata: {
+       authors: [data.author || "Unknown"],
+       status: data.status || "Unknown",
+       category: data.category || "Unknown",
+       publisher: data.site || ""
+    },
     thumbnail: data.thumbnail || "",
     url: data.url,
-    site: data.site,
+    
+    // Legacy / Convenience fields
+    author: data.author || "Unknown", // for backward compat if needed during migration
     last_episode: data.last_episode || 0,
     file_count: data.file_count || 0,
     last_updated: new Date().toISOString()

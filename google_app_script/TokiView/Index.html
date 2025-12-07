@@ -1052,6 +1052,12 @@
                     try {
                         const card = document.createElement('div');
                         card.className = 'card';
+
+                        // Defensive Coding
+                        const meta = series.metadata || { status: 'Unknown', authors: [] };
+                        const authors = meta.authors || [];
+                        const status = meta.status || 'Unknown';
+
                         const thumb = series.thumbnail && series.thumbnail.startsWith("data:image") ? series.thumbnail : NO_IMAGE_SVG;
                         const dynamicUrl = getDynamicLink(series);
                         const hasContentId = !!series.sourceId;
@@ -1070,9 +1076,9 @@
               </div>
               <div class="info">
                 <div class="title" title="${series.name}">${series.name}</div>
-                <span class="author" title="${series.metadata.authors.join(', ')}">${series.metadata.authors.join(', ') || '작가 미상'}</span>
+                <span class="author" title="${authors.join(', ')}">${authors.join(', ') || '작가 미상'}</span>
                 <div class="meta">
-                  <span class="badge">${series.metadata.status || '상태 미상'}</span>
+                  <span class="badge">${status}</span>
                   <span class="count">${series.booksCount || 0}권</span>
                 </div>
               </div>
@@ -1091,7 +1097,9 @@
                 const cards = document.querySelectorAll('.card');
                 cards.forEach((card, index) => {
                     const series = allSeries[index];
-                    const text = (series.name + (series.metadata.authors.join(' '))).toLowerCase();
+                    const meta = series.metadata || { authors: [] };
+                    const authors = meta.authors || [];
+                    const text = (series.name + (authors.join(' '))).toLowerCase();
                     card.style.display = text.includes(query) ? 'flex' : 'none';
                 });
             }

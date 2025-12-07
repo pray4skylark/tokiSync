@@ -77,9 +77,18 @@ function rebuildLibraryIndex(folderId) {
           const parsed = JSON.parse(jsonContent);
           
           if(parsed.title) seriesName = parsed.title;
-          if(parsed.author) metadata.authors = [parsed.author];
+          
+          if (parsed.metadata) {
+             // New Format
+             if(parsed.metadata.authors) metadata.authors = parsed.metadata.authors;
+             if(parsed.metadata.status) metadata.status = parsed.metadata.status;
+          } else {
+             // Legacy Format
+             if(parsed.author) metadata.authors = [parsed.author];
+             if(parsed.status) metadata.status = parsed.status;
+          }
+          
           if(parsed.thumbnail) thumbnail = parsed.thumbnail;
-          if(parsed.status) metadata.status = parsed.status;
           if(parsed.id) sourceId = parsed.id; // info.json 우선
           
         } catch (e) {}
