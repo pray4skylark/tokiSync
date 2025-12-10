@@ -2,10 +2,11 @@
 
 ## 📥 Client (Tampermonkey)
 
-### v3.0.0-BETA7 (Unified Version) - 2025.12.10
+### v3.0.0-BETA8 (Hotfix) - 2025.12.10
 
-- **[Refactor]** 모든 프로젝트 구성 요소(Client, Server, Dashboard)의 버전을 `v3.0.0-BETA7`으로 통일.
-- **[Doc]** 프로젝트 규칙(`project_rules.md`) 및 배포 가이드라인 수립.
+- **[Hotfix]** CDN(jsdelivr) 캐시 문제 해결을 위한 버전 범프 (`BETA7` -> `BETA8`).
+
+* **[Doc]** 프로젝트 규칙(`project_rules.md`) 및 배포 가이드라인 수립.
 
 ### v2.2.1 (Remote Execution) - 2025.12.03
 

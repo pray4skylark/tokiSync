@@ -1,14 +1,14 @@
 // =====================================================
-// ⚙️ TokiSync API Server v3.0.0-BETA7 (Stateless)
+// ⚙️ TokiSync API Server v3.0.0-BETA8 (Stateless)
 // -----------------------------------------------------
 // 🤝 Compatibility:
-//    - Client v3.0.0-BETA7+ (User Execution Mode)
+//    - Client v3.0.0-BETA8+ (User Execution Mode)
 // -----------------------------------------------------
 
 // [GET] 서버 상태 확인용
 function doGet(e) {
   return ContentService.createTextOutput(
-    "✅ TokiSync API Server v3.0.0-BETA7 (Stateless) is Running..."
+    "✅ TokiSync API Server v3.0.0-BETA8 (Stateless) is Running..."
   );
 }
 

@@ -15,7 +15,7 @@ function doGet(e) {
   const template = HtmlService.createTemplateFromFile("Index");
   return template
     .evaluate()
-    .setTitle("TokiView v3.0.0-BETA7")
+    .setTitle("TokiView v3.0.0-BETA8")
     .addMetaTag("viewport", "width=device-width, initial-scale=1")
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
