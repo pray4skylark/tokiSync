@@ -1,4 +1,4 @@
-// 🚀 TokiSync Core Logic v3.0.0-BETA3
+// 🚀 TokiSync Core Logic v3.0.0-BETA7
 // This script is loaded dynamically by the Loader.
 
 window.TokiSyncCore = function (GM_context) {
@@ -12,7 +12,7 @@ window.TokiSyncCore = function (GM_context) {
     const GM_deleteValue = GM_context.GM_deleteValue;
     const JSZip = GM_context.JSZip;
 
-    console.log("🚀 TokiSync Core v3.0.0-BETA3 Loaded (Remote)");
+    console.log("🚀 TokiSync Core v3.0.0-BETA7 Loaded (Remote)");
 
     // #region [1. 설정 및 상수] ====================================================
     const CFG_URL_KEY = "TOKI_GAS_URL";
@@ -23,9 +23,9 @@ window.TokiSyncCore = function (GM_context) {
     const CFG_CONFIG_VER = "TOKI_CONFIG_VER"; // [NEW] 설정 버전 관리
     const CURRENT_CONFIG_VER = 1; // v3.0.0 초기 버전
 
-    // 🚀 v3.0.0-BETA3 New Deployment URLs
-    const DEFAULT_API_URL = "https://script.google.com/macros/s/AKfycbyPN2DmWIC92T_MotbHv9Ky-8bIH0Y8QiYmrlgmBbz2H41km8W6afasZkJcbMa6_P5C/exec";
-    const DEFAULT_DASH_URL = "https://script.google.com/macros/s/AKfycbxbGiDHQD8yavNA9N3fAzkG95Wikw0b8ku1WjXOwZ0jctXgMLo8kPC7_WuW5K1px5QN/exec";
+    // 🚀 v3.0.0-BETA7 New Deployment URLs (Fixed ID Strategy)
+    const DEFAULT_API_URL = "https://script.google.com/macros/s/AKfycbwoalR1yG4NkKpC4zV8oxSsxMBZLP6MNYqoG0Fn1U-KHysIuJPaL5oaNd7bdGkZCGsv/exec"; // @29
+    const DEFAULT_DASH_URL = "https://script.google.com/macros/s/AKfycbzfuNB8hlRTKFWPGPxh2nVVcODaVIhBYMVBxbsDiOKxc6H2GmaGZPyFbLyw_aI9TpEy/exec"; // @25
 
     function getConfig() {
         return {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Loader)
 // @namespace    https://github.com/pray4skylark/tokiSync
-// @version      3.0.0-BETA3
+// @version      3.0.0-BETA7
 // @description  TokiSync Core Script Loader (GitHub CDN)
 // @author       pray4skylark
 // @match        https://*.com/webtoon/*
@@ -146,19 +146,19 @@
                                 GM_setValue(CACHE_TIME_KEY, now);
                                 resolve(latestVer);
                             } else {
-                                resolve(cachedVer || "v3.0.0-BETA3"); // Fallback
+                                resolve(cachedVer || "v3.0.0-BETA7"); // Fallback
                             }
                         } catch (e) {
                             console.error("❌ Failed to parse tags:", e);
-                            resolve(cachedVer || "v3.0.0-BETA3");
+                            resolve(cachedVer || "v3.0.0-BETA7");
                         }
                     } else {
                         console.error("❌ GitHub API Error:", res.status);
-                        resolve(cachedVer || "v3.0.0-BETA3");
+                        resolve(cachedVer || "v3.0.0-BETA7");
                     }
                 },
                 onerror: () => {
-                    resolve(cachedVer || "v3.0.0-BETA3");
+                    resolve(cachedVer || "v3.0.0-BETA7");
                 }
             });
         });
