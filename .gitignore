@@ -2,3 +2,6 @@ node_modules/
 북토끼/
 뉴토끼/
 마나토끼/
+
+# Clasp Settings (Contains Script ID)
+.clasp.json

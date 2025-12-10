@@ -1,0 +1,539 @@
+<script>
+    const NO_IMAGE_SVG = "data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22100%22%20height%3D%22100%22%20viewBox%3D%220%200%20100%20100%22%3E%3Crect%20width%3D%22100%22%20height%3D%22100%22%20fill%3D%22%23333%22%2F%3E%3Ctext%20x%3D%2250%22%20y%3D%2250%22%20font-family%3D%22Arial%22%20font-size%3D%2212%22%20fill%3D%22%23666%22%20text-anchor%3D%22middle%22%20dy%3D%22.3em%22%3ENo%20Image%3C%2Ftext%3E%3C%2Fsvg%3E";
+    const URL_NEWTOKI = 'https://newtoki469.com';
+    const URL_MANATOKI = 'https://manatoki469.net';
+    const URL_BOOKTOKI = 'https://booktoki469.com';
+
+    let allSeries = [];
+    let currentBookList = [];
+    let currentBookIndex = -1;
+    let viewerImages = [];
+    let viewerPageIndex = 0;
+    let nextBookPreload = null;
+
+    // Feature Flags (State)
+    let isScriptConnected = false;
+    let scriptCheckTimeout = null;
+
+    // 초기화
+    window.onload = function () {
+        loadDomains();
+        
+        // 1. 스크립트 통신 대기 (3초)
+        scriptCheckTimeout = setTimeout(() => {
+            if (!isScriptConnected) {
+                // 스크립트 미감지 -> 설정 모달 띄우기 (수동 입력 필요)
+                checkLocalConfig();
+            }
+        }, 1500); // 1.5초 대기
+
+        // 2. 부모(스크립트)로부터 메시지 대기
+        window.addEventListener("message", handleMessage, false);
+
+        // 3. 로컬 캐시 우선 로드 (빠른 화면 표시)
+        const cachedId = localStorage.getItem('toki_folder_id');
+        if (cachedId) {
+            refreshDB(cachedId, true); // true = silent load (no spinner reset)
+        }
+    };
+
+    function handleMessage(event) {
+        if (event.data.type === "TOKI_INIT") {
+            isScriptConnected = true;
+            if (scriptCheckTimeout) clearTimeout(scriptCheckTimeout);
+
+            const folderId = event.data.folderId;
+            console.log("🔗 Connected to Script. Root Folder ID:", folderId);
+            
+            // 저장 및 리로드
+            if (folderId && folderId !== localStorage.getItem('toki_folder_id')) {
+                localStorage.setItem('toki_folder_id', folderId);
+                showToast("🔗 스크립트 연결됨 (자동 동기화)");
+                refreshDB(folderId);
+            } else {
+                // 이미 같은 ID면 로드만 수행
+                if (!allSeries.length) refreshDB(folderId);
+            }
+            updateFeatureUI();
+        }
+    }
+
+    function checkLocalConfig() {
+        // 저장된 폴더 ID가 없으면 모달 띄우기
+        if (!localStorage.getItem('toki_folder_id')) {
+            document.getElementById('configModal').style.display = 'flex';
+        } else {
+            // ID 있으면 로드 시도 (하지만 스크립트 없으므로 일부 기능 제한)
+            showToast("⚠️ 스크립트가 연결되지 않았습니다. (읽기 전용 모드)", 5000);
+            updateFeatureUI();
+        }
+    }
+
+    function saveConfig() {
+        const id = document.getElementById('configFolderId').value.trim();
+        if(!id) return alert("Folder ID를 입력해주세요.");
+        localStorage.setItem('toki_folder_id', id);
+        document.getElementById('configModal').style.display = 'none';
+        refreshDB(id);
+    }
+
+    function updateFeatureUI() {
+        const syncButtons = document.querySelectorAll('.sync-feature');
+        const scriptRequired = document.querySelectorAll('.script-only');
+        
+        // 스크립트 없으면 동기화 버튼 비활성화 스타일 적용
+        if (!isScriptConnected) {
+             syncButtons.forEach(btn => btn.classList.add('script-required'));
+             // PWA 설치 버튼 표시는 별도 로직 (여기서는 생략)
+        } else {
+             syncButtons.forEach(btn => btn.classList.remove('script-required'));
+        }
+    }
+
+    // Toast UI
+    function showToast(msg, duration = 3000) {
+        const toast = document.createElement('div');
+        toast.style.position = 'fixed';
+        toast.style.bottom = '20px';
+        toast.style.left = '50%';
+        toast.style.transform = 'translateX(-50%)';
+        toast.style.background = 'rgba(50, 50, 50, 0.9)';
+        toast.style.color = 'white';
+        toast.style.padding = '10px 20px';
+        toast.style.borderRadius = '20px';
+        toast.style.zIndex = '9999';
+        toast.style.fontSize = '14px';
+        toast.innerText = msg;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), duration);
+    }
+
+    function refreshDB(forceId = null, silent = false) {
+        const folderId = forceId || localStorage.getItem('toki_folder_id');
+        if (!folderId) return;
+
+        if (!silent) {
+            const btn = document.getElementById('refreshBtn');
+            btn.classList.add('spin-anim');
+        }
+
+        google.script.run
+            .withSuccessHandler((data) => {
+                if (!silent) document.getElementById('refreshBtn').classList.remove('spin-anim');
+                renderGrid(data);
+            })
+            .withFailureHandler((e) => {
+                if (!silent) document.getElementById('refreshBtn').classList.remove('spin-anim');
+                showToast(`❌ 갱신 실패: ${e.message}`, 5000);
+            })
+            .getSeriesList(folderId); // Use LibraryService
+    }
+
+    function toggleSettings() { document.getElementById('domainPanel').style.display = document.getElementById('domainPanel').style.display === 'block' ? 'none' : 'block'; }
+    function saveDomains() {
+        localStorage.setItem('url_newtoki', document.getElementById('url_newtoki').value.trim());
+        localStorage.setItem('url_manatoki', document.getElementById('url_manatoki').value.trim());
+        localStorage.setItem('url_booktoki', document.getElementById('url_booktoki').value.trim());
+        renderGrid(allSeries);
+    }
+
+    function loadDomains() {
+        const n = localStorage.getItem('url_newtoki');
+        const m = localStorage.getItem('url_manatoki');
+        const b = localStorage.getItem('url_booktoki');
+
+        document.getElementById('url_newtoki').value = n ? n : URL_NEWTOKI;
+        document.getElementById('url_manatoki').value = m ? m : URL_MANATOKI;
+        document.getElementById('url_booktoki').value = b ? b : URL_BOOKTOKI;
+    }
+
+    function getDynamicLink(series) {
+        const contentId = series.sourceId;
+
+        const site = (series.name || "").toLowerCase(); // Simple check from name?
+        let baseUrl = document.getElementById('url_manatoki').value;
+        let path = "/comic/";
+
+        if (site.includes("뉴토끼")) { baseUrl = document.getElementById('url_newtoki').value; path = "/webtoon/"; }
+        else if (site.includes("북토끼")) { baseUrl = document.getElementById('url_booktoki').value; path = "/novel/"; }
+
+        if (baseUrl.endsWith("/")) baseUrl = baseUrl.slice(0, -1);
+        return contentId ? (baseUrl + path + contentId) : "#";
+    }
+
+    function renderGrid(seriesList) {
+        allSeries = seriesList;
+        const grid = document.getElementById('grid');
+        grid.innerHTML = '';
+
+        if (!seriesList || seriesList.length === 0) {
+            grid.innerHTML = '<div class="no-data">저장된 작품이 없습니다.</div>';
+            document.getElementById('pageLoader').style.display = 'none';
+            return;
+        }
+
+        seriesList.forEach((series, index) => {
+            try {
+                const card = document.createElement('div');
+                card.className = 'card';
+
+                // Defensive Coding
+                const meta = series.metadata || { status: 'Unknown', authors: [] };
+                const authors = meta.authors || [];
+                const status = meta.status || 'Unknown';
+
+                const thumb = series.thumbnail && series.thumbnail.startsWith("data:image") ? series.thumbnail : NO_IMAGE_SVG;
+                const dynamicUrl = getDynamicLink(series);
+                const hasContentId = !!series.sourceId;
+
+                card.innerHTML = `
+      <div class="thumb-wrapper">
+        <img src="${thumb}" class="thumb" onerror="this.src='${NO_IMAGE_SVG}'">
+        <div class="overlay">
+          <a href="${series.url}" target="_blank" class="btn btn-drive">📂 드라이브</a>
+          <button onclick="openEpisodeList('${series.id}', '${series.name}', ${index})" class="btn" style="background:#444; color:white;">📄 목록</button>
+          ${hasContentId ? `
+              <a href="${dynamicUrl}" target="_blank" class="btn btn-site">🌐 사이트</a>
+              <a href="${dynamicUrl}?toki_action=sync" target="_blank" class="btn sync-feature" style="background:#ff9800; color:black;">⚡️ 동기화</a>
+          ` : ''}
+        </div>
+      </div>
+      <div class="info">
+        <div class="title" title="${series.name}">${series.name}</div>
+        <span class="author" title="${authors.join(', ')}">${authors.join(', ') || '작가 미상'}</span>
+        <div class="meta">
+          <span class="badge">${status}</span>
+          <span class="count">${series.booksCount || 0}권</span>
+        </div>
+      </div>
+    `;
+                grid.appendChild(card);
+            } catch (err) {
+                console.error("Error rendering item index " + index, err);
+            }
+        });
+        updateFeatureUI(); // 렌더링 후 버튼 상태 업데이트
+        document.getElementById('pageLoader').style.display = 'none';
+    }
+
+    function filterData() {
+        const query = document.getElementById('search').value.toLowerCase();
+        const cards = document.querySelectorAll('.card');
+        cards.forEach((card, index) => {
+            const series = allSeries[index];
+            const meta = series.metadata || { authors: [] };
+            const authors = meta.authors || [];
+            const text = (series.name + (authors.join(' '))).toLowerCase();
+            card.style.display = text.includes(query) ? 'flex' : 'none';
+        });
+    }
+    function togglePwaGuide() {
+        const guide = document.getElementById('pwaGuide');
+        if (guide.style.display === 'block') {
+            guide.style.display = 'none';
+        } else {
+            guide.style.display = 'block';
+        }
+    }
+
+    // [Episode List Logic]
+    function openEpisodeList(seriesId, title, seriesIndex) {
+        document.getElementById('episodeModal').style.display = 'flex';
+        document.querySelector('#episodeModal .modal-title').innerText = `📄 ${title}`;
+        const listEl = document.getElementById('episodeList');
+        listEl.innerHTML = '<div style="padding:20px; color:#888;">로딩 중...</div>';
+        console.log('seriesId', seriesId);
+        console.log('title', title);
+        console.log('seriesIndex', seriesIndex);
+        google.script.run
+            .withSuccessHandler((books) => {
+                document.querySelector('#episodeModal .modal-title').innerText = `📄 ${title} (${books ? books.length : 0}개)`;
+                renderEpisodeList(books, seriesIndex);
+            })
+            .withFailureHandler(e => {
+                listEl.innerHTML = `<div style="padding:20px; color:red;">오류: ${e.message}</div>`;
+            })
+            .getBooks(seriesId); // Use BookService
+    }
+
+    function closeEpisodeModal() {
+        document.getElementById('episodeModal').style.display = 'none';
+    }
+
+    function renderEpisodeList(books, seriesIndex) {
+        currentBookList = books || [];
+        const listEl = document.getElementById('episodeList');
+        listEl.innerHTML = '';
+
+        if (!books || books.length === 0) {
+            listEl.innerHTML = '<div style="padding:20px; color:#888;">표시할 회차가 없습니다.</div>';
+            return;
+        }
+
+        books.forEach((book, index) => {
+            try {
+                const div = document.createElement('div');
+                div.className = 'episode-item';
+
+                let icon = '📁';
+                let meta = '폴더';
+                let clickHandler = () => window.open(book.url, '_blank');
+
+                if (book.media && book.media.mediaType && !book.media.mediaType.includes('folder')) {
+                    icon = '📦';
+                    // Safe formatSize check
+                    meta = (typeof formatSize === 'function') ? formatSize(book.size) : (book.size + ' B');
+
+                    // Check extension from name
+                    if (book.name.toLowerCase().endsWith('.cbz') || book.name.toLowerCase().endsWith('.zip')) {
+                        icon = '📖';
+                        clickHandler = () => {
+                            if (confirm(`"${book.name}"\n정주행을 시작하시겠습니까?`)) {
+                                loadViewer(index);
+                            }
+                        };
+                    }
+                } else {
+                    // Folder
+                    icon = '📁';
+                }
+
+                div.innerHTML = `
+                    <div>
+                        <span style="margin-right:10px;">${icon}</span>
+                        <span class="ep-name">${book.name}</span>
+                    </div>
+                    <span class="ep-meta">${meta}</span>
+                `;
+                div.onclick = clickHandler;
+                listEl.appendChild(div);
+
+            } catch (err) {
+                console.error("Error rendering item index " + index, book, err);
+                // Show error item in list
+                const errDiv = document.createElement('div');
+                errDiv.style.color = "red";
+                errDiv.innerText = `[Render Error] ${book ? book.name : 'Unknown Item'}`;
+                listEl.appendChild(errDiv);
+            }
+        });
+    }
+
+    function formatSize(bytes) {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    }
+
+    // [Viewer Logic]
+    async function loadViewer(index) {
+        const book = currentBookList[index];
+        if (!book) return;
+
+        closeEpisodeModal();
+        currentBookIndex = index;
+        viewerPageIndex = 0;
+
+        const viewer = document.getElementById('viewerOverlay');
+        const content = document.getElementById('viewerContent');
+        const titleEl = document.getElementById('viewerTitle');
+
+        viewer.style.display = 'flex';
+        document.body.classList.add('no-scroll');
+
+        titleEl.innerText = book.name;
+
+        content.innerHTML = `
+        <div class="nav-zone nav-prev" onclick="navigateViewer(-1)">❮</div>
+            <div class="nav-zone nav-next" onclick="navigateViewer(1)">❯</div>
+            <div id="viewerImageContainer" style="width:100%; height:100%; display:flex; justify-content:center; align-items:center;">
+                 <div style="color:white; font-size:14px;">로딩 중... (0%)</div>
+            </div>
+            <div id="pageCounter" class="page-counter">- / -</div>
+    `;
+
+        try {
+            let images = [];
+            // Check Preload
+            if (nextBookPreload && nextBookPreload.index === index) {
+                console.log("Using preloaded data!");
+                images = nextBookPreload.images;
+                nextBookPreload = null;
+            } else {
+                images = await fetchAndUnzip(book.id, (progress) => {
+                    const el = document.querySelector('#viewerImageContainer div');
+                    if (el) el.innerText = progress;
+                });
+            }
+
+            if (images.length === 0) throw new Error("이미지를 찾을 수 없습니다.");
+
+            viewerImages = images;
+            renderViewerPage(0);
+
+        } catch (e) {
+            alert("뷰어 로드 실패: " + e.message);
+            closeViewer();
+        }
+    }
+
+    async function fetchAndUnzip(fileId, onProgress) {
+        const chunks = [];
+        let offset = 0;
+        let totalLength = 0;
+        const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB
+
+        // 1. Download Chunks
+        while (true) {
+            const response = await new Promise((resolve, reject) => {
+                google.script.run
+                    .withSuccessHandler(resolve)
+                    .withFailureHandler(reject)
+                    .getFileChunk(fileId, offset, CHUNK_SIZE); // Use BookService
+            });
+
+            if (!response) break;
+
+            const binaryString = atob(response.data);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+
+            chunks.push(bytes);
+            totalLength += len;
+            offset = response.nextOffset;
+
+            const percent = Math.round((offset / response.totalSize) * 100);
+            if (onProgress) onProgress(`파일 다운로드 중... (${percent}%)`);
+
+            if (!response.hasMore) break;
+        }
+
+        // 2. Merge & Unzip
+        if (onProgress) onProgress('이미지 압축 해제 중...');
+        const combinedBytes = new Uint8Array(totalLength);
+        let position = 0;
+        for (const chunk of chunks) {
+            combinedBytes.set(chunk, position);
+            position += chunk.length;
+        }
+
+        const zip = await JSZip.loadAsync(combinedBytes);
+
+        // 3. Extract Images
+        const files = Object.keys(zip.files).sort((a, b) => {
+            return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+        });
+
+        const imageUrls = [];
+        for (const filename of files) {
+            if (filename.match(/\.(jpg|jpeg|png|webp|gif)$/i)) {
+                const blob = await zip.files[filename].async('blob');
+                imageUrls.push(URL.createObjectURL(blob));
+            }
+        }
+        return imageUrls;
+    }
+
+    function renderViewerPage(pageIndex) {
+        if (pageIndex < 0 || pageIndex >= viewerImages.length) return;
+
+        viewerPageIndex = pageIndex;
+        const container = document.getElementById('viewerImageContainer');
+        const counter = document.getElementById('pageCounter');
+
+        container.innerHTML = '';
+
+        const img = document.createElement('img');
+        img.src = viewerImages[pageIndex];
+        img.className = 'viewer-image';
+        container.appendChild(img);
+
+        counter.innerText = `${pageIndex + 1} / ${viewerImages.length}`;
+
+        // Preload Trigger (Last 5 pages)
+        if (viewerImages.length - pageIndex <= 5) {
+            preloadNextEpisode();
+        }
+    }
+
+    function navigateViewer(dir) {
+        const nextIndex = viewerPageIndex + dir;
+
+        if (nextIndex >= viewerImages.length) {
+            // End of episode
+            if (currentBookIndex < currentBookList.length - 1) {
+                // Next episode exists
+                if (confirm("다음 화로 이동하시겠습니까?")) {
+                    loadViewer(currentBookIndex + 1);
+                }
+            } else {
+                showToast("마지막 화입니다.");
+            }
+            return;
+        }
+
+        if (nextIndex < 0) {
+            showToast("첫 페이지입니다.");
+            return;
+        }
+
+        renderViewerPage(nextIndex);
+    }
+
+    function preloadNextEpisode() {
+        const nextIndex = currentBookIndex + 1;
+        if (nextIndex >= currentBookList.length) return;
+
+        // Check if already preloaded or preloading
+        if (nextBookPreload && nextBookPreload.index === nextIndex) return;
+
+        if (window.isPreloading) return;
+
+        console.log("Preloading next episode:", currentBookList[nextIndex].name);
+        window.isPreloading = true;
+
+        fetchAndUnzip(currentBookList[nextIndex].id, null)
+            .then(images => {
+                nextBookPreload = { index: nextIndex, images: images };
+                console.log("Preload complete");
+                showToast("📦 다음 화 준비 완료!", 3000);
+                window.isPreloading = false;
+            })
+            .catch(e => {
+                console.error("Preload failed", e);
+                window.isPreloading = false;
+            });
+    }
+
+    function closeViewer() {
+        const viewer = document.getElementById('viewerOverlay');
+        const content = document.getElementById('viewerContent');
+
+        // Cleanup Blob URLs
+        if (viewerImages) {
+            viewerImages.forEach(url => URL.revokeObjectURL(url));
+        }
+        viewerImages = [];
+
+        content.innerHTML = '';
+        viewer.style.display = 'none';
+        document.body.classList.remove('no-scroll');
+    }
+
+    // Global Keydown Handler
+    document.addEventListener('keydown', (e) => {
+        if (document.getElementById('viewerOverlay').style.display === 'flex') {
+            if (e.key === 'Escape') closeViewer();
+            else if (e.key === 'ArrowLeft') navigateViewer(-1);
+            else if (e.key === 'ArrowRight') navigateViewer(1);
+            else if (e.key === ' ' || e.key === 'Enter') navigateViewer(1);
+        } else if (document.getElementById('episodeModal').style.display === 'flex') {
+            if (e.key === 'Escape') closeEpisodeModal();
+        }
+    });
+</script>
