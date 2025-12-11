@@ -12,10 +12,23 @@ const INDEX_FILE_NAME = "library_index.json";
 function doGet(e) {
   // 서버에서는 더 이상 데이터를 미리 로드하지 않음 (Stateless)
   // 클라이언트가 localStorage 또는 스크립트 주입을 통해 ID를 확보하고 요청해야 함
+  // [New] 서버 정보 자가 진단 (TokiView)
+  if (e.parameter && e.parameter.type === "get_server_info") {
+    const info = {
+      name: "TokiView Dashboard",
+      version: "v3.0.0-beta.251211",
+      url: ScriptApp.getService().getUrl(),
+      user: Session.getActiveUser().getEmail(),
+    };
+    return ContentService.createTextOutput(JSON.stringify(info)).setMimeType(
+      ContentService.MimeType.JSON
+    );
+  }
+
   const template = HtmlService.createTemplateFromFile("Index");
   return template
     .evaluate()
-    .setTitle("TokiView v3.0.0-BETA8")
+    .setTitle("TokiView v3.0.0-beta.251211")
     .addMetaTag("viewport", "width=device-width, initial-scale=1")
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }

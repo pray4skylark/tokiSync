@@ -13,19 +13,14 @@
 
     // Feature Flags (State)
     let isScriptConnected = false;
-    let scriptCheckTimeout = null;
+    // let scriptCheckTimeout = null; // Deprecated
 
     // 초기화
     window.onload = function () {
         loadDomains();
         
-        // 1. 스크립트 통신 대기 (3초)
-        scriptCheckTimeout = setTimeout(() => {
-            if (!isScriptConnected) {
-                // 스크립트 미감지 -> 설정 모달 띄우기 (수동 입력 필요)
-                checkLocalConfig();
-            }
-        }, 1500); // 1.5초 대기
+        // 1. 능동적 핸드쉐이크 시작 (Ping-Pong)
+        startHandshake();
 
         // 2. 부모(스크립트)로부터 메시지 대기
         window.addEventListener("message", handleMessage, false);
@@ -37,10 +32,38 @@
         }
     };
 
+    function startHandshake() {
+        let attempts = 0;
+        const maxAttempts = 20; // 10초간 시도 (0.5s * 20)
+        
+        const interval = setInterval(() => {
+            if (isScriptConnected || attempts >= maxAttempts) {
+                clearInterval(interval);
+                if (!isScriptConnected) {
+                     // 타임아웃: 스크립트 미감지 -> 설정 모달 (수동)
+                     checkLocalConfig();
+                }
+                return;
+            }
+            
+            // Ping 발송
+            // console.log("📡 Sending Ping...");
+            window.postMessage({ type: 'TOKI_PING' }, '*');
+            
+            if (window.top !== window.self) {
+                window.top.postMessage({ type: 'TOKI_PING' }, '*');
+            }
+            
+            attempts++;
+        }, 500); 
+    }
+
     function handleMessage(event) {
         if (event.data.type === "TOKI_INIT") {
             isScriptConnected = true;
-            if (scriptCheckTimeout) clearTimeout(scriptCheckTimeout);
+
+            // 연결 확정 (Optional: ACK 발송)
+            // window.postMessage({ type: 'TOKI_ACK' }, '*');
 
             const folderId = event.data.folderId;
             console.log("🔗 Connected to Script. Root Folder ID:", folderId);
