@@ -55,7 +55,10 @@ We follow **Semantic Versioning 2.0.0** (`MAJOR.MINOR.PATCH`).
 
 #### 🏷 Versioning Strategy (CalVer for Beta)
 
-- **Format**: `v3.0.0-beta.YYMMDD` (Daily Build)
+- **Versioning**: strictly use `v3.0.0-beta.YYMMDD.NNNN` (e.g., `v3.0.0-beta.251212.0001`).
+  - `YYMMDD`: Date of the release.
+  - `NNNN`: 4-digit daily build sequence (0001, 0002, ...).
+  - This ensures version uniqueness and proper ordering in Tampermonkey.
   - Example: `v3.0.0-beta.251211`
   - If multiple updates/day: `v3.0.0-beta.251211.2`
 - **Reason**: Avoids sorting ambiguity of `BETA1` vs `BETA10` in GitHub API.
