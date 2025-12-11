@@ -369,6 +369,14 @@ window.TokiSyncCore = function (GM_context) {
                         if (checkAuthRequired(res.responseText)) { resolve([]); return; }
                         try {
                             const json = JSON.parse(res.responseText);
+                            
+                            // [New] 서버 디버그 로그 출력
+                            if (json.debugLogs && Array.isArray(json.debugLogs)) {
+                                console.groupCollapsed("🔍 [Server Debug Log] Drive Scan Trace");
+                                json.debugLogs.forEach(l => console.log(l));
+                                console.groupEnd();
+                            }
+
                             const cloudHistory = Array.isArray(json.body) ? json.body : [];
                             const historyKey = `history_${info.id}`;
                             GM_setValue(historyKey, cloudHistory);

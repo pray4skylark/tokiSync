@@ -13,6 +13,7 @@ function doGet(e) {
 
 // [POST] Tampermonkey 요청 처리 (핵심 로직)
 function doPost(e) {
+  Debug.start(); // 🐞 디버그 시작
   try {
     const data = JSON.parse(e.postData.contents);
 
