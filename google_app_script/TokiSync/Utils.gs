@@ -27,6 +27,23 @@ function findFolderId(folderName, rootFolderId) {
     if (response.files && response.files.length > 0) {
       return response.files[0].id;
     }
+
+    // 2. Fallback: ID 검색 실패 시, 제목만으로(Exact Name) 재검색 (Legacy 지원)
+    if (idMatch) {
+      const titleOnly = folderName.replace(idMatch[0], "").trim();
+      const safeTitle = titleOnly.replace(/'/g, "\\'");
+      const fallbackQuery = `'${rootFolderId}' in parents and name = '${safeTitle}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+
+      const fallbackRes = Drive.Files.list({
+        q: fallbackQuery,
+        fields: "files(id, name)",
+        pageSize: 1,
+      });
+
+      if (fallbackRes.files && fallbackRes.files.length > 0) {
+        return fallbackRes.files[0].id; // 제목만 일치하는 폴더 반환
+      }
+    }
   } catch (e) {
     console.error("Advanced Search Failed:", e);
     // Fallback (필요시) - DriveApp은 느리므로 여기선 생략하거나 Retry 로직 추가 가능

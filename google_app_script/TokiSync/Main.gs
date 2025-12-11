@@ -25,7 +25,7 @@ function doPost(e) {
 
     // 🔒 [New] 클라이언트 버전 검증
     // Core에서 clientVersion 필드를 보내야 함
-    const MIN_CLIENT_VERSION = "3.0.0-beta.251212.0002";
+    const MIN_CLIENT_VERSION = "3.0.0-beta.251212.0003";
     const clientVer = data.clientVersion || "0.0.0"; // 없으면 구버전
 
     // 날짜 기반 버전 비교 (문자열 비교 가능: "3.0.0-beta.251212.0001" 형태)
@@ -56,7 +56,7 @@ function doPost(e) {
       else if (data.type === "get_server_info") {
         result = createRes("success", {
           name: "TokiSync API",
-          version: "v3.0.0-beta.251212.0002",
+          version: "v3.0.0-beta.251212.0003",
           url: ScriptApp.getService().getUrl(),
           user: Session.getActiveUser().getEmail(),
         });
