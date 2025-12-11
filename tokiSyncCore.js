@@ -23,7 +23,7 @@ window.TokiSyncCore = function (GM_context) {
         return; // Core 실행 중단
     }
 
-    console.log("🚀 TokiSync Core v3.0.0-beta.251211 Loaded (Remote)");
+    console.log("🚀 TokiSync Core v3.0.0-beta.251211+debug Loaded (Remote)");
 
     // #region [1. 설정 및 상수] ====================================================
     const CFG_URL_KEY = "TOKI_GAS_URL";
@@ -410,7 +410,7 @@ window.TokiSyncCore = function (GM_context) {
             const payload = {
                 folderId: config.folderId, 
                 type: 'save_info', 
-                clientVersion: "3.0.0-beta.251211", // [New] API Version Check
+                clientVersion: "3.0.0-beta.251211+debug", // [New] API Version Check
                 folderName: `[${info.id}] ${info.cleanTitle}`,
                 id: info.id, title: info.fullTitle, url: document.URL, site: site,
                 author: info.author, category: info.category, status: info.status, thumbnail: thumbnailBase64 || info.thumbnail,
@@ -451,7 +451,7 @@ window.TokiSyncCore = function (GM_context) {
                 data: JSON.stringify({ 
                     folderId: config.folderId, 
                     type: "init", 
-                    clientVersion: "3.0.0-beta.251211", // [New] API Version Check
+                    clientVersion: "3.0.0-beta.251211+debug", // [New] API Version Check
                     folderName: folderName, 
                     fileName: fileName 
                 }),
@@ -487,7 +487,7 @@ window.TokiSyncCore = function (GM_context) {
                     data: JSON.stringify({ 
                         folderId: config.folderId, 
                         type: "upload", 
-                        clientVersion: "3.0.0-beta.251211", // [New] API Version Check (Chunk는 생략 가능하지만 안전하게 추가)
+                        clientVersion: "3.0.0-beta.251211+debug", // [New] API Version Check (Chunk는 생략 가능하지만 안전하게 추가)
                         uploadUrl: uploadUrl, 
                         chunkData: chunkBase64, 
                         start: start, end: end, total: totalSize 
