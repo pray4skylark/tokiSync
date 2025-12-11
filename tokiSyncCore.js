@@ -1,10 +1,11 @@
-// 🚀 TokiSync Core Logic v3.0.0-BETA8
+// 🚀 TokiSync Core Logic v3.0.0-beta.251211
 // This script is loaded dynamically by the Loader.
 
 window.TokiSyncCore = function (GM_context) {
     'use strict';
 
-    // GM functions mapping (passed from Loader)
+    // #region [0. 초기화 및 권한 확보]
+    // Loader에서 전달받은 GM 함수들을 Core 스코프로 가져옵니다.
     const GM_registerMenuCommand = GM_context.GM_registerMenuCommand;
     const GM_xmlhttpRequest = GM_context.GM_xmlhttpRequest;
     const GM_setValue = GM_context.GM_setValue;
@@ -12,18 +13,28 @@ window.TokiSyncCore = function (GM_context) {
     const GM_deleteValue = GM_context.GM_deleteValue;
     const JSZip = GM_context.JSZip;
 
-    console.log("🚀 TokiSync Core v3.0.0-BETA8 Loaded (Remote)");
+    // [New] 호환성 체크: Core가 요구하는 최소 로더 버전 확인
+    const MIN_LOADER_VERSION = "3.0.0-beta.251211";
+    const currentLoaderVer = GM_context.loaderVersion || "2.0.0"; // 없을 경우 구버전 간주
+
+    if (currentLoaderVer < MIN_LOADER_VERSION) {
+        console.error(`❌ Loader is outdated! (Current: ${currentLoaderVer}, Required: ${MIN_LOADER_VERSION})`);
+        alert(`[TokiSync] 로더 업데이트가 필요합니다!\n\n현재 로더 버전이 낮아 새로운 기능을 실행할 수 없습니다.\nTampermonkey에서 스크립트 업데이트를 진행해주세요.\n(현재: ${currentLoaderVer} / 필요: ${MIN_LOADER_VERSION})`);
+        return; // Core 실행 중단
+    }
+
+    console.log("🚀 TokiSync Core v3.0.0-beta.251211 Loaded (Remote)");
 
     // #region [1. 설정 및 상수] ====================================================
     const CFG_URL_KEY = "TOKI_GAS_URL";
     const CFG_DASH_KEY = "TOKI_DASH_URL";
-    // const CFG_SECRET_KEY = "TOKI_SECRET_KEY"; // Removed
+    const CFG_FOLDER_ID = "TOKI_FOLDER_ID";
     const CFG_DEBUG_KEY = "TOKI_DEBUG_MODE";
-    const CFG_FOLDER_ID = "TOKI_FOLDER_ID"; // [NEW] 폴더 ID 저장용
+    const CFG_AUTO_SYNC_KEY = "TOKI_AUTO_SYNC";
     const CFG_CONFIG_VER = "TOKI_CONFIG_VER"; // [NEW] 설정 버전 관리
     const CURRENT_CONFIG_VER = 1; // v3.0.0 초기 버전
 
-    // 🚀 v3.0.0-BETA8 New Deployment URLs (Fixed ID Strategy)
+    // 🚀 v3.0.0-beta.251211 New Deployment URLs (Fixed ID Strategy)
     const DEFAULT_API_URL = "https://script.google.com/macros/s/AKfycbwoalR1yG4NkKpC4zV8oxSsxMBZLP6MNYqoG0Fn1U-KHysIuJPaL5oaNd7bdGkZCGsv/exec"; // @29
     const DEFAULT_DASH_URL = "https://script.google.com/macros/s/AKfycbzfuNB8hlRTKFWPGPxh2nVVcODaVIhBYMVBxbsDiOKxc6H2GmaGZPyFbLyw_aI9TpEy/exec"; // @25
 
@@ -389,7 +400,10 @@ window.TokiSyncCore = function (GM_context) {
                 thumbnailBase64 = await urlToBase64(info.thumbnail);
             }
             const payload = {
-                folderId: config.folderId, type: 'save_info', folderName: `[${info.id}] ${info.cleanTitle}`,
+                folderId: config.folderId, 
+                type: 'save_info', 
+                clientVersion: "3.0.0-beta.251211", // [New] API Version Check
+                folderName: `[${info.id}] ${info.cleanTitle}`,
                 id: info.id, title: info.fullTitle, url: document.URL, site: site,
                 author: info.author, category: info.category, status: info.status, thumbnail: thumbnailBase64 || info.thumbnail,
                 last_episode: lastEpisode,
@@ -426,7 +440,13 @@ window.TokiSyncCore = function (GM_context) {
         await new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method: "POST", url: config.url,
-                data: JSON.stringify({ folderId: config.folderId, type: "init", folderName: folderName, fileName: fileName }),
+                data: JSON.stringify({ 
+                    folderId: config.folderId, 
+                    type: "init", 
+                    clientVersion: "3.0.0-beta.251211", // [New] API Version Check
+                    folderName: folderName, 
+                    fileName: fileName 
+                }),
                 headers: { "Content-Type": "text/plain" },
                 onload: (res) => {
                     if (checkAuthRequired(res.responseText)) {
@@ -456,7 +476,14 @@ window.TokiSyncCore = function (GM_context) {
             await new Promise((resolve, reject) => {
                 GM_xmlhttpRequest({
                     method: "POST", url: config.url,
-                    data: JSON.stringify({ folderId: config.folderId, type: "upload", uploadUrl: uploadUrl, chunkData: chunkBase64, start: start, end: end, total: totalSize }),
+                    data: JSON.stringify({ 
+                        folderId: config.folderId, 
+                        type: "upload", 
+                        clientVersion: "3.0.0-beta.251211", // [New] API Version Check (Chunk는 생략 가능하지만 안전하게 추가)
+                        uploadUrl: uploadUrl, 
+                        chunkData: chunkBase64, 
+                        start: start, end: end, total: totalSize 
+                    }),
                     headers: { "Content-Type": "text/plain" },
                     onload: (res) => {
                         if (checkAuthRequired(res.responseText)) {

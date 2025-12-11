@@ -53,15 +53,17 @@ We follow **Semantic Versioning 2.0.0** (`MAJOR.MINOR.PATCH`).
 - **MINOR**: New features (e.g., Support for new site, new Dashboard UI).
 - **PATCH**: Bug fixes, hotfixes.
 
-#### Release Cycle
+#### 🏷 Versioning Strategy (CalVer for Beta)
 
-1.  **Pre-release**: Use `-beta.X` or `-rc.X` for testing (e.g., `v3.0.0-beta.1`).
-2.  **Documentation**: Update `update_history.md` **before** tagging.
-3.  **Synchronization**: Ensure `tokiSyncScript.js` (UserScript) and `tokiSyncCore.js` (Logic) versions match if dependent.
+- **Format**: `v3.0.0-beta.YYMMDD` (Daily Build)
+  - Example: `v3.0.0-beta.251211`
+  - If multiple updates/day: `v3.0.0-beta.251211.2`
+- **Reason**: Avoids sorting ambiguity of `BETA1` vs `BETA10` in GitHub API.
+- **Release**:
+  1.  Update `update_history.md`.
+  2.  Sync `Client` & `Server` version strings.
+  3.  Git Tag & Push.
 
 ## Specific Constraints
-
-- PWA restrictions in mobile mode.
-- Version string format: vX.X.X-BETAX
 
 <!-- Add further project-specific constraints below -->
