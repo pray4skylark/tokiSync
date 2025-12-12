@@ -5,7 +5,9 @@
 // 기능: 다운로드 기록 확인 (폴더/파일 스캔)
 // 기능: 다운로드 기록 확인 (폴더/파일 스캔) - [Optimized]
 function checkDownloadHistory(data, rootFolderId) {
-  Debug.log(`🔍 checkDownloadHistory Start. Target: ${data.folderName}`);
+  Debug.log(`🔍 checkDownloadHistory Start.`);
+  Debug.log(`   📂 Root Folder: ${rootFolderId}`);
+  Debug.log(`   🎯 Target Series: ${data.folderName}`);
 
   const folderId = findFolderId(data.folderName, rootFolderId);
 
@@ -29,6 +31,8 @@ function checkDownloadHistory(data, rootFolderId) {
         fields: "nextPageToken, files(name)",
         pageSize: 1000, // 최대 1000개씩 가져옴
         pageToken: pageToken,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
       });
 
       if (response.files) {

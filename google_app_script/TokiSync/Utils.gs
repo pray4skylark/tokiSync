@@ -17,31 +17,49 @@ function findFolderId(folderName, rootFolderId) {
     query = `'${rootFolderId}' in parents and name = '${safeName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
   }
 
+  console.log(`🔍 findFolderId for: "${folderName}" (Root: ${rootFolderId})`);
+  if (idMatch) console.log(`   -> Detected ID: [${idMatch[1]}]`);
+  console.log(`   -> Primary Query: ${query}`);
+
   try {
     const response = Drive.Files.list({
       q: query,
       fields: "files(id, name)",
       pageSize: 1,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
     });
 
     if (response.files && response.files.length > 0) {
+      console.log(
+        `✅ Primary Found: ${response.files[0].name} (${response.files[0].id})`
+      );
       return response.files[0].id;
     }
 
     // 2. Fallback: ID 검색 실패 시, 제목만으로(Exact Name) 재검색 (Legacy 지원)
     if (idMatch) {
+      console.log(`⚠️ Primary search failed. Trying fallback (Exact Name)...`);
       const titleOnly = folderName.replace(idMatch[0], "").trim();
       const safeTitle = titleOnly.replace(/'/g, "\\'");
       const fallbackQuery = `'${rootFolderId}' in parents and name = '${safeTitle}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
 
+      console.log(`🔎 Fallback Query: ${fallbackQuery}`);
       const fallbackRes = Drive.Files.list({
         q: fallbackQuery,
         fields: "files(id, name)",
         pageSize: 1,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
       });
 
       if (fallbackRes.files && fallbackRes.files.length > 0) {
-        return fallbackRes.files[0].id; // 제목만 일치하는 폴더 반환
+        console.log(
+          `✅ Fallback Found: ${fallbackRes.files[0].name} (${fallbackRes.files[0].id})`
+        );
+        return fallbackRes.files[0].id;
+      } else {
+        console.warn(`❌ Fallback also failed.`);
       }
     }
   } catch (e) {
