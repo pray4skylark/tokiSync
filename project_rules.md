@@ -58,6 +58,7 @@ We follow **Semantic Versioning 2.0.0** (`MAJOR.MINOR.PATCH`).
 - **Versioning**: strictly use `v3.0.0-beta.YYMMDD.NNNN` (e.g., `v3.0.0-beta.251212.0001`).
   - `YYMMDD`: Date of the release.
   - `NNNN`: 4-digit daily build sequence (0001, 0002, ...).
+  - Do not add a suffix after the sequence.
   - This ensures version uniqueness and proper ordering in Tampermonkey.
   - Example: `v3.0.0-beta.251211`
   - If multiple updates/day: `v3.0.0-beta.251211.2`

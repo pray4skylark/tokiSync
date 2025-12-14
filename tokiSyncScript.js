@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Loader)
 // @namespace    https://github.com/pray4skylark/tokiSync
-// @version      3.0.0-beta.251212.0005
+// @version      3.0.0-beta.251214.0001
 // @description  TokiSync Core Script Loader (GitHub CDN)
 // @author       pray4skylark
 // @updateURL    https://github.com/pray4skylark/tokiSync/raw/main/tokiSyncScript.js
@@ -91,7 +91,8 @@
         const pinnedVer = GM_getValue(PINNED_VER_KEY);
         const latestVer = await fetchLatestVersion();
 
-        // 1. 저장된 스크립트 확인 (속도 최적화)
+        // 1. 저장된 스크립트 확인 (속도 최적화) -> [Disabled for Verification]
+        /*
         const storedScript = GM_getValue(STORED_CORE_KEY, "");
         if (pinnedVer && pinnedVer === latestVer && storedScript) {
             // 버전 변경 없음 & 스크립트 보유 -> 즉시 실행
@@ -99,6 +100,7 @@
             executeScript(storedScript);
             return;
         }
+        */
 
         // 2. 최초 실행 또는 업데이트 필요
         if (!pinnedVer) {
@@ -165,9 +167,9 @@
     }
 
     function fetchAndStoreScript(version, reloadAfter = false) {
-        // [Optimization] Remove timestamp to use CDN cache effectively
-        // const cdnUrl = `https://cdn.jsdelivr.net/gh/${GITHUB_USER}/${GITHUB_REPO}@${version}/${CORE_FILENAME}?t=${Date.now()}`;
-        const cdnUrl = `https://cdn.jsdelivr.net/gh/${GITHUB_USER}/${GITHUB_REPO}@${version}/${CORE_FILENAME}`;
+        // [Verified] Restore timestamp for cache busting
+        const cdnUrl = `https://cdn.jsdelivr.net/gh/${GITHUB_USER}/${GITHUB_REPO}@${version}/${CORE_FILENAME}?t=${Date.now()}`;
+        // const cdnUrl = `https://cdn.jsdelivr.net/gh/${GITHUB_USER}/${GITHUB_REPO}@${version}/${CORE_FILENAME}`;
 
         console.log(`☁️ Fetching Core Script from: ${cdnUrl}`);
 
@@ -184,9 +186,9 @@
                         return;
                     }
 
-                    // [핵심] 스크립트 저장
-                    GM_setValue(STORED_CORE_KEY, scriptContent);
-                    console.log("💾 Core Script Stored to Storage");
+                    // [DEBUG] Always execute fresh script, disable caching for verification
+                    // GM_setValue(STORED_CORE_KEY, scriptContent);
+                    console.log("⚡️ Executing Remote Script (Direct)");
 
                     if(reloadAfter) {
                         location.reload();
@@ -209,7 +211,7 @@
 
                 if (typeof window.TokiSyncCore === 'function') {
                     window.TokiSyncCore({
-                        loaderVersion: "3.0.0-beta.251212.0005", // 현재 로더 버전 전달
+                        loaderVersion: "3.0.0-beta.251214.0001", // 현재 로더 버전 전달
                         GM_registerMenuCommand: GM_registerMenuCommand,
                         GM_xmlhttpRequest: GM_xmlhttpRequest,
                         GM_setValue: GM_setValue,
