@@ -16,7 +16,7 @@ function doGet(e) {
   if (e.parameter && e.parameter.type === "get_server_info") {
     const info = {
       name: "TokiView Dashboard",
-      version: "v3.0.0-beta.251211",
+      version: "v3.0.0-beta.251215.0007",
       url: ScriptApp.getService().getUrl(),
       user: Session.getActiveUser().getEmail(),
     };
@@ -28,7 +28,7 @@ function doGet(e) {
   const template = HtmlService.createTemplateFromFile("Index");
   return template
     .evaluate()
-    .setTitle("TokiView v3.0.0-beta.251215.0005")
+    .setTitle("TokiView v3.0.0-beta.251215.0007")
     .addMetaTag("viewport", "width=device-width, initial-scale=1")
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }

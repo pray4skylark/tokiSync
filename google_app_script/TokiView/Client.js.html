@@ -147,6 +147,7 @@
             })
             .withFailureHandler((e) => {
                 if (!silent) document.getElementById('refreshBtn').classList.remove('spin-anim');
+                document.getElementById('pageLoader').style.display = 'none'; // [Fix] Hide loader on error
                 showToast(`❌ 갱신 실패: ${e.message}`, 5000);
             })
             .getSeriesList(folderId); // Use LibraryService
@@ -681,7 +682,6 @@
     // Global Key Connect
     document.addEventListener('keydown', (e) => {
         const overlay = document.getElementById('viewerOverlay');
-        if (overlay && overlay.style.display === 'flex') {
         if (overlay && overlay.style.display === 'flex') {
             if (e.key === 'Escape') closeViewer();
             else if (e.key === 'ArrowLeft') navigateViewer(vState.rtlMode ? 1 : -1);
