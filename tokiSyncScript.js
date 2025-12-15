@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Loader)
 // @namespace    https://github.com/pray4skylark/tokiSync
-// @version      3.0.0-beta.251215.0002
+// @version      3.0.0-beta.251215.0008
 // @description  TokiSync Core Script Loader (GitHub CDN)
 // @author       pray4skylark
 // @updateURL    https://github.com/pray4skylark/tokiSync/raw/main/tokiSyncScript.js
@@ -56,9 +56,10 @@
                 if (event.data.type === 'TOKI_PING') {
                     const folderId = GM_getValue(CFG_FOLDER_ID);
                     if (folderId) {
-                        // Ping 수신 시 Init으로 응답
-                        // console.log("📡 Received Ping -> Sending Init");
-                        window.postMessage({ type: 'TOKI_INIT', folderId: folderId }, '*');
+                        // Ping 수신 시 Init으로 응답 (event.source가 있으면 거기로, 없으면 window로)
+                        // This fixes Parent -> Iframe communication
+                        const target = event.source || window;
+                        target.postMessage({ type: 'TOKI_INIT', folderId: folderId }, '*');
                     }
                 }
             });
@@ -257,7 +258,7 @@
 
                 if (typeof window.TokiSyncCore === 'function') {
                     window.TokiSyncCore({
-                        loaderVersion: "3.0.0-beta.251215.0002", // 현재 로더 버전 전달
+                        loaderVersion: "3.0.0-beta.251215.0008", // 현재 로더 버전 전달
                         GM_registerMenuCommand: GM_registerMenuCommand,
                         GM_xmlhttpRequest: GM_xmlhttpRequest,
                         GM_setValue: GM_setValue,
