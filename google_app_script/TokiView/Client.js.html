@@ -299,6 +299,7 @@
     let vState = {
         mode: '1page', // '1page' or '2page'
         coverPriority: true,
+        rtlMode: false,
         images: [], // Array of {src, width, height, loaded}
         spreads: [], // Array of arrays containing image indices [0], [1,2] etc.
         currentSpreadIndex: 0,
@@ -309,10 +310,12 @@
     function loadViewerSettings() {
         vState.mode = localStorage.getItem('toki_v_mode') || '1page';
         vState.coverPriority = (localStorage.getItem('toki_v_cover') === 'true');
+        vState.rtlMode = (localStorage.getItem('toki_v_rtl') === 'true');
         
         // UI Sync
         document.getElementById('chkTwoPage').checked = (vState.mode === '2page');
         document.getElementById('chkCover').checked = vState.coverPriority;
+        document.getElementById('chkRtl').checked = vState.rtlMode;
         document.getElementById('groupCover').style.display = (vState.mode === '2page') ? 'flex' : 'none';
     }
 
@@ -344,6 +347,24 @@
         recalcSpreads();
     }
 
+    function toggleRtlMode() {
+        vState.rtlMode = document.getElementById('chkRtl').checked;
+        localStorage.setItem('toki_v_rtl', String(vState.rtlMode));
+        
+        // Update Navigation Click Handlers (Re-render UI or just force update)
+        // Simplest: just re-render current spread, but nav handlers are static HTML in loadViewer.
+        // We need to update them.
+        updateNavHandlers();
+        renderCurrentSpread();
+    }
+
+    function updateNavHandlers() {
+        const prev = document.querySelector('.nav-prev');
+        const next = document.querySelector('.nav-next');
+        if(prev) prev.onclick = () => navigateViewer(vState.rtlMode ? 1 : -1);
+        if(next) next.onclick = () => navigateViewer(vState.rtlMode ? -1 : 1);
+    }
+
     // History Logic
     function getReadHistory(seriesId) {
         const json = localStorage.getItem(`read_${seriesId}`);
@@ -373,13 +394,14 @@
 
         // Initial UI
         content.innerHTML = `
-            <div class="nav-zone nav-prev" onclick="navigateViewer(-1)"></div>
-            <div class="nav-zone nav-next" onclick="navigateViewer(1)"></div>
+            <div class="nav-zone nav-prev"></div>
+            <div class="nav-zone nav-next"></div>
             <div id="viewerImageContainer" class="viewer-image-container">
                  <div style="color:white; font-size:14px;">로딩 중... (0%)</div>
             </div>
             <div id="pageCounter" class="page-counter">- / -</div>
         `;
+        updateNavHandlers();
 
         try {
             let blobUrls = [];
@@ -570,7 +592,10 @@
         
         const spreadIndices = vState.spreads[vState.currentSpreadIndex]; // e.g. [2, 3]
         
-        container.innerHTML = `<div class="viewer-spread">
+        // RTL Direction
+        const dirStyle = vState.rtlMode ? 'flex-direction:row-reverse;' : '';
+
+        container.innerHTML = `<div class="viewer-spread" style="${dirStyle}">
             ${spreadIndices.map(idx => `
                 <img src="${vState.images[idx].src}" class="viewer-page ${spreadIndices.length > 1 ? 'half' : ''}">
             `).join('')}
@@ -657,9 +682,10 @@
     document.addEventListener('keydown', (e) => {
         const overlay = document.getElementById('viewerOverlay');
         if (overlay && overlay.style.display === 'flex') {
+        if (overlay && overlay.style.display === 'flex') {
             if (e.key === 'Escape') closeViewer();
-            else if (e.key === 'ArrowLeft') navigateViewer(-1);
-            else if (e.key === 'ArrowRight') navigateViewer(1);
+            else if (e.key === 'ArrowLeft') navigateViewer(vState.rtlMode ? 1 : -1);
+            else if (e.key === 'ArrowRight') navigateViewer(vState.rtlMode ? -1 : 1);
             else if (e.key === ' ' || e.key === 'Enter') navigateViewer(1);
             // Hide Settings on keypress
             const panel = document.getElementById('viewerSettings');
