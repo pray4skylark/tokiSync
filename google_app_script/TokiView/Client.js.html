@@ -415,7 +415,8 @@
             // USER REQUEST 1.2: "만약 가로 비율이 세로 보다 큰경우... 합친 이미지로 판단"
             // To do this, we need to know the aspect ratio.
             
-            await preloadDimensions(vState.images); // Optional: Fast preload for header info?
+            // await preloadDimensions(vState.images); // [Removed] Undefined function
+            
             // Actually loading all images might take time.
             // Let's implement lazy spread calculation? 
             // For now, let's load dimensions of the FIRST few images, but really we need all for correct spread paging.
