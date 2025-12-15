@@ -13,7 +13,7 @@ window.TokiSyncCore = function (GM_context) {
     const GM_deleteValue = GM_context.GM_deleteValue;
     const JSZip = GM_context.JSZip;
     const PROTOCOL_VERSION = 3; // Major Version (Server Compatibility)
-    const CLIENT_VERSION = "3.0.0-beta.251215.0002"; // Build Version
+    const CLIENT_VERSION = "3.0.0-beta.251215.0003"; // Build Version
 
     // [New] 호환성 체크: Core가 요구하는 최소 로더 버전 확인
     const MIN_LOADER_VERSION = "3.0.0-beta.251215.0002";

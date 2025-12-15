@@ -431,6 +431,66 @@
         }
     }
 
+    async function fetchAndUnzip(fileId, onProgress) {
+        const chunks = [];
+        let offset = 0;
+        let totalLength = 0;
+        const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB
+
+        // 1. Download Chunks
+        while (true) {
+            const response = await new Promise((resolve, reject) => {
+                google.script.run
+                    .withSuccessHandler(resolve)
+                    .withFailureHandler(reject)
+                    .getFileChunk(fileId, offset, CHUNK_SIZE); // Use BookService
+            });
+
+            if (!response) break;
+
+            const binaryString = atob(response.data);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+
+            chunks.push(bytes);
+            totalLength += len;
+            offset = response.nextOffset;
+
+            const percent = Math.round((offset / response.totalSize) * 100);
+            if (onProgress) onProgress(`파일 다운로드 중... (${percent}%)`);
+
+            if (!response.hasMore) break;
+        }
+
+        // 2. Merge & Unzip
+        if (onProgress) onProgress('이미지 압축 해제 중...');
+        const combinedBytes = new Uint8Array(totalLength);
+        let position = 0;
+        for (const chunk of chunks) {
+            combinedBytes.set(chunk, position);
+            position += chunk.length;
+        }
+
+        const zip = await JSZip.loadAsync(combinedBytes);
+
+        // 3. Extract Images
+        const files = Object.keys(zip.files).sort((a, b) => {
+            return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+        });
+
+        const imageUrls = [];
+        for (const filename of files) {
+            if (filename.match(/\.(jpg|jpeg|png|webp|gif)$/i)) {
+                const blob = await zip.files[filename].async('blob');
+                imageUrls.push(URL.createObjectURL(blob));
+            }
+        }
+        return imageUrls;
+    }
+
     function loadAllImageDimensions(images) {
         const promises = images.map(imgData => {
             return new Promise(resolve => {
