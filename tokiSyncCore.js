@@ -1,4 +1,4 @@
-// 🚀 TokiSync Core Logic v3.0.0-beta.251214.0001
+// 🚀 TokiSync Core Logic v3.0.0-beta.251215.0002
 // This script is loaded dynamically by the Loader.
 
 window.TokiSyncCore = function (GM_context) {
@@ -12,9 +12,11 @@ window.TokiSyncCore = function (GM_context) {
     const GM_getValue = GM_context.GM_getValue;
     const GM_deleteValue = GM_context.GM_deleteValue;
     const JSZip = GM_context.JSZip;
+    const PROTOCOL_VERSION = 3; // Major Version (Server Compatibility)
+    const CLIENT_VERSION = "3.0.0-beta.251215.0002"; // Build Version
 
     // [New] 호환성 체크: Core가 요구하는 최소 로더 버전 확인
-    const MIN_LOADER_VERSION = "3.0.0-beta.251214.0001";
+    const MIN_LOADER_VERSION = "3.0.0-beta.251215.0002";
     const currentLoaderVer = GM_context.loaderVersion || "2.0.0"; // 없을 경우 구버전 간주
 
     if (currentLoaderVer < MIN_LOADER_VERSION) {
@@ -23,7 +25,7 @@ window.TokiSyncCore = function (GM_context) {
         return; // Core 실행 중단
     }
 
-    console.log("🚀 TokiSync Core v3.0.0-beta.251214.0001 Loaded (Remote)");
+    console.log("🚀 TokiSync Core v3.0.0-beta.251215.0002 Loaded (Remote)");
 
     // #region [1. 설정 및 상수] ====================================================
     const CFG_URL_KEY = "TOKI_GAS_URL";
@@ -364,7 +366,7 @@ window.TokiSyncCore = function (GM_context) {
             folderId: config.folderId, 
             type: 'check_history', 
             protocolVersion: 3, // [New] Major Protocol Version
-            clientVersion: "3.0.0-beta.251214.0001", 
+            clientVersion: "3.0.0-beta.251215.0002", 
             folderName: `[${info.id}] ${info.cleanTitle}` 
         };
             updateStatus("☁️ 드라이브 파일 스캔 중...");
@@ -434,7 +436,7 @@ window.TokiSyncCore = function (GM_context) {
                 folderId: config.folderId, 
                 type: 'save_info', 
                 protocolVersion: 3, // [New] Major Protocol Version
-                clientVersion: "3.0.0-beta.251214.0001", 
+                clientVersion: "3.0.0-beta.251215.0002", 
                 folderName: `[${info.id}] ${info.cleanTitle}`,
                 id: info.id, title: info.fullTitle, url: document.URL, site: site,
                 author: info.author, category: info.category, status: info.status, thumbnail: thumbnailBase64 || info.thumbnail,
@@ -476,7 +478,7 @@ window.TokiSyncCore = function (GM_context) {
                     folderId: config.folderId, 
                     type: "init", 
                     protocolVersion: 3, // [New] Major Protocol Version
-                    clientVersion: "3.0.0-beta.251214.0001", 
+                    clientVersion: "3.0.0-beta.251215.0002", 
                     folderName: folderName, 
                     fileName: fileName 
                 }),
@@ -512,7 +514,7 @@ window.TokiSyncCore = function (GM_context) {
                     data: JSON.stringify({ 
                         folderId: config.folderId, 
                         type: "upload", 
-                        clientVersion: "3.0.0-beta.251214.0001", // [New] API Version Check (Chunk는 생략 가능하지만 안전하게 추가)
+                        clientVersion: "3.0.0-beta.251215.0002", // [New] API Version Check (Chunk는 생략 가능하지만 안전하게 추가)
                         uploadUrl: uploadUrl, 
                         chunkData: chunkBase64, 
                         start: start, end: end, total: totalSize 

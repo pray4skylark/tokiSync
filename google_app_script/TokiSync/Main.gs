@@ -24,16 +24,20 @@ function doPost(e) {
     }
 
     // 🔒 [New] 클라이언트 프로토콜 버전 검증 (Major Version 기준)
-    const MIN_PROTOCOL_VERSION = 3;
-    const clientProtocol = data.protocolVersion || 0;
+    // const MIN_PROTOCOL_VERSION = 3;
+    // const MIN_CLIENT_VERSION = "3.0.0-beta.251215.0002";
+    // const clientProtocol = data.protocolVersion || 0;
 
+    // [Verified] Strict Check Disabled for Safety during Rollout
+    /*
     if (clientProtocol < MIN_PROTOCOL_VERSION) {
-      return createRes(
-        "error",
-        `Client Incompatible (Requires Protocol v${MIN_PROTOCOL_VERSION}+)`
-      );
+        return createRes({
+            status: 'error',
+            error: `Client Incompatible (Requires Protocol v${MIN_PROTOCOL_VERSION}+)`,
+            message: '클라이언트 업데이트가 필요합니다.'
+        });
     }
-
+    */
     const rootFolderId = data.folderId;
 
     // 2. 요청 타입 분기
@@ -53,7 +57,7 @@ function doPost(e) {
       else if (data.type === "get_server_info") {
         result = createRes("success", {
           name: "TokiSync API",
-          version: "v3.0.0-beta.251214.0001",
+          version: "v3.0.0-beta.251215.0002",
           url: ScriptApp.getService().getUrl(),
           user: Session.getActiveUser().getEmail(),
         });

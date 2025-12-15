@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Loader)
 // @namespace    https://github.com/pray4skylark/tokiSync
-// @version      3.0.0-beta.251214.0001
+// @version      3.0.0-beta.251215.0002
 // @description  TokiSync Core Script Loader (GitHub CDN)
 // @author       pray4skylark
 // @updateURL    https://github.com/pray4skylark/tokiSync/raw/main/tokiSyncScript.js
@@ -201,20 +201,19 @@
                                 GM_setValue(CACHE_KEY_VER, latestVer);
                                 GM_setValue(CACHE_KEY_TIME, now);
                                 resolve(latestVer);
-                            } else resolve(cachedVer || "v3.0.0-beta.251211");
-                        } catch (e) { resolve(cachedVer || "v3.0.0-beta.251211"); }
-                    } else resolve(cachedVer || "v3.0.0-beta.251211");
+                            } else resolve(cachedVer || "v3.0.0-beta.251215.0002");
+                        } catch (e) { resolve(cachedVer || "v3.0.0-beta.251215.0002"); }
+                    } else resolve(cachedVer || "v3.0.0-beta.251215.0002");
                 },
-                onerror: () => resolve(cachedVer || "v3.0.0-beta.251211")
+                onerror: () => resolve(cachedVer || "v3.0.0-beta.251215.0002")
             });
         });
     }
 
     function fetchAndStoreScript(version, reloadAfter = false) {
-        // [Verified] Restore timestamp for cache busting
-        const cdnUrl = `https://cdn.jsdelivr.net/gh/${GITHUB_USER}/${GITHUB_REPO}@${version}/${CORE_FILENAME}?t=${Date.now()}`;
-        // const cdnUrl = `https://cdn.jsdelivr.net/gh/${GITHUB_USER}/${GITHUB_REPO}@${version}/${CORE_FILENAME}`;
-
+        // [Changed] Use Raw GitHub for instant updates (Bypass CDN delay)
+        const cdnUrl = `https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/${version}/${CORE_FILENAME}?t=${Date.now()}`;
+        
         console.log(`☁️ Fetching Core Script from: ${cdnUrl}`);
 
         GM_xmlhttpRequest({
@@ -224,27 +223,30 @@
                 if (response.status === 200) {
                     const scriptContent = response.responseText;
                     
-                    // 무결성 최소 검즈
                     if (!scriptContent.includes("window.TokiSyncCore")) {
                         console.error("❌ Invalid Script Content");
+                        alert("스크립트 내용이 올바르지 않습니다.");
                         return;
                     }
 
-                    // [DEBUG] Always execute fresh script, disable caching for verification
-                    // GM_setValue(STORED_CORE_KEY, scriptContent);
-                    console.log("⚡️ Executing Remote Script (Direct)");
-
+                    console.log(`✅ Core Updated to ${version}`);
+                    GM_setValue(STORED_CORE_KEY, scriptContent);
+                    
                     if(reloadAfter) {
+                        alert(`[TokiSync] ${version} 업데이트 완료! 새로고침합니다.`);
                         location.reload();
                     } else {
                         executeScript(scriptContent);
                     }
                 } else {
                     console.error("❌ Fetch Failed:", response.status);
-                    alert("스크립트 다운로드 실패");
+                    alert(`스크립트 다운로드 실패: ${response.status}`);
                 }
             },
-            onerror: () => alert("네트워크 오류")
+            onerror: (e) => {
+                console.error("❌ Network Error", e);
+                alert("네트워크 오류 발생");
+            }
         });
     }
 
@@ -255,7 +257,7 @@
 
                 if (typeof window.TokiSyncCore === 'function') {
                     window.TokiSyncCore({
-                        loaderVersion: "3.0.0-beta.251214.0001", // 현재 로더 버전 전달
+                        loaderVersion: "3.0.0-beta.251215.0002", // 현재 로더 버전 전달
                         GM_registerMenuCommand: GM_registerMenuCommand,
                         GM_xmlhttpRequest: GM_xmlhttpRequest,
                         GM_setValue: GM_setValue,
