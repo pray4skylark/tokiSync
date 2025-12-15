@@ -5,3 +5,6 @@ node_modules/
 
 # Clasp Settings (Contains Script ID)
 .clasp.json
+
+# Analysis Files (Local only)
+old_*

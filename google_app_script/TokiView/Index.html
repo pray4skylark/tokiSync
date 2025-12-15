@@ -27,12 +27,23 @@
         <div id="loaderMsg" style="color:var(--sub)">내 서재를 불러오는 중입니다...</div>
     </div>
 
-    <!-- Viewer Overlay -->
     <div id="viewerOverlay" class="viewer-overlay">
-        <div class="viewer-header">
-            <span id="viewerTitle">Viewer</span>
-            <button onclick="closeViewer()" style="background:none; border:none; color:white; font-size:24px; cursor:pointer;">&times;</button>
+        <!-- Hidden Trigger Zone -->
+        <div class="viewer-settings-trigger" onmouseenter="showViewerSettings()" onclick="toggleViewerSettings()"></div>
+        
+        <!-- Settings Panel -->
+        <div id="viewerSettings" class="viewer-settings-panel">
+            <div class="setting-group">
+                <label><input type="checkbox" id="chkTwoPage" onchange="toggleViewMode()"> 2쪽 보기</label>
+            </div>
+            <div class="setting-group" id="groupCover" style="display:none;">
+                <label><input type="checkbox" id="chkCover" onchange="toggleCoverMode()"> 표지 따로 보기</label>
+            </div>
+            <div class="setting-group">
+                <button onclick="closeViewer()" style="background:#cc0000; border:none; color:white; padding:5px 10px; border-radius:4px; cursor:pointer;">닫기</button>
+            </div>
         </div>
+
         <div id="viewerContent" class="viewer-content">
             <!-- Viewer Content dynamically injected -->
         </div>

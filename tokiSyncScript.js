@@ -87,13 +87,57 @@
         location.reload();
     });
 
+    // [DEBUG] Core 직접 주입 메뉴
+    GM_registerMenuCommand('🛠 [Debug] Core 직접 입력', () => {
+        const oldUI = document.getElementById('tokiDebugInputUI');
+        if (oldUI) oldUI.remove();
+
+        const div = document.createElement('div');
+        div.id = 'tokiDebugInputUI';
+        div.style.cssText = "position:fixed; top:10%; left:10%; width:80%; height:80%; background:white; z-index:999999; border:2px solid red; padding:20px; box-shadow:0 0 20px rgba(0,0,0,0.5); display:flex; flex-direction:column;";
+        
+        div.innerHTML = `
+            <h2 style="margin:0 0 10px 0; color:red;">🛠 Core Script Manual Injection</h2>
+            <p style="font-size:12px; color:#666;">여기에 tokiSyncCore.js 전체 코드를 붙여넣으세요. (기존 캐시 덮어씀)</p>
+            <textarea id="tokiDebugTextarea" style="flex:1; width:100%; margin-bottom:10px; font-family:monospace; font-size:11px;"></textarea>
+            <div style="display:flex; gap:10px;">
+                <button id="tokiDebugSaveBtn" style="flex:1; padding:10px; background:red; color:white; font-weight:bold; border:none; cursor:pointer;">💾 저장 및 실행</button>
+                <button id="tokiDebugCloseBtn" style="flex:0 0 100px; padding:10px; background:#ccc; border:none; cursor:pointer;">닫기</button>
+            </div>
+        `;
+        document.body.appendChild(div);
+
+        document.getElementById('tokiDebugCloseBtn').onclick = () => div.remove();
+        document.getElementById('tokiDebugSaveBtn').onclick = () => {
+            const content = document.getElementById('tokiDebugTextarea').value;
+            if (!content.trim()) { alert("내용이 비어있습니다."); return; }
+            
+            if (!content.includes("window.TokiSyncCore")) {
+                if(!confirm("⚠️ Core 스크립트 형식이 아닌 것 같습니다 (window.TokiSyncCore 미포함).\n그래도 저장하시겠습니까?")) return;
+            }
+
+            GM_setValue(STORED_CORE_KEY, content);
+            GM_setValue(PINNED_VER_KEY, "MANUAL_DEBUG"); // 버전 고정
+            alert("💾 Core 스크립트가 저장되었습니다.\n페이지를 새로고침하여 적용합니다.");
+            location.reload();
+        };
+    });
+
     async function checkAndLoadCore() {
         const pinnedVer = GM_getValue(PINNED_VER_KEY);
         const latestVer = await fetchLatestVersion();
 
-        // 1. 저장된 스크립트 확인 (속도 최적화) -> [Disabled for Verification]
-        /*
+        // 1. 저장된 스크립트 확인
         const storedScript = GM_getValue(STORED_CORE_KEY, "");
+        
+        // [Verified] Manual Injection Support
+        if (pinnedVer === "MANUAL_DEBUG" && storedScript) {
+             console.log("🛠 Loading Manually Injected Core Script");
+             executeScript(storedScript);
+             return;
+        }
+
+        /* [Disabled for Remote Verification]
         if (pinnedVer && pinnedVer === latestVer && storedScript) {
             // 버전 변경 없음 & 스크립트 보유 -> 즉시 실행
             console.log(`⚡️ Loading stored Core (${pinnedVer}) - No Network`);

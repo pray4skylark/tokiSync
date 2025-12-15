@@ -3,24 +3,23 @@
 // =======================================================
 
 // 기능: 다운로드 기록 확인 (폴더/파일 스캔)
-// 기능: 다운로드 기록 확인 (폴더/파일 스캔) - [Optimized]
+// 기능: 다운로드 기록 확인 (폴더/파일 스캔)
 function checkDownloadHistory(data, rootFolderId) {
-  Debug.log(`🔍 checkDownloadHistory Start.`);
-  Debug.log(`   📂 Root Folder: ${rootFolderId}`);
-  Debug.log(`   🎯 Target Series: ${data.folderName}`);
-
+  Debug.log(`🚀 checkDownloadHistory Start`);
+  // const root = DriveApp.getFolderById(rootFolderId); // Unused in this function
   const folderId = findFolderId(data.folderName, rootFolderId);
 
   if (!folderId) {
-    Debug.log("⚠️ Folder not found.");
-    return createRes("success", [], Debug.getLogs()); // 로그 포함 반환
+    Debug.log(`❌ Folder not found in Root(${rootFolderId})`);
+    return createRes("success", [], Debug.getLogs()); // 폴더 없으면 기록 없음 + 로그
   }
-  Debug.log(`✅ Folder Found: ${folderId}`);
+
+  Debug.log(`📂 Scanning Files in: ${folderId}`);
+  const seriesFolder = DriveApp.getFolderById(folderId); // Backup access check
+  const existingEpisodes = [];
 
   // 🚀 Optimization: Drive Advanced Service (Drive.Files.list)
-  // 기존 DriveApp 반복문보다 훨씬 빠름 (Batch Fetch)
   let pageToken = null;
-  const existingEpisodes = [];
   let fetchCount = 0;
 
   try {
@@ -29,7 +28,7 @@ function checkDownloadHistory(data, rootFolderId) {
       const response = Drive.Files.list({
         q: `'${folderId}' in parents and trashed = false`,
         fields: "nextPageToken, files(name)",
-        pageSize: 1000, // 최대 1000개씩 가져옴
+        pageSize: 1000,
         pageToken: pageToken,
         supportsAllDrives: true,
         includeItemsFromAllDrives: true,
@@ -48,16 +47,19 @@ function checkDownloadHistory(data, rootFolderId) {
 
     Debug.log(`🎉 Scan Complete. Found ${existingEpisodes.length} episodes.`);
   } catch (e) {
-    Debug.error("❌ Drive Scan Failed", e);
-    // 에러 발생 시에도 빈 배열보다는 현재까지 찾은거라도 줄 수 있지만, 안전하게 에러 리턴
-    // 또는, 로그를 포함해서 성공으로 처리하되 빈 배열 (디버깅용)
+    Debug.error("❌ Drive Scan Failed (Advanced)", e);
+    // Fallback? No, we want to see if this fails.
     return createRes("error", `Scan Error: ${e.message}`, Debug.getLogs());
   }
 
+  // 폴더 스캔 (구버전 호환) - 이건 DriveApp 그대로 유지 (보조)
+  // const subFolders = seriesFolder.getFolders(); ... (생략 또는 필요시 추가)
+
   // 중복 제거 및 정렬
   const uniqueEpisodes = [...new Set(existingEpisodes)].sort((a, b) => a - b);
+  Debug.log(`✅ Total Unique Episodes: ${uniqueEpisodes.length}`);
 
-  return createRes("success", uniqueEpisodes, Debug.getLogs()); // 성공 시에도 로그 반환 (필요시)
+  return createRes("success", uniqueEpisodes, Debug.getLogs());
 }
 
 // 기능: 작품 정보(info.json) 저장

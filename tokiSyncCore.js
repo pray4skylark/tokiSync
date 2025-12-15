@@ -360,7 +360,13 @@ window.TokiSyncCore = function (GM_context) {
             const config = getConfig();
             if (!config.url) { markDownloadedItems(); resolve([]); return; }
             const info = getSeriesInfo();
-            const payload = { folderId: config.folderId, type: 'check_history', folderName: `[${info.id}] ${info.cleanTitle}` };
+            const payload = { 
+            folderId: config.folderId, 
+            type: 'check_history', 
+            protocolVersion: 3, // [New] Major Protocol Version
+            clientVersion: "3.0.0-beta.251214.0001", 
+            folderName: `[${info.id}] ${info.cleanTitle}` 
+        };
             updateStatus("☁️ 드라이브 파일 스캔 중...");
             GM_xmlhttpRequest({
                 method: "POST", url: config.url, data: JSON.stringify(payload), headers: { "Content-Type": "text/plain" },
@@ -380,7 +386,13 @@ window.TokiSyncCore = function (GM_context) {
                             const cloudHistory = Array.isArray(json.body) ? json.body : [];
                             
                             // [VERIFICATION DEBUG]
-                            console.log(`🔍 [VERIFY] Server Response for ${info.cleanTitle}:`, cloudHistory);
+                            console.log(`🔍 [VERIFY] Full Server Response:`, json);
+                            if (json.debugLogs) {
+                                console.group("Start Server Side Logs");
+                                json.debugLogs.forEach(log => console.log(`[SERVER] ${log}`));
+                                console.groupEnd();
+                            }
+
                             if (cloudHistory.length === 0) {
                                 console.warn("⚠️ Received EMPTY history. Folder may not be found or empty.");
                                 // alert(`[TokiSync 검증] 서버 응답이 비어있습니다!\n폴더를 찾지 못했거나, 파일이 하나도 없습니다.\n(ID: ${info.id})`);
@@ -421,7 +433,8 @@ window.TokiSyncCore = function (GM_context) {
             const payload = {
                 folderId: config.folderId, 
                 type: 'save_info', 
-                clientVersion: "3.0.0-beta.251214.0001", // [New] API Version Check
+                protocolVersion: 3, // [New] Major Protocol Version
+                clientVersion: "3.0.0-beta.251214.0001", 
                 folderName: `[${info.id}] ${info.cleanTitle}`,
                 id: info.id, title: info.fullTitle, url: document.URL, site: site,
                 author: info.author, category: info.category, status: info.status, thumbnail: thumbnailBase64 || info.thumbnail,
@@ -462,7 +475,8 @@ window.TokiSyncCore = function (GM_context) {
                 data: JSON.stringify({ 
                     folderId: config.folderId, 
                     type: "init", 
-                    clientVersion: "3.0.0-beta.251214.0001", // [New] API Version Check
+                    protocolVersion: 3, // [New] Major Protocol Version
+                    clientVersion: "3.0.0-beta.251214.0001", 
                     folderName: folderName, 
                     fileName: fileName 
                 }),

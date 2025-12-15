@@ -23,17 +23,14 @@ function doPost(e) {
       return createRes("error", "Missing folderId in request payload");
     }
 
-    // 🔒 [New] 클라이언트 버전 검증
-    // Core에서 clientVersion 필드를 보내야 함
-    const MIN_CLIENT_VERSION = "3.0.0-beta.251212.0005";
-    const clientVer = data.clientVersion || "0.0.0"; // 없으면 구버전
+    // 🔒 [New] 클라이언트 프로토콜 버전 검증 (Major Version 기준)
+    const MIN_PROTOCOL_VERSION = 3;
+    const clientProtocol = data.protocolVersion || 0;
 
-    // 날짜 기반 버전 비교 (문자열 비교 가능: "3.0.0-beta.251212.0001" 형태)
-    // 베타 버전 문자열 비교를 위해 간단한 로직 사용 ("" 제거 후 숫자 비교 권장하지만, CalVer 문자열 비교도 유효)
-    if (clientVer < MIN_CLIENT_VERSION) {
+    if (clientProtocol < MIN_PROTOCOL_VERSION) {
       return createRes(
         "error",
-        `Client Outdated. (Server requires ${MIN_CLIENT_VERSION}+)`
+        `Client Incompatible (Requires Protocol v${MIN_PROTOCOL_VERSION}+)`
       );
     }
 
@@ -56,7 +53,7 @@ function doPost(e) {
       else if (data.type === "get_server_info") {
         result = createRes("success", {
           name: "TokiSync API",
-          version: "v3.0.0-beta.251212.0005",
+          version: "v3.0.0-beta.251214.0001",
           url: ScriptApp.getService().getUrl(),
           user: Session.getActiveUser().getEmail(),
         });
