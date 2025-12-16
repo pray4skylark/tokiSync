@@ -94,9 +94,12 @@
                 <label><input type="checkbox" id="chkTwoPage" onchange="toggleViewMode()"> 2쪽</label>
                 <label><input type="checkbox" id="chkCover" onchange="toggleCoverMode()"> 표지</label>
                 <label><input type="checkbox" id="chkRtl" onchange="toggleRtlMode()"> 일본</label>
+                <label><input type="checkbox" id="chkPreload" onchange="togglePreloadMode()"> 미리</label>
             </div>
             <button class="modal-close" onclick="closeViewer()" style="color:white;">×</button>
         </div>
+        
+        <div class="viewer-trigger-zone"></div>
         
         <div class="viewer-content" id="viewerContent">
             <div class="nav-zone nav-prev"></div>

@@ -15,7 +15,9 @@ let vState = {
     images: [], 
     spreads: [], 
     currentSpreadIndex: 0,
-    settingsTimer: null
+    currentSpreadIndex: 0,
+    settingsTimer: null,
+    preload: true
 };
 let nextBookPreload = null;
 
@@ -340,7 +342,16 @@ function loadAllImageDimensions(images) {
     return Promise.all(promises);
 }
 
+
+function togglePreloadMode() {
+    const chk = document.getElementById('chkPreload');
+    vState.preload = chk && chk.checked;
+    localStorage.setItem('toki_v_preload', vState.preload);
+}
+
 function preloadNextEpisode() {
+    if (!vState.preload) return; // Feature disabled
+    
     const nextIndex = currentBookIndex + 1;
     if (nextIndex >= currentBookList.length) return;
     if (nextBookPreload && nextBookPreload.index === nextIndex) return;
@@ -367,7 +378,9 @@ function updateNavHandlers() {
 function loadViewerSettings() {
     vState.mode = localStorage.getItem('toki_v_mode') || '1page';
     vState.coverPriority = (localStorage.getItem('toki_v_cover') === 'true');
+    vState.coverPriority = (localStorage.getItem('toki_v_cover') === 'true');
     vState.rtlMode = (localStorage.getItem('toki_v_rtl') === 'true');
+    vState.preload = (localStorage.getItem('toki_v_preload') !== 'false'); // Default true
     
     const elTwo = document.getElementById('chkTwoPage');
     if(elTwo) elTwo.checked = (vState.mode === '2page');
@@ -377,6 +390,11 @@ function loadViewerSettings() {
 
     const elRtl = document.getElementById('chkRtl');
     if(elRtl) elRtl.checked = vState.rtlMode;
+    const elRtl = document.getElementById('chkRtl');
+    if(elRtl) elRtl.checked = vState.rtlMode;
+
+    const elPreload = document.getElementById('chkPreload');
+    if(elPreload) elPreload.checked = vState.preload;
 }
 function toggleViewMode() {
     const chk = document.getElementById('chkTwoPage');
@@ -422,6 +440,7 @@ window.loadViewer = loadViewer;
 window.toggleViewMode = toggleViewMode;
 window.toggleCoverMode = toggleCoverMode;
 window.toggleRtlMode = toggleRtlMode;
+window.togglePreloadMode = togglePreloadMode;
 window.closeViewer = closeViewer;
 window.closeEpisodeModal = closeEpisodeModal;
 

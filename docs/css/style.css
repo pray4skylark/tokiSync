@@ -321,6 +321,16 @@ h1 {
 .viewer-overlay:hover .viewer-header, .viewer-header.show {
   opacity: 1; pointer-events: auto;
 }
+/* Only show on top interaction */
+.viewer-header:hover { opacity: 1; pointer-events: auto; }
+.viewer-overlay:hover .viewer-header { opacity: 0; pointer-events: none; } /* Reset global hover */
+
+.viewer-trigger-zone {
+  position: absolute; top: 0; left: 0; width: 100%; height: 80px; z-index: 90;
+}
+.viewer-trigger-zone:hover ~ .viewer-header, .viewer-header:hover {
+  opacity: 1; pointer-events: auto;
+}
 .viewer-content {
   flex: 1; position: relative; width: 100%; height: 100%; overflow: hidden;
   display: flex; justify-content: center; align-items: center;
