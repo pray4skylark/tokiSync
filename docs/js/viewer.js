@@ -260,7 +260,7 @@ function renderCurrentSpread() {
     // RTL
     const dirStyle = vState.rtlMode ? 'flex-direction:row-reverse;' : '';
 
-    container.innerHTML = `<div class="viewer-spread" style="${dirStyle}">
+    container.innerHTML = `<div class="viewer-spread" style="${dirStyle}" onclick="toggleControls()">
         ${spreadIndices.map(idx => `
             <img src="${vState.images[idx].src}" class="viewer-page ${spreadIndices.length > 1 ? 'half' : ''}">
         `).join('')}
@@ -371,13 +371,32 @@ function loadViewerSettings() {
     
     const elTwo = document.getElementById('chkTwoPage');
     if(elTwo) elTwo.checked = (vState.mode === '2page');
-    // ... other UI syncs can be added ...
+
+    const elCover = document.getElementById('chkCover');
+    if(elCover) elCover.checked = vState.coverPriority;
+
+    const elRtl = document.getElementById('chkRtl');
+    if(elRtl) elRtl.checked = vState.rtlMode;
 }
 function toggleViewMode() {
     const chk = document.getElementById('chkTwoPage');
     vState.mode = chk && chk.checked ? '2page' : '1page';
     localStorage.setItem('toki_v_mode', vState.mode);
     recalcSpreads();
+}
+
+function toggleCoverMode() {
+    const chk = document.getElementById('chkCover');
+    vState.coverPriority = chk && chk.checked;
+    localStorage.setItem('toki_v_cover', vState.coverPriority);
+    recalcSpreads();
+}
+
+function toggleRtlMode() {
+    const chk = document.getElementById('chkRtl');
+    vState.rtlMode = chk && chk.checked;
+    localStorage.setItem('toki_v_rtl', vState.rtlMode);
+    recalcSpreads(); // Re-render to apply direction style
 }
 
 function getReadHistory(seriesId) {
@@ -399,6 +418,15 @@ function formatSize(bytes) {
 // Expose globals for HTML onclicks
 window.openEpisodeList = openEpisodeList;
 window.loadViewer = loadViewer;
+window.loadViewer = loadViewer;
 window.toggleViewMode = toggleViewMode;
+window.toggleCoverMode = toggleCoverMode;
+window.toggleRtlMode = toggleRtlMode;
 window.closeViewer = closeViewer;
 window.closeEpisodeModal = closeEpisodeModal;
+
+function toggleControls() {
+    const header = document.querySelector('.viewer-header');
+    header.classList.toggle('show');
+}
+window.toggleControls = toggleControls;
