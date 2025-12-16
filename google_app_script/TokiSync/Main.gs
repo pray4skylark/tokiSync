@@ -1,4 +1,4 @@
-// ⚙️ TokiSync API Server v3.1.0-beta.251216 (Stateless)
+// ⚙️ TokiSync API Server v3.1.0-beta.251216.0001 (Stateless)
 // -----------------------------------------------------
 // 🤝 Compatibility:
 //    - Client v3.0.0-beta.251211+ (User Execution Mode)
@@ -57,7 +57,7 @@ function doPost(e) {
       else if (data.type === "get_server_info") {
         result = createRes("success", {
           name: "TokiSync API",
-          version: "v3.1.0-beta.251216",
+          version: "v3.1.0-beta.251216.0001",
           url: ScriptApp.getService().getUrl(),
           user: Session.getActiveUser().getEmail(),
         });
