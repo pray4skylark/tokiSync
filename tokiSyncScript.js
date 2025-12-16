@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Loader)
 // @namespace    https://github.com/pray4skylark/tokiSync
-// @version      3.1.0-beta.251216.0001
+// @version      3.1.0-beta.251216.0002
 // @description  TokiSync Core Script Loader (GitHub CDN)
 // @author       pray4skylark
 // @updateURL    https://github.com/pray4skylark/tokiSync/raw/main/tokiSyncScript.js
@@ -21,6 +21,7 @@
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_deleteValue
+// @grant        GM_registerMenuCommand
 // @require      https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js
 // @require      https://cdnjs.cloudflare.com/ajax/libs/jszip-utils/0.1.0/jszip-utils.js
 // @run-at       document-end
@@ -289,7 +290,7 @@
 
                 if (typeof window.TokiSyncCore === 'function') {
                     window.TokiSyncCore({
-                        loaderVersion: "3.1.0-beta.251216.0001", // View Migration Update
+                        loaderVersion: "3.1.0-beta.251216.0002", // View Migration Update
                         GM_registerMenuCommand: GM_registerMenuCommand,
                         GM_xmlhttpRequest: GM_xmlhttpRequest,
                         GM_setValue: GM_setValue,
