@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Loader)
 // @namespace    https://github.com/pray4skylark/tokiSync
-// @version      3.0.0-beta.251215.0008
+// @version      3.1.0-beta.251216
 // @description  TokiSync Core Script Loader (GitHub CDN)
 // @author       pray4skylark
 // @updateURL    https://github.com/pray4skylark/tokiSync/raw/main/tokiSyncScript.js
@@ -258,7 +258,7 @@
 
                 if (typeof window.TokiSyncCore === 'function') {
                     window.TokiSyncCore({
-                        loaderVersion: "3.0.0-beta.251215.0008", // 현재 로더 버전 전달
+                        loaderVersion: "3.1.0-beta.251216", // View Migration Update
                         GM_registerMenuCommand: GM_registerMenuCommand,
                         GM_xmlhttpRequest: GM_xmlhttpRequest,
                         GM_setValue: GM_setValue,
