@@ -63,7 +63,10 @@ function doPost(e) {
         });
       } else if (data.type === "history_get")
         result = checkDownloadHistory(data, rootFolderId);
-      else result = createRes("error", "Unknown type");
+      // [Viewer Migration] Isolated Routing
+      else if (data.type && data.type.startsWith("view_")) {
+        result = View_Dispatcher(data);
+      } else result = createRes("error", "Unknown type");
     } catch (handlerError) {
       Debug.error("❌ Handler Error", handlerError);
       return createRes("error", handlerError.toString(), Debug.getLogs());
