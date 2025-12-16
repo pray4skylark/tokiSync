@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TokiSync Viewer</title>
+    <!-- CSS -->
+    <link rel="stylesheet" href="css/style.css">
+    <!-- JSLibs -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+</head>
+<body>
+
+    <!-- App Container -->
+    <div class="app-container">
+        <header>
+            <div class="header-top">
+                <h1 onclick="location.reload()">TokiSync ⚡️</h1>
+                <div class="controls">
+                    <input type="text" id="search" class="search-box" placeholder="작품 검색..." onkeyup="filterData()">
+                    <button class="btn-icon btn-refresh" id="refreshBtn" onclick="refreshDB()" title="새로고침">↻</button>
+                    <button class="btn-icon" onclick="toggleSettings()" title="사이트 설정">⚙️</button>
+                </div>
+            </div>
+            
+            <!-- Domain Panel (Hidden) -->
+            <div id="domainPanel" style="display:none; background:#252525; padding:15px; border-radius:10px; margin-top:10px;">
+                <h3 style="margin:0 0 10px 0; font-size:14px;">바로가기 도메인 설정</h3>
+                <div class="config-group">
+                    <input type="text" id="url_manatoki" class="config-input" placeholder="마나토끼 URL (예: https://manatoki470.net)">
+                </div>
+                <div class="config-group">
+                    <input type="text" id="url_newtoki" class="config-input" placeholder="뉴토끼 URL">
+                </div>
+                <div class="config-group">
+                     <button class="btn btn-save" onclick="saveDomains()">저장</button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Grid -->
+        <div class="grid-container" id="grid">
+            <!-- Cards injected by main.js -->
+        </div>
+    </div>
+
+    <!-- Modals -->
+
+    <!-- 1. Config Modal (First Run) -->
+    <div id="configModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title">⚙️ 서버 연결 설정</div>
+            </div>
+            <div class="modal-body" style="text-align:center;">
+                <p style="color:#aaa; font-size:14px; margin-bottom:20px;">
+                    Google Apps Script 배포 URL과 폴더 ID를 입력하세요.<br>
+                    (PC에서 Tampermonkey 스크립트 실행 시 자동 설정됩니다.)
+                </p>
+                <div class="config-group">
+                    <label class="config-label">GAS 웹 앱 URL</label>
+                    <input type="text" id="configApiUrl" class="config-input" placeholder="https://script.google.com/macros/s/.../exec">
+                </div>
+                <div class="config-group">
+                    <label class="config-label">루트 폴더 ID</label>
+                    <input type="text" id="configFolderId" class="config-input" placeholder="Google Drive Folder ID">
+                </div>
+                <button class="btn btn-save" onclick="saveManualConfig()">설정 저장</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. Episode Modal -->
+    <div id="episodeModal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title">📄 회차 목록</div>
+                <button class="modal-close" onclick="closeEpisodeModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <div id="episodeList" class="episode-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. Viewer Overlay -->
+    <div id="viewerOverlay" class="viewer-overlay">
+        <div class="viewer-header">
+            <span style="font-weight:bold;">TokiViewer</span>
+            <div class="setting-group">
+                <label><input type="checkbox" id="chkTwoPage" onchange="toggleViewMode()"> 2쪽 보기</label>
+                <!-- Other settings can be added here -->
+            </div>
+            <button class="modal-close" onclick="closeViewer()" style="color:white;">×</button>
+        </div>
+        
+        <div class="viewer-content" id="viewerContent">
+            <div class="nav-zone nav-prev"></div>
+            <div class="nav-zone nav-next"></div>
+            <div id="viewerImageContainer" class="viewer-image-container"></div>
+            <div id="pageCounter" class="page-counter">- / -</div>
+        </div>
+    </div>
+
+    <!-- Loader -->
+    <div id="pageLoader" class="loader-overlay">
+        <div class="spinner"></div>
+        <div style="color:#888;">데이터 불러오는 중...</div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="js/api_client.js"></script>
+    <script src="js/viewer.js"></script>
+    <script src="js/main.js"></script>
+
+</body>
+</html>

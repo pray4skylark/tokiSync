@@ -11,9 +11,46 @@
 // @match        https://*.com/novel/*
 // @match        https://*.net/comic/*
 // @match        https://script.google.com/*
-// @match        https://*.googleusercontent.com/*
-// @icon         https://github.com/user-attachments/assets/99f5bb36-4ef8-40cc-8ae5-e3bf1c7952ad
-// @grant        GM_registerMenuCommand
+// @match        https://*.github.io/tokiSync/*
+// @match        https://pray4skylark.github.io/tokiSync/*
+// @match        http://127.0.0.1:5500/*
+// @match        http://localhost:*
+
+    // ... (Previous Code) ...
+
+    // #region 1. TokiView Integration (Handshake) ==============================
+    // 1-A. Original TokiView (GAS Web App)
+    if (location.hostname.includes('google.com') || location.hostname.includes('googleusercontent.com')) {
+         // ... (Keep existing Logic)
+    }
+
+    // 1-B. GitHub Pages (New Frontend) Integration
+    if (location.hostname.includes('github.io') || location.hostname.includes('localhost') || location.hostname.includes('127.0.0.1')) {
+        console.log("📂 TokiView (GitHub Pages) detected. Injecting Config...");
+
+        const folderId = GM_getValue(CFG_FOLDER_ID);
+        // Custom Deploy ID (Personal)
+        const customDeployId = GM_getValue("TOKI_DEPLOY_ID", ""); 
+        // Default Deploy ID (Shared/Auto-Update) - v3.1.0-beta.251216
+        const DEFAULT_ID = "AKfycbydljTPV1VvWTqRUBxegOSPPnirFQB7TN28A3C7ScZix7cErvvp2id3N20fIT3PTnfy"; 
+
+        const targetId = customDeployId || DEFAULT_ID;
+        const apiUrl = `https://script.google.com/macros/s/${targetId}/exec`;
+
+        if (folderId) {
+            // Wait slightly for page load
+            setTimeout(() => {
+                window.postMessage({ 
+                    type: 'TOKI_CONFIG', 
+                    url: apiUrl, 
+                    folderId: folderId,
+                    deployId: targetId
+                }, '*');
+                console.log("✅ Config Injected to Frontend:", targetId);
+            }, 500);
+        }
+    }
+    // #endregion ================================================================
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
 // @grant        GM_getValue
