@@ -378,7 +378,7 @@ function updateNavHandlers() {
 function loadViewerSettings() {
     vState.mode = localStorage.getItem('toki_v_mode') || '1page';
     vState.coverPriority = (localStorage.getItem('toki_v_cover') === 'true');
-    vState.coverPriority = (localStorage.getItem('toki_v_cover') === 'true');
+
     vState.rtlMode = (localStorage.getItem('toki_v_rtl') === 'true');
     vState.preload = (localStorage.getItem('toki_v_preload') !== 'false'); // Default true
     
@@ -388,8 +388,6 @@ function loadViewerSettings() {
     const elCover = document.getElementById('chkCover');
     if(elCover) elCover.checked = vState.coverPriority;
 
-    const elRtl = document.getElementById('chkRtl');
-    if(elRtl) elRtl.checked = vState.rtlMode;
     const elRtl = document.getElementById('chkRtl');
     if(elRtl) elRtl.checked = vState.rtlMode;
 
@@ -435,7 +433,6 @@ function formatSize(bytes) {
 
 // Expose globals for HTML onclicks
 window.openEpisodeList = openEpisodeList;
-window.loadViewer = loadViewer;
 window.loadViewer = loadViewer;
 window.toggleViewMode = toggleViewMode;
 window.toggleCoverMode = toggleCoverMode;
