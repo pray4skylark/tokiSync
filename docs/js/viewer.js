@@ -128,16 +128,29 @@ async function loadViewer(index) {
 
         if (blobUrls.length === 0) throw new Error("이미지를 찾을 수 없습니다.");
 
-        // Mark Read
-        saveReadHistory(book.seriesId, book.id);
-
+        if (blobUrls.length === 0) throw new Error("이미지를 찾을 수 없습니다.");
+        
         // Setup Images
         vState.images = blobUrls.map(url => ({ src: url, width: 0, height: 0, loaded: false }));
         
-        // Load Dimensions for Smart Spreads (Optional but good)
+        // Load Dimensions for Smart Spreads
         await loadAllImageDimensions(vState.images);
 
-        recalcSpreads(true);
+        // Calculate Spreads first
+        recalcSpreads(false); // Don't reset page yet
+
+        // Restore Progress
+        const lastPage = getProgress(book.seriesId, book.id);
+        if (lastPage > 0 && lastPage < vState.images.length) {
+            // Find spread containing this image
+            const spreadIdx = vState.spreads.findIndex(spread => spread.includes(lastPage));
+            vState.currentSpreadIndex = spreadIdx >= 0 ? spreadIdx : 0;
+            showToast(`📑 이어보기: ${lastPage + 1}페이지`);
+        } else {
+            vState.currentSpreadIndex = 0;
+        }
+
+        renderCurrentSpread();
 
     } catch (e) {
         alert("뷰어 로드 실패: " + e.message);
@@ -269,10 +282,23 @@ function renderCurrentSpread() {
     </div>`;
     
     // Counter
-    const start = spreadIndices[0] + 1;
-    const end = spreadIndices[spreadIndices.length-1] + 1;
     const total = vState.images.length;
     counter.innerText = (start === end) ? `${start} / ${total}` : `${start}-${end} / ${total}`;
+
+    // Save Progress
+    const currentImgIdx = spreadIndices[0]; // Use first image of spread as marker
+    saveProgress(currentBookList[currentBookIndex].seriesId, currentBookList[currentBookIndex].id, currentImgIdx);
+
+    // Check Finish (Mark Read if last page)
+    if (vState.currentSpreadIndex === vState.spreads.length - 1) {
+        saveReadHistory(currentBookList[currentBookIndex].seriesId, currentBookList[currentBookIndex].id);
+        const modal = document.getElementById('episodeModal');
+        if (modal.style.display === 'flex') {
+             // Refresh list if open behind
+             // renderEpisodeList(currentBookList, currentBookList[currentBookIndex].seriesId); 
+             // (Optional: might be too heavy/distracting)
+        }
+    }
 
     // Preload Trigger
     if (vState.spreads.length - vState.currentSpreadIndex <= 4) {
@@ -429,6 +455,19 @@ function formatSize(bytes) {
     const k = 1024;
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + ['B','KB','MB','GB'][i];
+}
+
+/* Progress Logic */
+function getProgress(seriesId, bookId) {
+    const json = localStorage.getItem(`prog_${seriesId}`);
+    const data = json ? JSON.parse(json) : {};
+    return data[bookId] || 0;
+}
+function saveProgress(seriesId, bookId, pageIndex) {
+    const json = localStorage.getItem(`prog_${seriesId}`);
+    const data = json ? JSON.parse(json) : {};
+    data[bookId] = pageIndex;
+    localStorage.setItem(`prog_${seriesId}`, JSON.stringify(data));
 }
 
 // Expose globals for HTML onclicks
