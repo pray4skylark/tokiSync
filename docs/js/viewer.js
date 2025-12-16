@@ -92,7 +92,7 @@ function closeEpisodeModal() {
 // ============================================================
 // 2. Viewer Core
 // ============================================================
-async function loadViewer(index) {
+async function loadViewer(index, isContinuous = false) {
     const book = currentBookList[index];
     if (!book) return;
 
@@ -139,9 +139,9 @@ async function loadViewer(index) {
         // Calculate Spreads first
         recalcSpreads(false); // Don't reset page yet
 
-        // Restore Progress
+        // Restore Progress (unless continuous read)
         const lastPage = getProgress(book.seriesId, book.id);
-        if (lastPage > 0 && lastPage < vState.images.length) {
+        if (!isContinuous && lastPage > 0 && lastPage < vState.images.length) {
             // Find spread containing this image
             const spreadIdx = vState.spreads.findIndex(spread => spread.includes(lastPage));
             vState.currentSpreadIndex = spreadIdx >= 0 ? spreadIdx : 0;
@@ -282,6 +282,8 @@ function renderCurrentSpread() {
     </div>`;
     
     // Counter
+    const start = spreadIndices[0] + 1;
+    const end = spreadIndices[spreadIndices.length-1] + 1;
     const total = vState.images.length;
     counter.innerText = (start === end) ? `${start} / ${total}` : `${start}-${end} / ${total}`;
 
@@ -311,7 +313,7 @@ function navigateViewer(dir) {
     const nextIdx = vState.currentSpreadIndex + dir;
     if (nextIdx >= vState.spreads.length) {
         if (currentBookIndex < currentBookList.length - 1) {
-             if (confirm("다음 화로 이동하시겠습니까?")) loadViewer(currentBookIndex + 1);
+             if (confirm("다음 화로 이동하시겠습니까?")) loadViewer(currentBookIndex + 1, true);
         } else {
              showToast("마지막 화입니다.");
         }
