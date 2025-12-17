@@ -371,6 +371,9 @@ function renderCurrentSpread() {
     if (vState.spreads.length - vState.currentSpreadIndex <= 4) {
          preloadNextEpisode();
     }
+    
+    // Update Slider
+    updateSliderUI();
 }
 
 // Navigation
@@ -450,9 +453,11 @@ function loadAllImageDimensions(images) {
 
 
 function togglePreloadMode() {
-    const chk = document.getElementById('chkPreload');
-    vState.preload = chk && chk.checked;
+    // Toggle Logic
+    vState.preload = !vState.preload;
     localStorage.setItem('toki_v_preload', vState.preload);
+    updateButtonStates();
+    showToast(vState.preload ? "미리 불러오기: ON" : "미리 불러오기: OFF");
 }
 
 /**
@@ -495,37 +500,40 @@ function loadViewerSettings() {
     vState.rtlMode = (localStorage.getItem('toki_v_rtl') === 'true');
     vState.preload = (localStorage.getItem('toki_v_preload') !== 'false'); // Default true
     
-    const elTwo = document.getElementById('chkTwoPage');
-    if(elTwo) elTwo.checked = (vState.mode === '2page');
-
-    const elCover = document.getElementById('chkCover');
-    if(elCover) elCover.checked = vState.coverPriority;
-
-    const elRtl = document.getElementById('chkRtl');
-    if(elRtl) elRtl.checked = vState.rtlMode;
-
-    const elPreload = document.getElementById('chkPreload');
-    if(elPreload) elPreload.checked = vState.preload;
+    updateButtonStates();
 }
+
+function updateButtonStates() {
+    const setBtn = (id, active) => {
+        const btn = document.getElementById(id);
+        if(btn) active ? btn.classList.add('active') : btn.classList.remove('active');
+    };
+    
+    setBtn('btnTwoPage', vState.mode === '2page');
+    setBtn('btnCover', vState.coverPriority);
+    setBtn('btnRtl', vState.rtlMode);
+    setBtn('btnPreload', vState.preload);
+}
+
 function toggleViewMode() {
-    const chk = document.getElementById('chkTwoPage');
-    vState.mode = chk && chk.checked ? '2page' : '1page';
+    vState.mode = (vState.mode === '1page') ? '2page' : '1page';
     localStorage.setItem('toki_v_mode', vState.mode);
-    recalcSpreads();
+    updateButtonStates();
+    recalcSpreads(false); // Keep current page if possible
 }
 
 function toggleCoverMode() {
-    const chk = document.getElementById('chkCover');
-    vState.coverPriority = chk && chk.checked;
+    vState.coverPriority = !vState.coverPriority;
     localStorage.setItem('toki_v_cover', vState.coverPriority);
-    recalcSpreads();
+    updateButtonStates();
+    recalcSpreads(false);
 }
 
 function toggleRtlMode() {
-    const chk = document.getElementById('chkRtl');
-    vState.rtlMode = chk && chk.checked;
+    vState.rtlMode = !vState.rtlMode;
     localStorage.setItem('toki_v_rtl', vState.rtlMode);
-    recalcSpreads(); // Re-render to apply direction style
+    updateButtonStates();
+    recalcSpreads(false); // Re-render to apply direction style
 }
 
 /**
@@ -570,6 +578,68 @@ function saveProgress(seriesId, bookId, pageIndex) {
     localStorage.setItem(`prog_${seriesId}`, JSON.stringify(data));
 }
 
+/* New UI Handlers */
+function toggleControls() {
+    const header = document.querySelector('.viewer-header');
+    const footer = document.querySelector('.viewer-footer');
+    header.classList.toggle('show');
+    footer.classList.toggle('show');
+}
+
+function updateSliderUI() {
+    const slider = document.getElementById('pageSlider');
+    const currentLabel = document.getElementById('sliderCurrent');
+    const totalLabel = document.getElementById('sliderTotal');
+    const title = document.getElementById('viewerTitle');
+
+    if (!vState.spreads || vState.spreads.length === 0) return;
+
+    // Current page number (1-based)
+    // Use the first image index of the current spread
+    const currentImgIndex = vState.spreads[vState.currentSpreadIndex][0] + 1;
+    const totalImages = vState.images.length;
+
+    if (slider) {
+        slider.min = 1;
+        slider.max = totalImages;
+        slider.value = currentImgIndex;
+    }
+    if (currentLabel) currentLabel.innerText = currentImgIndex;
+    if (totalLabel) totalLabel.innerText = totalImages;
+    
+    // Update Title with Series/Episode Info if available
+    if(title && currentBookList[currentBookIndex]) {
+        title.innerText = currentBookList[currentBookIndex].name;
+    }
+}
+
+function onSliderInput(val) {
+    const el = document.getElementById('sliderCurrent');
+    if(el) el.innerText = val;
+}
+
+function onSliderChange(val) {
+    const targetPage = parseInt(val) - 1; // 0-based index
+    // Find spread containing targetPage
+    const spreadIdx = vState.spreads.findIndex(spread => spread.includes(targetPage));
+    if (spreadIdx >= 0) {
+        vState.currentSpreadIndex = spreadIdx;
+        renderCurrentSpread();
+    } else {
+        // Fallback: approximate
+        vState.currentSpreadIndex = Math.min(targetPage, vState.spreads.length - 1);
+        renderCurrentSpread();
+    }
+}
+
+function openEpisodeListFromViewer() {
+    const book = currentBookList[currentBookIndex];
+    if(book) {
+        // Re-open with same context
+        openEpisodeList(book.seriesId, document.querySelector('.modal-title').innerText.replace('📄 ','').split('(')[0].trim());
+    }
+}
+
 // Expose globals for HTML onclicks
 window.openEpisodeList = openEpisodeList;
 window.loadViewer = loadViewer;
@@ -579,9 +649,8 @@ window.toggleRtlMode = toggleRtlMode;
 window.togglePreloadMode = togglePreloadMode;
 window.closeViewer = closeViewer;
 window.closeEpisodeModal = closeEpisodeModal;
-
-function toggleControls() {
-    const header = document.querySelector('.viewer-header');
-    header.classList.toggle('show');
-}
 window.toggleControls = toggleControls;
+window.navigateViewer = navigateViewer;
+window.onSliderInput = onSliderInput;
+window.onSliderChange = onSliderChange;
+window.openEpisodeListFromViewer = openEpisodeListFromViewer;

@@ -1,3 +1,4 @@
+@import url('viewer_ui.css');
 :root {
   --bg-color: #1a1a1a;
   --card-bg: #252525;
@@ -235,7 +236,7 @@ h1 {
   display: none;
   justify-content: center;
   align-items: center;
-  z-index: 2000;
+  z-index: 4000;
   backdrop-filter: blur(2px);
 }
 .modal {

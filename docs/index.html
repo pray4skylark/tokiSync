@@ -87,25 +87,52 @@
     </div>
 
     <!-- 3. Viewer Overlay -->
+    <!-- 3. Viewer Overlay -->
     <div id="viewerOverlay" class="viewer-overlay">
+        <!-- Top Header (Title & Close) -->
         <div class="viewer-header">
-            <span style="font-weight:bold;">TokiViewer</span>
-            <div class="setting-group">
-                <label><input type="checkbox" id="chkTwoPage" onchange="toggleViewMode()"> 2쪽</label>
-                <label><input type="checkbox" id="chkCover" onchange="toggleCoverMode()"> 표지</label>
-                <label><input type="checkbox" id="chkRtl" onchange="toggleRtlMode()"> 일본</label>
-                <label><input type="checkbox" id="chkPreload" onchange="togglePreloadMode()"> 미리</label>
-            </div>
-            <button class="modal-close" onclick="closeViewer()" style="color:white;">×</button>
+            <span class="viewer-title" id="viewerTitle">TokiViewer</span>
+            <button class="btn-icon close-btn" onclick="closeViewer()">×</button>
         </div>
         
-        <div class="viewer-trigger-zone"></div>
+        <!-- Center Trigger Zone (Toggle UI) -->
+        <div class="viewer-trigger-zone" onclick="toggleControls()"></div>
         
+        <!-- Main Content (Image & Nav Zones) -->
         <div class="viewer-content" id="viewerContent">
             <div class="nav-zone nav-prev"></div>
             <div class="nav-zone nav-next"></div>
             <div id="viewerImageContainer" class="viewer-image-container"></div>
+            <!-- Page Counter (Floating, separate from footer) -->
             <div id="pageCounter" class="page-counter">- / -</div>
+        </div>
+
+        <!-- Bottom Footer (Honeyview Style) -->
+        <div class="viewer-footer">
+            <!-- Row 1: Navigation & Slider -->
+            <div class="footer-row main-row">
+                <button class="btn-icon" onclick="openEpisodeListFromViewer()" title="목차">📑</button>
+                
+                <div class="slider-container">
+                    <span id="sliderCurrent" class="slider-label">1</span>
+                    <input type="range" id="pageSlider" min="1" max="100" value="1" step="1" oninput="onSliderInput(this.value)" onchange="onSliderChange(this.value)">
+                    <span id="sliderTotal" class="slider-label">100</span>
+                </div>
+
+                <div class="nav-buttons">
+                    <button class="btn-icon" onclick="navigateViewer(-1)">◀</button>
+                    <button class="btn-icon" onclick="navigateViewer(1)">▶</button>
+                </div>
+            </div>
+
+            <!-- Row 2: Settings Toggles -->
+            <div class="footer-row settings-row">
+                <button id="btnTwoPage" class="btn-toggle" onclick="toggleViewMode()">2쪽 보기</button>
+                <button id="btnCover" class="btn-toggle" onclick="toggleCoverMode()">표지 먼저</button>
+                <button id="btnRtl" class="btn-toggle" onclick="toggleRtlMode()">일본어(우좌)</button>
+                <div class="divider"></div>
+                <button id="btnPreload" class="btn-toggle" onclick="togglePreloadMode()">미리 등</button>
+            </div>
         </div>
     </div>
 
