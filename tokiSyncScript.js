@@ -88,8 +88,8 @@
         const folderId = GM_getValue(CFG_FOLDER_ID);
         // Custom Deploy ID (Personal)
         const customDeployId = GM_getValue("TOKI_DEPLOY_ID", ""); 
-        // Default Deploy ID (Shared/Auto-Update) - v3.1.0-beta.251216
-        const DEFAULT_ID = "AKfycbydljTPV1VvWTqRUBxegOSPPnirFQB7TN28A3C7ScZix7cErvvp2id3N20fIT3PTnfy"; 
+        // Default Deploy ID (Shared/Auto-Update) - v3.1.0 Safe JSDoc
+        const DEFAULT_ID = "AKfycbzRmA_VFSVkGYfSNFhmLj1Q-o0rO_3D7kUmWcyk_YQhHlFRTGB49ijG7ZXSxn_MgllH"; 
 
         const targetId = customDeployId || DEFAULT_ID;
         const apiUrl = `https://script.google.com/macros/s/${targetId}/exec`;
