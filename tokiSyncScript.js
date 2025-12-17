@@ -156,6 +156,11 @@
         };
     });
 
+    /**
+     * 1. 저장된 스크립트 버전과 GitHub 최신 버전을 비교합니다.
+     * 2. 업데이트가 필요하면 사용자에게 알림을 표시합니다.
+     * 3. 최신 스크립트 또는 캐시된 스크립트를 로드합니다.
+     */
     async function checkAndLoadCore() {
         const pinnedVer = GM_getValue(PINNED_VER_KEY);
         const latestVer = await fetchLatestVersion();
@@ -209,6 +214,11 @@
         }
     }
 
+    /**
+     * GitHub API를 통해 최신 릴리스 태그(버전)를 조회합니다.
+     * API 호출 제한을 피하기 위해 캐시(1시간)를 사용합니다.
+     * @returns {Promise<string>} 최신 버전 태그 (e.g. "v3.1.0")
+     */
     function fetchLatestVersion() {
         return new Promise((resolve) => {
             const cachedVer = GM_getValue(CACHE_KEY_VER);
@@ -243,6 +253,11 @@
         });
     }
 
+    /**
+     * GitHub Raw 서버에서 실제 스크립트 파일을 다운로드하고 저장합니다.
+     * @param {string} version - 다운로드할 버전
+     * @param {boolean} [reloadAfter=false] - 다운로드 후 페이지 새로고침 여부
+     */
     function fetchAndStoreScript(version, reloadAfter = false) {
         // [Changed] Use Raw GitHub for instant updates (Bypass CDN delay)
         const cdnUrl = `https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/${version}/${CORE_FILENAME}?t=${Date.now()}`;
@@ -283,6 +298,11 @@
         });
     }
 
+    /**
+     * 저장된 스크립트 문자열을 `new Function`으로 실행합니다.
+     * GM_* 함수들을 Core 스크립트로 전달합니다 (Sandboxing 우회).
+     * @param {string} scriptContent - 실행할 JS 코드 문자열
+     */
     function executeScript(scriptContent) {
         try {
             const runScript = new Function("window", scriptContent);

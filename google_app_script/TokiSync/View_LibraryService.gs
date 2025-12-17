@@ -2,6 +2,13 @@
 // 🚀 Viewer Library Service (Isolated)
 // =======================================================
 
+/**
+ * 해당 폴더(Libraries)의 시리즈 목록을 반환합니다.
+ * 성능을 위해 `index.json` 캐시 파일을 우선 확인하고, 없으면 재구축합니다.
+ *
+ * @param {string} folderId - 라이브러리 루트 폴더 ID
+ * @returns {Array<Object>} 시리즈 목록 (JSON)
+ */
 function View_getSeriesList(folderId) {
   if (!folderId) throw new Error("Folder ID is required");
 
@@ -23,6 +30,14 @@ function View_getSeriesList(folderId) {
   return View_rebuildLibraryIndex(folderId);
 }
 
+/**
+ * 라이브러리 폴더 구조를 스캔하여 인덱스(시리즈 목록)를 생성합니다.
+ * `info.json` 메타데이터를 우선순위로 하며, 폴더명 파싱도 지원합니다.
+ * 생성된 인덱스는 `index.json` 파일로 저장됩니다.
+ *
+ * @param {string} folderId - 라이브러리 루트 폴더 ID
+ * @returns {Array<Object>} 생성된 시리즈 목록
+ */
 function View_rebuildLibraryIndex(folderId) {
   if (!folderId) throw new Error("Folder ID is required");
 

@@ -2,6 +2,15 @@
 // 🛠 유틸리티 함수
 // =======================================================
 
+/**
+ * 폴더명으로 Google Drive 폴더 ID를 검색합니다.
+ * Advanced Drive Service를 사용하여 빠르고 정확하게 검색합니다.
+ * [ID] 태그가 있는 경우 해당 태그를 우선적으로 검색합니다.
+ *
+ * @param {string} folderName - 검색할 폴더명 (e.g. "[123] 제목")
+ * @param {string} rootFolderId - 검색 대상 루트 폴더 ID
+ * @returns {string|null} 검색된 폴더 ID 또는 null
+ */
 function findFolderId(folderName, rootFolderId) {
   const idMatch = folderName.match(/^\[(\d+)\]/);
   const root = DriveApp.getFolderById(rootFolderId);
@@ -70,6 +79,14 @@ function findFolderId(folderName, rootFolderId) {
   return null;
 }
 
+/**
+ * JSON 응답 객체(TextOutput)를 생성합니다.
+ *
+ * @param {string} status - 응답 상태 ('success' | 'error')
+ * @param {any} body - 응답 데이터
+ * @param {Array} [debugLogs=null] - 디버그 로그 (옵션)
+ * @returns {TextOutput} JSON TextOutput
+ */
 function createRes(status, body, debugLogs = null) {
   const payload = { status: status, body: body };
   if (debugLogs) payload.debugLogs = debugLogs;

@@ -2,6 +2,13 @@
 // 📡 Viewer Action Dispatcher (Controller)
 // =======================================================
 
+/**
+ * Viewer 관련 요청을 처리하는 중앙 라우터
+ * `view_` 접두사가 붙은 요청(`view_get_library`, `view_get_books` 등)을 적절한 서비스 함수로 연결합니다.
+ *
+ * @param {Object} data - 클라이언트 요청 페이로드
+ * @returns {TextOutput} JSON 응답
+ */
 function View_Dispatcher(data) {
   try {
     const action = data.type; // Use 'type' to match TokiSync Main.gs convention

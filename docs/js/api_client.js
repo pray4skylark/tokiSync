@@ -5,6 +5,9 @@
  */
 
 class TokiApiClient {
+    /**
+     * 초기화: 로컬 스토리지에서 저장된 설정(URL, API Key)을 로드합니다.
+     */
     constructor() {
         this.baseUrl = localStorage.getItem('TOKI_API_URL') || '';
         this.folderId = localStorage.getItem('TOKI_ROOT_ID') || '';
@@ -20,6 +23,10 @@ class TokiApiClient {
         localStorage.setItem('TOKI_ROOT_ID', id);
     }
 
+    /**
+     * API 통신을 위한 필수 설정(URL, FolderID)이 되어 있는지 확인합니다.
+     * @returns {boolean} 설정 완료 여부
+     */
     isConfigured() {
         return this.baseUrl && this.folderId;
     }

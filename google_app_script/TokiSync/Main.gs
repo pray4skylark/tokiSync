@@ -5,6 +5,13 @@
 // -----------------------------------------------------
 
 // [GET] 서버 상태 확인용
+/**
+ * [GET] 서버 상태 확인용 엔드포인트
+ * 웹 앱 URL 접근 시 서버가 작동 중인지 확인하는 메시지를 반환합니다.
+ *
+ * @param {Object} e - 이벤트 객체
+ * @returns {TextOutput} 서버 상태 메시지
+ */
 function doGet(e) {
   return ContentService.createTextOutput(
     "✅ TokiSync API Server v3.0.0-beta.251211 (Stateless) is Running..."
@@ -12,6 +19,19 @@ function doGet(e) {
 }
 
 // [POST] Tampermonkey 요청 처리 (핵심 로직)
+/**
+ * [POST] API 요청 처리 핸들러
+ * 클라이언트(Tampermonkey, Web App)로부터의 JSON 요청을 처리합니다.
+ *
+ * [요청 흐름]
+ * 1. Payload 파싱 및 `folderId` 검증
+ * 2. `data.type`에 따라 적절한 서비스 함수로 분기
+ * 3. `view_*` 요청은 `View_Dispatcher`로 위임
+ * 4. 결과(JSON) 반환
+ *
+ * @param {Object} e - 이벤트 객체 (postData 포함)
+ * @returns {TextOutput} JSON 응답
+ */
 function doPost(e) {
   Debug.start(); // 🐞 디버그 시작
   try {

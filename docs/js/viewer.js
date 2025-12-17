@@ -8,13 +8,22 @@
 // State
 let currentBookList = [];
 let currentBookIndex = -1;
+/**
+ * 뷰어 상태 객체
+ * @property {string} mode - 보기 모드 ('1page' | '2page')
+ * @property {boolean} coverPriority - 2쪽 보기 시 표지(첫장) 단독 표시 여부
+ * @property {boolean} rtlMode - 오른쪽에서 왼쪽으로 읽기 (만화 모드)
+ * @property {Array<Object>} images - 이미지 객체 리스트 ({src, width, height, loaded})
+ * @property {Array<Array<number>>} spreads - 펼침면 구성 (페이지 인덱스 배열의 배열)
+ * @property {number} currentSpreadIndex - 현재 보고 있는 펼침면 인덱스
+ * @property {boolean} preload - 다음 화 미리 불러오기 활성화 여부
+ */
 let vState = {
     mode: '1page', // '1page' or '2page'
     coverPriority: true,
     rtlMode: false,
     images: [], 
     spreads: [], 
-    currentSpreadIndex: 0,
     currentSpreadIndex: 0,
     settingsTimer: null,
     preload: true
@@ -24,6 +33,12 @@ let nextBookPreload = null;
 // ============================================================
 // 1. Episode List
 // ============================================================
+/**
+ * 회차 목록 모달을 열고 데이터를 로드합니다.
+ * @param {string} seriesId - 시리즈 폴더 ID
+ * @param {string} title - 시리즈 제목
+ * @param {number} seriesIndex - (Optional) 시리즈 인덱스
+ */
 async function openEpisodeList(seriesId, title, seriesIndex) {
     document.getElementById('episodeModal').style.display = 'flex';
     document.querySelector('#episodeModal .modal-title').innerText = `📄 ${title}`;
@@ -39,6 +54,15 @@ async function openEpisodeList(seriesId, title, seriesIndex) {
     }
 }
 
+/**
+ * 회차 목록 UI를 렌더링합니다.
+ * - .cbz/.zip 파일은 뷰어로 열기
+ * - 폴더는 새 탭(구글 드라이브)으로 열기
+ * - 'Read' 뱃지 표시
+ * 
+ * @param {Array<Object>} books - 회차 목록
+ * @param {string} seriesId - 시리즈 ID (읽음 기록 조회를 위해 필요)
+ */
 function renderEpisodeList(books, seriesId) {
     currentBookList = books || [];
     const listEl = document.getElementById('episodeList');
@@ -92,6 +116,12 @@ function closeEpisodeModal() {
 // ============================================================
 // 2. Viewer Core
 // ============================================================
+/**
+ * 뷰어를 초기화하고 이미지를 로드합니다.
+ * 
+ * @param {number} index - currentBookList 내의 회차 인덱스
+ * @param {boolean} [isContinuous=false] - 연속 읽기 여부 (true면 처음부터, false면 저장된 페이지부터 시작)
+ */
 async function loadViewer(index, isContinuous = false) {
     const book = currentBookList[index];
     if (!book) return;
@@ -158,6 +188,19 @@ async function loadViewer(index, isContinuous = false) {
     }
 }
 
+/**
+ * .cbz 파일을 청크 단위로 다운로드하고 압축을 해제합니다.
+ * 
+ * [Stream Process]
+ * 1. GAS API(view_get_chunk)를 호출하여 10MB 단위로 다운로드.
+ * 2. `chunks` 배열에 바이너리 데이터를 누적.
+ * 3. `JSZip`을 사용하여 압축 해제.
+ * 4. 이미지 파일만 필터링하여 Blob URL 생성.
+ * 
+ * @param {string} fileId - 파일 ID
+ * @param {Function} onProgress - 진행률 콜백
+ * @returns {Promise<Array<string>>} Blob URL 리스트 (파일명 순 정렬됨)
+ */
 async function fetchAndUnzip(fileId, onProgress) {
     const chunks = [];
     let offset = 0;
@@ -223,6 +266,18 @@ async function fetchAndUnzip(fileId, onProgress) {
 // ============================================================
 // 3. View Logic (Spreads, Nav)
 // ============================================================
+/**
+ * 보기 모드(1쪽/2쪽)와 이미지 크기(가로/세로)에 따라 페이지(Spread)를 재구성합니다.
+ * 
+ * [Logic]
+ * - 1쪽 보기: 각 이미지가 하나의 Spread가 됨.
+ * - 2쪽 보기:
+ *   - 가로형 이미지(Landscape): 단독 페이지 사용.
+ *   - 표지 모드(Cover Priority): 첫 페이지는 무조건 단독 사용.
+ *   - 세로형 이미지: 가능한 경우 두 장을 하나의 Spread로 묶음.
+ * 
+ * @param {boolean} [resetPage=false] - 현재 페이지 인덱스를 0으로 초기화할지 여부
+ */
 function recalcSpreads(resetPage = false) {
     vState.spreads = [];
     const images = vState.images;
@@ -265,6 +320,16 @@ function recalcSpreads(resetPage = false) {
     renderCurrentSpread();
 }
 
+/**
+ * 현재 Spread(vState.currentSpreadIndex)를 DOM에 그립니다.
+ * 
+ * [Main Actions]
+ * 1. 이미지 태그 생성 및 RTL 모드 적용
+ * 2. 페이지 카운터 갱신
+ * 3. 현재 페이지 진행도 저장 (`saveProgress`)
+ * 4. 마지막 페이지 도달 시 '완독' 처리 (`saveReadHistory`)
+ * 5. 남은 페이지가 4장 미만일 때 다음 화 프리로드 트리거 (`preloadNextEpisode`)
+ */
 function renderCurrentSpread() {
     if (!vState.spreads || vState.spreads.length === 0) return;
     
@@ -309,6 +374,11 @@ function renderCurrentSpread() {
 }
 
 // Navigation
+/**
+ * 뷰어 페이지를 이동합니다.
+ * 
+ * @param {number} dir - 이동 방향 (1: 다음, -1: 이전)
+ */
 function navigateViewer(dir) {
     const nextIdx = vState.currentSpreadIndex + dir;
     if (nextIdx >= vState.spreads.length) {
@@ -327,6 +397,10 @@ function navigateViewer(dir) {
     renderCurrentSpread();
 }
 
+/**
+ * 뷰어를 닫고 리소스를 정리합니다.
+ * 중요: `URL.revokeObjectURL`을 호출하여 메모리 누수를 방지합니다.
+ */
 function closeViewer() {
     const viewer = document.getElementById('viewerOverlay');
     const container = document.getElementById('viewerImageContainer');
@@ -358,6 +432,10 @@ document.addEventListener('keydown', (e) => {
 // ============================================================
 // 4. Helpers
 // ============================================================
+/**
+ * 모든 이미지의 실제 크기(naturalWidth/Height)를 비동기적으로 로드합니다.
+ * 스마트 2쪽 보기(가로형 이미지 단독 표시 등)를 위해 필수적입니다.
+ */
 function loadAllImageDimensions(images) {
     const promises = images.map(imgData => {
         return new Promise(resolve => {
@@ -377,6 +455,10 @@ function togglePreloadMode() {
     localStorage.setItem('toki_v_preload', vState.preload);
 }
 
+/**
+ * 다음 화 미리 불러오기(Preload).
+ * 현재 화를 4페이지 남겨두었을 때 트리거됩니다.
+ */
 function preloadNextEpisode() {
     if (!vState.preload) return; // Feature disabled
     
@@ -403,6 +485,9 @@ function updateNavHandlers() {
 }
 
 /* Settings Logic (Reused from Client.js but simplified) */
+/**
+ * 로컬 스토리지에서 뷰어 설정을 로드하고 UI에 반영합니다.
+ */
 function loadViewerSettings() {
     vState.mode = localStorage.getItem('toki_v_mode') || '1page';
     vState.coverPriority = (localStorage.getItem('toki_v_cover') === 'true');
@@ -443,10 +528,17 @@ function toggleRtlMode() {
     recalcSpreads(); // Re-render to apply direction style
 }
 
+/**
+ * 읽은 기록 반환 (Key: `read_{seriesId}`)
+ * @returns {Object} 읽은 기록 객체 { bookId: true, ... }
+ */
 function getReadHistory(seriesId) {
     const json = localStorage.getItem(`read_${seriesId}`);
     return json ? JSON.parse(json) : {};
 }
+/**
+ * 에피소드 읽음 처리 및 저장
+ */
 function saveReadHistory(seriesId, bookId) {
     let history = getReadHistory(seriesId);
     history[bookId] = true;
@@ -460,11 +552,17 @@ function formatSize(bytes) {
 }
 
 /* Progress Logic */
+/**
+ * 저장된 진행도(페이지 인덱스)를 반환합니다.
+ */
 function getProgress(seriesId, bookId) {
     const json = localStorage.getItem(`prog_${seriesId}`);
     const data = json ? JSON.parse(json) : {};
     return data[bookId] || 0;
 }
+/**
+ * 현재 읽고 있는 페이지 인덱스를 저장합니다.
+ */
 function saveProgress(seriesId, bookId, pageIndex) {
     const json = localStorage.getItem(`prog_${seriesId}`);
     const data = json ? JSON.parse(json) : {};

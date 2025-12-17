@@ -2,6 +2,13 @@
 // 📚 Viewer Book Service (Isolated)
 // =======================================================
 
+/**
+ * 특정 시리즈(폴더) 내의 책(파일/폴더) 목록을 반환합니다.
+ * 파일명에서 숫자 정보를 추출하여 정렬합니다.
+ *
+ * @param {string} seriesId - 시리즈 폴더 ID
+ * @returns {Array<Object>} 책 목록
+ */
 function View_getBooks(seriesId) {
   try {
     if (!seriesId) throw new Error("Series ID is required");
@@ -88,6 +95,15 @@ function View_getBooks(seriesId) {
   }
 }
 
+/**
+ * 파일을 청크(Chunk) 단위로 분할하여 반환합니다.
+ * 대용량 파일(CBZ 등)을 브라우저로 전송하기 위해 사용됩니다.
+ *
+ * @param {string} fileId - 대상 파일 ID
+ * @param {number} offset - 시작 바이트 위치
+ * @param {number} length - 읽을 바이트 길이
+ * @returns {Object} { data: Base64String, hasMore: boolean, totalSize: number, nextOffset: number }
+ */
 function View_getFileChunk(fileId, offset, length) {
   const file = DriveApp.getFileById(fileId);
   const blob = file.getBlob();

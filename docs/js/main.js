@@ -41,6 +41,12 @@ window.onload = function () {
     }
 };
 
+/**
+ * UserScript(Tampermonkey)로부터의 설정 주입 메시지를 처리합니다.
+ * Zero-Config: 별도 설정 없이 바로 서버 URL과 폴더 ID를 수신하여 설정합니다.
+ * 
+ * @param {MessageEvent} event - window message event
+ */
 function handleMessage(event) {
     if (event.data.type === 'TOKI_CONFIG') {
         const { url, folderId, deployId } = event.data;
@@ -60,6 +66,12 @@ function handleMessage(event) {
 // ============================================================
 // 2. Data Fetching
 // ============================================================
+/**
+ * 라이브러리 데이터를 서버에서 새로고침합니다.
+ * 
+ * @param {string} [forceId=null] - 강제로 특정 폴더 ID를 사용할 경우 지정
+ * @param {boolean} [silent=false] - 로딩 인디케이터 표시 여부 (true면 숨김)
+ */
 async function refreshDB(forceId = null, silent = false) {
     const loader = document.getElementById('pageLoader');
     const btn = document.getElementById('refreshBtn');
@@ -90,6 +102,12 @@ async function refreshDB(forceId = null, silent = false) {
 // ============================================================
 // 3. UI Rendering (Grid)
 // ============================================================
+/**
+ * 시리즈 목록 데이터를 기반으로 만화 책자(그리드)를 렌더링합니다.
+ * 각 카드는 클릭 시 에피소드 목록(`openEpisodeList`)을 엽니다.
+ * 
+ * @param {Array<Object>} seriesList - 시리즈 객체 배열
+ */
 function renderGrid(seriesList) {
     allSeries = seriesList || [];
     const grid = document.getElementById('grid');
@@ -142,6 +160,11 @@ function renderGrid(seriesList) {
 // ============================================================
 // 4. Utility / UI Handlers
 // ============================================================
+/**
+ * 토스트 메시지를 화면 하단에 표시합니다.
+ * @param {string} msg - 메시지 내용
+ * @param {number} [duration=3000] - 지속 시간 (ms)
+ */
 function showToast(msg, duration = 3000) {
     const toast = document.createElement('div');
     toast.className = 'toast show';
@@ -153,7 +176,10 @@ function showToast(msg, duration = 3000) {
     }, duration);
 }
 
-// Manual Save Config
+/**
+ * 설정 모달의 '저장' 버튼 핸들러입니다.
+ * 입력된 URL과 ID를 저장하고 데이터를 새로고침합니다.
+ */
 function saveManualConfig() {
     const url = document.getElementById('configApiUrl').value.trim();
     const id = document.getElementById('configFolderId').value.trim();
@@ -165,6 +191,10 @@ function saveManualConfig() {
     refreshDB();
 }
 
+/**
+ * 검색창 입력 이벤트 핸들러.
+ * `allSeries`에서 제목을 검색하여 그리드를 필터링합니다.
+ */
 function filterData() {
     const query = document.getElementById('search').value.toLowerCase();
     const cards = document.querySelectorAll('.card');
@@ -214,6 +244,9 @@ function getDynamicLink(series) {
     return contentId ? (baseUrl + path + contentId) : "#";
 }
 
+/**
+ * 도메인 설정 패널을 토글(열기/닫기)합니다.
+ */
 function toggleSettings() {
     const el = document.getElementById('domainPanel');
     el.style.display = el.style.display === 'block' ? 'none' : 'block';
