@@ -145,21 +145,22 @@ async function loadViewer(index, isContinuous = false) {
         let blobUrls = [];
         
         // Check Preload
-        if (nextBookPreload && nextBookPreload.index === index) {
+        if (nextBookPreload && nextBookPreload.index === index && Array.isArray(nextBookPreload.images)) {
             console.log("Using preloaded data!");
             blobUrls = nextBookPreload.images;
             nextBookPreload = null;
         } else {
+            // Clear invalid preload
+            if (nextBookPreload && nextBookPreload.index === index) nextBookPreload = null;
+
             blobUrls = await fetchAndUnzip(book.id, (progress) => {
                 const el = container.querySelector('div');
                 if (el) el.innerText = progress;
             });
         }
 
-        if (blobUrls.length === 0) throw new Error("이미지를 찾을 수 없습니다.");
+        if (!Array.isArray(blobUrls) || blobUrls.length === 0) throw new Error("이미지를 찾을 수 없습니다.");
 
-        if (blobUrls.length === 0) throw new Error("이미지를 찾을 수 없습니다.");
-        
         // Setup Images
         vState.images = blobUrls.map(url => ({ src: url, width: 0, height: 0, loaded: false }));
         
@@ -336,6 +337,10 @@ function renderCurrentSpread() {
     const container = document.getElementById('viewerImageContainer');
     const counter = document.getElementById('pageCounter');
     const spreadIndices = vState.spreads[vState.currentSpreadIndex];
+    if (!spreadIndices) {
+        console.error(`Rendering Error: Invalid Spread Index ${vState.currentSpreadIndex} / ${vState.spreads.length}`);
+        return;
+    }
     
     // RTL
     const dirStyle = vState.rtlMode ? 'flex-direction:row-reverse;' : '';
