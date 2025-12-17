@@ -1,0 +1,174 @@
+/* Viewer Footer (Honeyview Style) */
+.viewer-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    background: rgba(30, 30, 30, 0.95);
+    backdrop-filter: blur(10px);
+    padding: 15px 20px;
+    box-shadow: 0 -5px 20px rgba(0, 0, 0, 0.5);
+    transform: translateY(110%);
+    transition: transform 0.3s ease;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.viewer-footer.show {
+    transform: translateY(0);
+}
+
+.footer-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 15px;
+    width: 100%;
+}
+
+/* Main Row: Slider & Nav */
+.slider-container {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    gap: 10px;
+    max-width: 600px;
+}
+
+.slider-label {
+    color: #ccc;
+    font-size: 13px;
+    min-width: 30px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Custom Slider Styling */
+input[type=range] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 4px;
+    background: #444;
+    border-radius: 2px;
+    cursor: pointer;
+}
+
+input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    height: 16px;
+    width: 16px;
+    border-radius: 50%;
+    background: #007aff;
+    box-shadow: 0 0 5px rgba(0,0,0,0.5);
+    margin-top: -6px; /* center thumb */
+}
+
+input[type=range]::-webkit-slider-runnable-track {
+    width: 100%;
+    height: 4px;
+    cursor: pointer;
+    background: #444;
+    border-radius: 2px;
+}
+
+/* Buttons */
+.nav-buttons {
+    display: flex;
+    gap: 10px;
+}
+
+.btn-icon {
+    background: none;
+    border: none;
+    color: #eee;
+    font-size: 18px;
+    cursor: pointer;
+    padding: 5px;
+    border-radius: 5px;
+    transition: background 0.2s;
+}
+
+.btn-icon:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* Settings Row */
+.settings-row {
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.3);
+    padding: 8px;
+    border-radius: 8px;
+    width: fit-content;
+    margin: 0 auto;
+}
+
+.btn-toggle {
+    background: transparent;
+    border: 1px solid #444;
+    color: #888;
+    padding: 5px 12px;
+    font-size: 12px;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-toggle.active {
+    background: #007aff;
+    border-color: #007aff;
+    color: white;
+    font-weight: bold;
+}
+
+.btn-toggle:hover:not(.active) {
+    border-color: #666;
+    color: #ccc;
+}
+
+/* Divider line in settings */
+.divider {
+    width: 1px;
+    height: 20px;
+    background: #444;
+    margin: 0 5px;
+}
+
+/* Page Counter Floating Override */
+#pageCounter {
+    position: absolute;
+    bottom: 20px; /* Moves up automatically when footer is shown? JS will handle or adjust if needed */
+    right: 20px;
+    background: rgba(0, 0, 0, 0.6);
+    padding: 5px 10px;
+    border-radius: 15px;
+    font-size: 12px;
+    pointer-events: none;
+    transition: opacity 0.3s;
+}
+
+/* Header Adjustments */
+.viewer-header {
+    background: linear-gradient(to bottom, rgba(0,0,0,0.9), transparent);
+    padding: 15px;
+    transform: translateY(-100%);
+    transition: transform 0.3s ease;
+}
+
+.viewer-header.show {
+    transform: translateY(0);
+}
+
+.viewer-title {
+    color: white;
+    font-size: 16px;
+    font-weight: 500;
+    text-shadow: 0 1px 3px black;
+}
+
+.close-btn {
+    font-size: 24px;
+    color: rgba(255, 255, 255, 0.8);
+}
