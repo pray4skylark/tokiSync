@@ -1,4 +1,4 @@
-// 🚀 TokiSync Core Logic v3.1.0-beta.251218.0001
+// 🚀 TokiSync Core Logic v3.1.0-beta.251218.0003
 // This script is loaded dynamically by the Loader.
 
 window.TokiSyncCore = function (GM_context) {
@@ -13,7 +13,7 @@ window.TokiSyncCore = function (GM_context) {
     const GM_deleteValue = GM_context.GM_deleteValue;
     const JSZip = GM_context.JSZip;
     const PROTOCOL_VERSION = 3; // Major Version (Server Compatibility)
-    const CLIENT_VERSION = "3.1.0-beta.251218.0001"; // Viewer Optimization Update
+    const CLIENT_VERSION = "3.1.0-beta.251218.0003"; // Viewer Optimization Update
 
     // [New] 호환성 체크: Core가 요구하는 최소 로더 버전 확인
     const MIN_LOADER_VERSION = "3.0.0-beta.251215.0002";
@@ -25,7 +25,7 @@ window.TokiSyncCore = function (GM_context) {
         return; // Core 실행 중단
     }
 
-    console.log("🚀 TokiSync Core v3.1.0-beta.251218.0001 Loaded (Remote)");
+    console.log(`🚀 TokiSync ${CLIENT_VERSION} Loaded (Remote)`);
 
     // #region [1. 설정 및 상수] ====================================================
     const CFG_URL_KEY = "TOKI_GAS_URL";
@@ -37,8 +37,8 @@ window.TokiSyncCore = function (GM_context) {
     const CURRENT_CONFIG_VER = 1; // v3.0.0 초기 버전
 
     // 🚀 v3.0.0-beta.251211 New Deployment URLs (Fixed ID Strategy)
-    const DEFAULT_API_URL = "https://script.google.com/macros/s/AKfycbwoalR1yG4NkKpC4zV8oxSsxMBZLP6MNYqoG0Fn1U-KHysIuJPaL5oaNd7bdGkZCGsv/exec"; // @29
-    const DEFAULT_DASH_URL = "https://script.google.com/macros/s/AKfycbzfuNB8hlRTKFWPGPxh2nVVcODaVIhBYMVBxbsDiOKxc6H2GmaGZPyFbLyw_aI9TpEy/exec"; // @25
+    const DEFAULT_API_URL = "https://script.google.com/macros/s//exec"; // @50
+    const DEFAULT_DASH_URL = "https://pray4skylark.github.io/tokiSync/"; // @25
 
     function getConfig() {
         return {
@@ -366,7 +366,7 @@ window.TokiSyncCore = function (GM_context) {
             folderId: config.folderId, 
             type: 'check_history', 
             protocolVersion: 3, // [New] Major Protocol Version
-            clientVersion: "3.1.0-beta.251218.0001", 
+            clientVersion: CLIENT_VERSION, 
             folderName: `[${info.id}] ${info.cleanTitle}` 
         };
             updateStatus("☁️ 드라이브 파일 스캔 중...");
@@ -436,7 +436,7 @@ window.TokiSyncCore = function (GM_context) {
                 folderId: config.folderId, 
                 type: 'save_info', 
                 protocolVersion: 3, // [New] Major Protocol Version
-                clientVersion: "3.1.0-beta.251218.0001", 
+                clientVersion: CLIENT_VERSION, 
                 folderName: `[${info.id}] ${info.cleanTitle}`,
                 id: info.id, title: info.fullTitle, url: document.URL, site: site,
                 author: info.author, category: info.category, status: info.status, thumbnail: thumbnailBase64 || info.thumbnail,
@@ -479,7 +479,7 @@ window.TokiSyncCore = function (GM_context) {
                     folderId: config.folderId, 
                     type: "init", 
                     protocolVersion: 3, // [New] Major Protocol Version
-                    clientVersion: "3.1.0-beta.251218.0001", 
+                    clientVersion: CLIENT_VERSION, 
                     folderName: folderName, 
                     fileName: fileName 
                 }),
@@ -524,7 +524,7 @@ window.TokiSyncCore = function (GM_context) {
                     data: JSON.stringify({ 
                         folderId: config.folderId, 
                         type: "upload", 
-                        clientVersion: "3.1.0-beta.251218.0001", // [New] API Version Check (Chunk는 생략 가능하지만 안전하게 추가)
+                        clientVersion: CLIENT_VERSION, // [New] API Version Check (Chunk는 생략 가능하지만 안전하게 추가)
                         uploadUrl: uploadUrl, 
                         chunkData: chunkBase64, 
                         start: start, end: end, total: totalSize 
