@@ -1,4 +1,4 @@
-// 🚀 TokiSync Core Logic v3.1.0-beta.251218.0003
+// 🚀 TokiSync Core Logic v3.1.0-beta.251218.0004
 // This script is loaded dynamically by the Loader.
 
 window.TokiSyncCore = function (GM_context) {
@@ -13,7 +13,7 @@ window.TokiSyncCore = function (GM_context) {
     const GM_deleteValue = GM_context.GM_deleteValue;
     const JSZip = GM_context.JSZip;
     const PROTOCOL_VERSION = 3; // Major Version (Server Compatibility)
-    const CLIENT_VERSION = "3.1.0-beta.251218.0003"; // Viewer Optimization Update
+    const CLIENT_VERSION = "3.1.0-beta.251218.0004"; // Viewer Optimization Update
 
     // [New] 호환성 체크: Core가 요구하는 최소 로더 버전 확인
     const MIN_LOADER_VERSION = "3.0.0-beta.251215.0002";
@@ -543,6 +543,7 @@ window.TokiSyncCore = function (GM_context) {
             start = end;
         }
         updateStatus(`<strong>✅ 완료: ${fileName}</strong>`);
+        return seriesFolderId; // [Fix] Return captured ID to caller
     }
     // #endregion
 
@@ -707,7 +708,7 @@ window.TokiSyncCore = function (GM_context) {
                 setListItemStatus(currentLi, "☁️ 업로드 중...", "#bbdefb", "#0d47a1");
 
                 const uploadTask = uploadResumable(content, targetFolderName, zipFileName)
-                    .then(() => {
+                    .then((seriesFolderId) => {
                         setListItemStatus(currentLi, "✅ 완료", "#e0e0e0", "green");
                         updateLocalHistory(parseInt(num));
                         

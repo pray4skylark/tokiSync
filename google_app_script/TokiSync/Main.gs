@@ -33,7 +33,7 @@ function doGet(e) {
  * @returns {TextOutput} JSON 응답
  */
 // [CONSTANTS]
-const SERVER_VERSION = "v3.1.0-beta.251218.0003"; // Server Logic Update (Viewer Opt + Upload/Cache)
+const SERVER_VERSION = "v3.1.0-beta.251218.0004"; // Server Logic Update (Viewer Opt + Upload/Cache)
 
 function doPost(e) {
   Debug.start(); // 🐞 디버그 시작

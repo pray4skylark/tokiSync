@@ -14,7 +14,7 @@ const DEFAULT_DOMAINS = {
     booktoki: '469'
 };
 
-const VIEWER_VERSION = "v3.1.0-beta.251218.0003"; // Viewer Optimization Update
+const VIEWER_VERSION = "v3.1.0-beta.251218.0004"; // Viewer Optimization Update
 // [New] Expose Version to Global Scope for Debugging
 window.TOKI_VIEWER_VERSION = VIEWER_VERSION;
 
