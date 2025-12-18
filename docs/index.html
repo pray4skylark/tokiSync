@@ -23,20 +23,56 @@
                 </div>
             </div>
             
-            <!-- Domain Panel (Hidden) -->
-            <div id="domainPanel" style="display:none; background:#252525; padding:15px; border-radius:10px; margin-top:10px;">
-                <h3 style="margin:0 0 10px 0; font-size:14px;">바로가기 도메인 설정</h3>
-                <div class="config-group">
-                    <input type="text" id="url_manatoki" class="config-input" placeholder="마나토끼 URL (예: https://manatoki470.net)">
+            <!-- Settings Panel -->
+            <div id="domainPanel" style="display:none; background:#252525; padding:15px; border-radius:10px; margin-top:10px; color:#ddd;">
+                
+                <!-- 1. Shortcuts (Numbers Only) -->
+                <h3 style="margin:0 0 10px 0; font-size:14px; border-bottom:1px solid #444; padding-bottom:5px;">🔗 바로가기 도메인 (번호)</h3>
+                <div class="config-grid" style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; margin-bottom:15px;">
+                    <div>
+                        <label style="font-size:11px; color:#aaa;">마나토끼</label>
+                        <input type="text" id="url_manatoki" class="config-input" placeholder="469" style="text-align:center;">
+                    </div>
+                    <div>
+                        <label style="font-size:11px; color:#aaa;">뉴토끼</label>
+                        <input type="text" id="url_newtoki" class="config-input" placeholder="469" style="text-align:center;">
+                    </div>
+                    <div>
+                        <label style="font-size:11px; color:#aaa;">북토끼</label>
+                        <input type="text" id="url_booktoki" class="config-input" placeholder="469" style="text-align:center;">
+                    </div>
                 </div>
-                <div class="config-group">
-                    <input type="text" id="url_newtoki" class="config-input" placeholder="뉴토끼 URL">
+
+                <!-- 2. Connection Settings -->
+                <h3 style="margin:0 0 10px 0; font-size:14px; border-bottom:1px solid #444; padding-bottom:5px;">☁️ 서버 연결 설정</h3>
+                <div class="config-group" style="margin-bottom:15px;">
+                    <label style="font-size:11px; color:#aaa; display:block; margin-bottom:3px;">Folder ID</label>
+                    <input type="text" id="setting_folderId" class="config-input" placeholder="Google Drive Folder ID">
                 </div>
-                <div class="config-group">
-                    <input type="text" id="url_booktoki" class="config-input" placeholder="북토끼 URL">
+                <div class="config-group" style="margin-bottom:15px;">
+                    <label style="font-size:11px; color:#aaa; display:block; margin-bottom:3px;">GAS Deployment ID</label>
+                    <input type="text" id="setting_deployId" class="config-input" placeholder="AKfycb...">
                 </div>
-                <div class="config-group">
-                     <button class="btn btn-save" onclick="saveDomains()">저장</button>
+
+                <!-- 3. Viewer Defaults -->
+                <h3 style="margin:0 0 10px 0; font-size:14px; border-bottom:1px solid #444; padding-bottom:5px;">👁️ 뷰어 기본 설정</h3>
+                <div class="config-check-group" style="display:flex; gap:15px; margin-bottom:15px;">
+                    <label style="display:flex; align-items:center; cursor:pointer; font-size:12px;">
+                        <input type="checkbox" id="pref_2page"> 2쪽 보기
+                    </label>
+                    <label style="display:flex; align-items:center; cursor:pointer; font-size:12px;">
+                        <input type="checkbox" id="pref_cover"> 표지 우선
+                    </label>
+                    <label style="display:flex; align-items:center; cursor:pointer; font-size:12px;">
+                        <input type="checkbox" id="pref_rtl"> 일본만화(우좌)
+                    </label>
+                </div>
+
+                <div class="config-group" style="text-align:right;">
+                     <button class="btn btn-save" onclick="saveActiveSettings()">전체 저장</button>
+                </div>
+                <div id="viewerVersionDisplay" style="margin-top:10px; font-size:11px; color:#555; text-align:center;">
+                    Version: Loading...
                 </div>
             </div>
         </header>

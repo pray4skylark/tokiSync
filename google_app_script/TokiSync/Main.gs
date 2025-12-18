@@ -32,6 +32,9 @@ function doGet(e) {
  * @param {Object} e - 이벤트 객체 (postData 포함)
  * @returns {TextOutput} JSON 응답
  */
+// [CONSTANTS]
+const SERVER_VERSION = "v3.1.0-beta.251218.0003"; // Server Logic Update (Viewer Opt + Upload/Cache)
+
 function doPost(e) {
   Debug.start(); // 🐞 디버그 시작
   try {
@@ -77,7 +80,10 @@ function doPost(e) {
       else if (data.type === "get_server_info") {
         result = createRes("success", {
           name: "TokiSync API",
-          version: "v3.1.0-beta.251216.0001",
+          status: "success",
+          message: "TokiSync Server is Online",
+          version: SERVER_VERSION,
+          timestamp: new Date().toISOString(),
           url: ScriptApp.getService().getUrl(),
           user: Session.getActiveUser().getEmail(),
         });
