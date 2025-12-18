@@ -20,9 +20,11 @@ function View_Dispatcher(data) {
     if (action === "view_get_library") {
       if (!data.folderId) throw new Error("folderId is required for library");
       resultBody = View_getSeriesList(data.folderId);
-    } else if (action === "view_get_books") {
+    } else if (action === "view_get_books" || action === "view_refresh_cache") {
       if (!data.seriesId) throw new Error("seriesId is required for books");
-      resultBody = View_getBooks(data.seriesId);
+      const bypassCache =
+        data.bypassCache === true || action === "view_refresh_cache";
+      resultBody = View_getBooks(data.seriesId, bypassCache);
     } else if (action === "view_get_chunk") {
       if (!data.fileId) throw new Error("fileId is required");
       // Chunk logic

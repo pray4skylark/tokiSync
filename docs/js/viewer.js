@@ -153,7 +153,8 @@ async function loadViewer(index, isContinuous = false) {
             // Clear invalid preload
             if (nextBookPreload && nextBookPreload.index === index) nextBookPreload = null;
 
-            blobUrls = await fetchAndUnzip(book.id, (progress) => {
+            // Pass Total Size for Adaptive Logic
+            blobUrls = await fetchAndUnzip(book.id, book.size || 0, (progress) => {
                 const el = container.querySelector('div');
                 if (el) el.innerText = progress;
             });
@@ -202,11 +203,159 @@ async function loadViewer(index, isContinuous = false) {
  * @param {Function} onProgress - 진행률 콜백
  * @returns {Promise<Array<string>>} Blob URL 리스트 (파일명 순 정렬됨)
  */
-async function fetchAndUnzip(fileId, onProgress) {
+/**
+ * .cbz 파일을 다운로드하고 압축을 해제합니다.
+ * 
+ * [Adaptive Strategy]
+ * 1. Small File (< 26MB): Single Fetch (Range-less or Full Range)
+ * 2. Large File (>= 26MB): Concurrent Chunk Fetch (10MB chunks, Max 3 concurrent)
+ * 
+ * @param {string} fileId - 파일 ID
+ * @param {number} totalSize - 파일 전체 크기 (bytes)
+ * @param {Function} onProgress - 진행률 콜백
+ * @returns {Promise<Array<string>>} Blob URL 리스트
+ */
+async function fetchAndUnzip(fileId, totalSize, onProgress) {
+    let combinedBytes = null;
+    const SAFE_THRESHOLD = 26 * 1024 * 1024; // 26MB
+
+    if (totalSize > 0 && totalSize < SAFE_THRESHOLD) {
+        // [Mode A] Single Fetch
+        console.log(`📉 Small File detected (${formatSize(totalSize)}). using Single Fetch.`);
+        if (onProgress) onProgress(`다운로드 중... (0%)`);
+        
+        try {
+            const response = await API.request('view_get_chunk', {
+                fileId: fileId,
+                offset: 0,
+                length: totalSize 
+            });
+            if (response && response.data) {
+                 const binaryString = atob(response.data);
+                 const len = binaryString.length;
+                 combinedBytes = new Uint8Array(len);
+                 for (let i = 0; i < len; i++) combinedBytes[i] = binaryString.charCodeAt(i);
+                 if (onProgress) onProgress(`다운로드 완료 (100%)`);
+            } else {
+                throw new Error("Empty Response");
+            }
+        } catch (e) {
+            console.warn("Single Fetch failed, falling back to Chunk mode", e);
+            // Fallback will happen naturally if combinedBytes remains null?
+            // No, strictly separate logic. If fail, throw.
+            throw new Error("다운로드 실패: " + e.message);
+        }
+
+    } else {
+        // [Mode B] Concurrent Chunk Fetch
+        console.log(`📈 Large File detected (${formatSize(totalSize)}). using Concurrent Chunk Fetch.`);
+        
+        const chunks = [];
+        const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB
+        let offset = 0;
+        
+        // 1. Calculate Chunks needed
+        // If totalSize is unknown (0), we can't use parallel accurately. Fallback to sequential.
+        if (totalSize === 0) {
+             // Sequential Fallback (Existing Logic)
+             return fetchAndUnzipSequentialFallback(fileId, onProgress);
+        }
+
+        const chunkCount = Math.ceil(totalSize / CHUNK_SIZE);
+        const tasks = [];
+        
+        for (let i = 0; i < chunkCount; i++) {
+            tasks.push({ index: i, start: i * CHUNK_SIZE, length: CHUNK_SIZE });
+        }
+
+        let completed = 0;
+        const results = new Array(chunkCount); 
+
+        // Worker Pool (Max Concurrency: 3)
+        const CONCURRENCY = 3;
+        
+        const worker = async () => {
+             while (tasks.length > 0) {
+                 const task = tasks.shift();
+                 const currentOffset = task.start;
+                 
+                 // Retry Logic
+                 let retries = 3;
+                 while(retries > 0) {
+                     try {
+                         const response = await API.request('view_get_chunk', {
+                            fileId: fileId,
+                            offset: currentOffset,
+                            length: task.length
+                        });
+                        
+                        if (!response) throw new Error("No response");
+                        
+                        const binaryString = atob(response.data);
+                        const len = binaryString.length;
+                        const bytes = new Uint8Array(len);
+                        for (let k = 0; k < len; k++) bytes[k] = binaryString.charCodeAt(k);
+                        
+                        results[task.index] = bytes;
+                        completed++;
+
+                        if (onProgress) {
+                             const percent = Math.round((completed / chunkCount) * 100);
+                             onProgress(`다운로드 중... (${percent}%)`);
+                        }
+                        break; // Success
+                     } catch (e) {
+                         console.warn(`Chunk ${task.index} failed, retrying...`, e);
+                         retries--;
+                         if (retries === 0) throw e;
+                         await new Promise(r => setTimeout(r, 1000));
+                     }
+                 }
+             }
+        };
+
+        const workers = [];
+        for(let k=0; k<CONCURRENCY; k++) workers.push(worker());
+        await Promise.all(workers);
+
+        // Merge
+        if (onProgress) onProgress('병합 중...');
+        let totalLen = 0;
+        results.forEach(r => totalLen += r.length);
+        combinedBytes = new Uint8Array(totalLen);
+        let pos = 0;
+        results.forEach(r => {
+            combinedBytes.set(r, pos);
+            pos += r.length;
+        });
+    }
+
+    if (onProgress) onProgress('압축 해제 중...');
+
+    // Unzip (Using JSZip global)
+    if (typeof JSZip === 'undefined') throw new Error("JSZip 라이브러리가 없습니다.");
+    const zip = await JSZip.loadAsync(combinedBytes);
+    
+    const files = Object.keys(zip.files).sort((a, b) => {
+        return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+    });
+
+    const imageUrls = [];
+    for (const filename of files) {
+        if (filename.match(/\.(jpg|jpeg|png|webp|gif)$/i)) {
+            const blob = await zip.files[filename].async('blob');
+            imageUrls.push(URL.createObjectURL(blob));
+        }
+    }
+    return imageUrls;
+}
+
+// Fallback for unknown size (Sequential)
+async function fetchAndUnzipSequentialFallback(fileId, onProgress) {
     const chunks = [];
     let offset = 0;
     let totalLength = 0;
-    const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB (Chunk Size)
+    const CHUNK_SIZE = 10 * 1024 * 1024; 
 
     while (true) {
         const response = await API.request('view_get_chunk', {
@@ -235,10 +384,7 @@ async function fetchAndUnzip(fileId, onProgress) {
 
         if (!response.hasMore) break;
     }
-
-    if (onProgress) onProgress('압축 해제 중...');
     
-    // Merge
     const combinedBytes = new Uint8Array(totalLength);
     let position = 0;
     for (const chunk of chunks) {
@@ -246,10 +392,7 @@ async function fetchAndUnzip(fileId, onProgress) {
         position += chunk.length;
     }
 
-    // Unzip (Using JSZip global)
-    if (typeof JSZip === 'undefined') throw new Error("JSZip 라이브러리가 없습니다.");
     const zip = await JSZip.loadAsync(combinedBytes);
-    
     const files = Object.keys(zip.files).sort((a, b) => {
         return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
     });
@@ -478,7 +621,7 @@ function preloadNextEpisode() {
     if (window.isPreloading) return;
 
     window.isPreloading = true;
-    fetchAndUnzip(currentBookList[nextIndex].id, null)
+    fetchAndUnzip(currentBookList[nextIndex].id, currentBookList[nextIndex].size || 0, null)
         .then(blobUrls => {
             nextBookPreload = { index: nextIndex, images: blobUrls };
             showToast("📦 다음 화 준비 완료!", 3000);

@@ -4,20 +4,39 @@
 
 /**
  * 특정 시리즈(폴더) 내의 책(파일/폴더) 목록을 반환합니다.
- * 파일명에서 숫자 정보를 추출하여 정렬합니다.
+ * - info.json / _toki_cache.json 캐시 처리 추가
  *
  * @param {string} seriesId - 시리즈 폴더 ID
+ * @param {boolean} bypassCache - 캐시 무시 여부 (새로고침)
  * @returns {Array<Object>} 책 목록
  */
-function View_getBooks(seriesId) {
+function View_getBooks(seriesId, bypassCache = false) {
   try {
     if (!seriesId) throw new Error("Series ID is required");
 
+    const CACHE_FILE_NAME = "_toki_cache.json";
     const folder = DriveApp.getFolderById(seriesId);
+
+    // 1. Check Cache
+    if (!bypassCache) {
+      const cacheFiles = folder.getFilesByName(CACHE_FILE_NAME);
+      if (cacheFiles.hasNext()) {
+        const cacheFile = cacheFiles.next();
+        try {
+          const content = cacheFile.getBlob().getDataAsString();
+          const cacheData = JSON.parse(content);
+          Debug.log(`[Cache Hit] Series: ${seriesId}`);
+          return cacheData;
+        } catch (e) {
+          console.error("Cache Parse Error, falling back to scan");
+        }
+      }
+    }
+
+    // 2. Full Scan (Existing Logic)
     const files = folder.getFiles();
     const folders = folder.getFolders();
     const books = [];
-
     let totalFiles = 0;
 
     const createBook = (fileOrFolder, type) => {
@@ -50,7 +69,8 @@ function View_getBooks(seriesId) {
 
     while (folders.hasNext()) {
       const f = folders.next();
-      if (f.getName() === "info.json") continue;
+      if (f.getName() === "info.json" || f.getName() === CACHE_FILE_NAME)
+        continue;
       books.push(createBook(f, "folder"));
     }
 
@@ -60,7 +80,12 @@ function View_getBooks(seriesId) {
       const name = f.getName();
       const mime = f.getMimeType();
 
-      if (name === "info.json" || name === INDEX_FILE_NAME) continue;
+      if (
+        name === "info.json" ||
+        name === INDEX_FILE_NAME ||
+        name === CACHE_FILE_NAME
+      )
+        continue;
 
       const lowerName = name.toLowerCase();
       if (
@@ -85,8 +110,17 @@ function View_getBooks(seriesId) {
       return numA - numB;
     });
 
+    // 3. Write Cache
+    const cacheContent = JSON.stringify(books);
+    const existingCache = folder.getFilesByName(CACHE_FILE_NAME);
+    if (existingCache.hasNext()) {
+      existingCache.next().setContent(cacheContent);
+    } else {
+      folder.createFile(CACHE_FILE_NAME, cacheContent, MimeType.PLAIN_TEXT);
+    }
+
     console.log(
-      `[View_getBooks] Series: ${seriesId}, Total: ${totalFiles}, Returned: ${books.length}`
+      `[View_getBooks] Series: ${seriesId}, Total: ${totalFiles}, Returned: ${books.length} (Cache Updated)`
     );
     return books;
   } catch (e) {
@@ -104,20 +138,75 @@ function View_getBooks(seriesId) {
  * @param {number} length - 읽을 바이트 길이
  * @returns {Object} { data: Base64String, hasMore: boolean, totalSize: number, nextOffset: number }
  */
+/**
+ * 파일을 청크(Chunk) 단위로 분할하여 반환합니다.
+ * Drive API (Advanced Service)를 사용하여 메모리 효율적으로 다운로드합니다.
+ */
 function View_getFileChunk(fileId, offset, length) {
-  const file = DriveApp.getFileById(fileId);
-  const blob = file.getBlob();
-  const bytes = blob.getBytes();
+  // Use Drive API for partial download (Range Header)
+  // Note: Drive API v2/v3 support 'Range' header but GAS wrapper behavior varies.
+  // Using UrlFetchApp with user token is the most reliable way to enforce Range.
+  const token = ScriptApp.getOAuthToken();
+  const url = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
 
-  if (offset >= bytes.length) return null;
+  // Calculate End
+  // Note: Range is inclusive (start-end). However, we usually don't know total size here efficiently without extra call.
+  // Ideally, we fetch a bit more or exact.
+  // "bytes=0-1048575"
+  const end = offset + length - 1;
 
-  const end = Math.min(offset + length, bytes.length);
-  const chunk = bytes.slice(offset, end);
+  try {
+    const response = UrlFetchApp.fetch(url, {
+      headers: {
+        Authorization: "Bearer " + token,
+        Range: `bytes=${offset}-${end}`,
+      },
+      muteHttpExceptions: true,
+    });
 
-  return {
-    data: Utilities.base64Encode(chunk),
-    hasMore: end < bytes.length,
-    totalSize: bytes.length,
-    nextOffset: end,
-  };
+    if (
+      response.getResponseCode() === 206 ||
+      response.getResponseCode() === 200
+    ) {
+      const blob = response.getBlob();
+      const bytes = blob.getBytes();
+      const totalSizeStr =
+        response.getHeaders()["Content-Range"]?.split("/")[1] || "*";
+      const totalSize =
+        totalSizeStr === "*" ? offset + bytes.length : parseInt(totalSizeStr);
+
+      // If we got full content (200 OK) but requested partial? Usually Drive returns 200 if file small? No, Drive with Range usually returns 206.
+
+      return {
+        data: Utilities.base64Encode(bytes),
+        hasMore: offset + bytes.length < totalSize,
+        totalSize: totalSize,
+        nextOffset: offset + bytes.length,
+      };
+    } else {
+      throw new Error(
+        `Drive API Failed: ${response.getResponseCode()} ${response.getContentText()}`
+      );
+    }
+  } catch (e) {
+    // Fallback to DriveApp if API fails (e.g. scope issue) - Optional but Risky for memory
+    console.warn(
+      "Drive API Partial Fetch failed, falling back to DriveApp (High Memory Risk): " +
+        e
+    );
+    const file = DriveApp.getFileById(fileId);
+    const blob = file.getBlob();
+    const bytes = blob.getBytes();
+
+    if (offset >= bytes.length) return null;
+    const chunkEnd = Math.min(offset + length, bytes.length);
+    const chunk = bytes.slice(offset, chunkEnd);
+
+    return {
+      data: Utilities.base64Encode(chunk),
+      hasMore: chunkEnd < bytes.length,
+      totalSize: bytes.length,
+      nextOffset: chunkEnd,
+    };
+  }
 }
