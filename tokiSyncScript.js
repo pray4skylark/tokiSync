@@ -89,10 +89,19 @@
         const folderId = GM_getValue(CFG_FOLDER_ID);
         // Custom Deploy ID (Personal)
         const customDeployId = GM_getValue("TOKI_DEPLOY_ID", ""); 
+        
+        // [Fix] Fallback: Try to extract ID from saved GAS URL if DeployID is missing
+        let derivedId = "";
+        const savedGasUrl = GM_getValue("TOKI_GAS_URL", "");
+        if (!customDeployId && savedGasUrl) {
+            const match = savedGasUrl.match(/\/s\/([^\/]+)\/exec/);
+            if (match) derivedId = match[1];
+        }
+
         // Default Deploy ID (Shared/Auto-Update) - v3.1.0 Safe JSDoc
         const DEFAULT_ID = ""; 
 
-        const targetId = customDeployId || DEFAULT_ID;
+        const targetId = customDeployId || derivedId || DEFAULT_ID;
         const apiUrl = `https://script.google.com/macros/s/${targetId}/exec`;
 
         if (folderId) {
