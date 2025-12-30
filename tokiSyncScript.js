@@ -43,7 +43,7 @@
     const CORE_FILENAME = "tokiSyncCore.js";
 
     // 캐시 및 버전 설정
-    const CACHE_KEY_VER = "TOKI_CACHE_VERSION";
+    const CACHE_KEY_VER = "TOKI_CACHE_VERSION_V2"; // Cache Busting for v3.1.1
     const CACHE_KEY_TIME = "TOKI_CACHE_TIME";
     const STORED_CORE_KEY = "TOKI_CORE_SCRIPT";
     const PINNED_VER_KEY = "TOKI_PINNED_VERSION";
