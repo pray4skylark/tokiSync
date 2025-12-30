@@ -11,6 +11,7 @@ window.TokiSyncCore = function (GM_context) {
     const GM_setValue = GM_context.GM_setValue;
     const GM_getValue = GM_context.GM_getValue;
     const GM_deleteValue = GM_context.GM_deleteValue;
+    const GM_addValueChangeListener = GM_context.GM_addValueChangeListener;
     const JSZip = GM_context.JSZip;
     const PROTOCOL_VERSION = 3; // Major Version (Server Compatibility)
     const CLIENT_VERSION = "3.1.0-beta.251218.0004"; // Viewer Optimization Update
@@ -84,9 +85,10 @@ window.TokiSyncCore = function (GM_context) {
     const newMatch = currentURL.match(/^https:\/\/newtoki[0-9]+\.com\/webtoon\/([0-9]+)/);
     const manaMatch = currentURL.match(/^https:\/\/manatoki[0-9]+\.net\/comic\/([0-9]+)/);
 
-    if (bookMatch) { site = "북토끼"; protocolDomain = currentURL.match(/^https:\/\/booktoki[0-9]+\.com/)[0]; workId = bookMatch[1]; }
-    else if (newMatch) { site = "뉴토끼"; protocolDomain = currentURL.match(/^https:\/\/newtoki[0-9]+\.com/)[0]; workId = newMatch[1]; }
-    else if (manaMatch) { site = "마나토끼"; protocolDomain = currentURL.match(/^https:\/\/manatoki[0-9]+\.net/)[0]; workId = manaMatch[1]; }
+    let detectedCategory = "Webtoon"; // Default
+    if (bookMatch) { site = "북토끼"; protocolDomain = currentURL.match(/^https:\/\/booktoki[0-9]+\.com/)[0]; workId = bookMatch[1]; detectedCategory = "Novel"; }
+    else if (newMatch) { site = "뉴토끼"; protocolDomain = currentURL.match(/^https:\/\/newtoki[0-9]+\.com/)[0]; workId = newMatch[1]; detectedCategory = "Webtoon"; }
+    else if (manaMatch) { site = "마나토끼"; protocolDomain = currentURL.match(/^https:\/\/manatoki[0-9]+\.net/)[0]; workId = manaMatch[1]; detectedCategory = "Webtoon"; }
     else { return; }
     // #endregion
 
@@ -129,7 +131,8 @@ window.TokiSyncCore = function (GM_context) {
         if (cleanTitle.length > 15) cleanTitle = cleanTitle.substring(0, 15).trim();
 
         const details = getDetailInfo();
-        return { fullTitle, cleanTitle, id: workId, ...details };
+        // Override category with strictly detected one
+        return { fullTitle, cleanTitle, id: workId, ...details, category: detectedCategory };
     }
 
     function arrayBufferToBase64(buffer) {
@@ -169,6 +172,65 @@ window.TokiSyncCore = function (GM_context) {
 
     function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
     function getDynamicWait(base) { return Math.floor(Math.random() * (base * 0.2 + 1)) + base; }
+
+    async function createEpub(zip, title, author, textContent) {
+        // 1. Mimetype (Must be first, uncompressed)
+        zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
+
+        // 2. Container
+        zip.file("META-INF/container.xml", `<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`);
+
+        // 3. Content (XHTML)
+        const escapedText = textContent.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const htmlBody = escapedText.split('\n').map(line => `<p>${line}</p>`).join('');
+        const xhtml = `<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>${title}</title></head>
+<body>
+<h1>${title}</h1>
+${htmlBody}
+</body></html>`;
+        zip.file("OEBPS/Text/chapter.xhtml", xhtml);
+
+        // 4. OPF
+        const opf = `<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="BookId" version="2.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
+    <dc:title>${title}</dc:title>
+    <dc:creator opf:role="aut">${author}</dc:creator>
+    <dc:language>ko</dc:language>
+  </metadata>
+  <manifest>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    <item id="chapter" href="Text/chapter.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine toc="ncx">
+    <itemref idref="chapter"/>
+  </spine>
+</package>`;
+        zip.file("OEBPS/content.opf", opf);
+
+        // 5. NCX (Minimal)
+        const ncx = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN" "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd">
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <head><meta name="dtb:uid" content="urn:uuid:12345"/></head>
+  <docTitle><text>${title}</text></docTitle>
+  <navMap>
+    <navPoint id="navPoint-1" playOrder="1">
+      <navLabel><text>${title}</text></navLabel>
+      <content src="Text/chapter.xhtml"/>
+    </navPoint>
+  </navMap>
+</ncx>`;
+        zip.file("OEBPS/toc.ncx", ncx);
+    }
 
     function checkAuthRequired(responseText) {
         if (responseText && responseText.trim().startsWith("<") && (responseText.includes("google.com") || responseText.includes("Google Accounts"))) {
@@ -214,7 +276,9 @@ window.TokiSyncCore = function (GM_context) {
         const current = GM_getValue(CFG_DEBUG_KEY, false);
         const next = !current;
         GM_setValue(CFG_DEBUG_KEY, next);
-        alert(`🐞 디버그 모드: ${next ? "ON" : "OFF"}\n(ON일 경우 에러 발생 시 멈춥니다)`);
+        if (confirm(`🐞 디버그 모드: ${next ? "ON" : "OFF"}\n메뉴 갱신을 위해 새로고침 하시겠습니까?`)) {
+            location.reload();
+        }
     }
 
     async function checkConfig() {
@@ -365,8 +429,9 @@ window.TokiSyncCore = function (GM_context) {
             const payload = { 
             folderId: config.folderId, 
             type: 'check_history', 
-            protocolVersion: 3, // [New] Major Protocol Version
+            protocolVersion: 3, 
             clientVersion: CLIENT_VERSION, 
+            category: info.category, // [New]
             folderName: `[${info.id}] ${info.cleanTitle}` 
         };
             updateStatus("☁️ 드라이브 파일 스캔 중...");
@@ -415,43 +480,73 @@ window.TokiSyncCore = function (GM_context) {
         });
     }
 
-    async function saveInfoJson() {
+    async function saveInfoJson(forceThumbnailUpdate = false) {
         return new Promise(async (resolve) => {
             const config = getConfig();
             if (!config.url) { resolve(); return; }
             const info = getSeriesInfo();
 
-            // [NEW] 메타데이터 계산 (최종 회차, 파일 수)
             const historyKey = `history_${info.id}`;
             const history = GM_getValue(historyKey, []);
             const lastEpisode = history.length > 0 ? Math.max(...history) : 0;
             const fileCount = history.length;
 
-            let thumbnailBase64 = "";
-            if (info.thumbnail && info.thumbnail.startsWith("http")) {
-                updateStatus("🖼️ 썸네일 처리 중...");
-                thumbnailBase64 = await urlToBase64(info.thumbnail);
-            }
+            // [Opt] Do NOT send Base64 Thumbnail in JSON
+            // Instead, we will upload it as 'cover.jpg' via separate logic if needed
+            
             const payload = {
                 folderId: config.folderId, 
                 type: 'save_info', 
-                protocolVersion: 3, // [New] Major Protocol Version
+                protocolVersion: 3,
                 clientVersion: CLIENT_VERSION, 
                 folderName: `[${info.id}] ${info.cleanTitle}`,
                 id: info.id, title: info.fullTitle, url: document.URL, site: site,
-                author: info.author, category: info.category, status: info.status, thumbnail: thumbnailBase64 || info.thumbnail,
+                author: info.author, category: info.category, status: info.status, 
+                thumbnail: info.thumbnail, // Just URL
+                thumbnail_file: true, // Signal to server that we use cover.jpg
                 last_episode: lastEpisode,
                 file_count: fileCount
             };
+            
             GM_xmlhttpRequest({
                 method: "POST", url: config.url, data: JSON.stringify(payload), headers: { "Content-Type": "text/plain" },
-                onload: (res) => {
-                    if (!checkAuthRequired(res.responseText)) resolve();
-                    else resolve(); // Auth required but resolve to not block flow, user will retry
+                onload: async (res) => {
+                    if (!checkAuthRequired(res.responseText)) {
+                        // Trigger Cover Upload if needed
+                        if (forceThumbnailUpdate && info.thumbnail) {
+                            await ensureCoverUpload(info.thumbnail, `[${info.id}] ${info.cleanTitle}`, info.category);
+                        }
+                        resolve();
+                    }
+                    else resolve(); 
                 },
                 onerror: () => resolve()
             });
         });
+    }
+
+    async function ensureCoverUpload(thumbnailUrl, folderName, category) {
+        if (!thumbnailUrl.startsWith('http')) return;
+        try {
+            updateStatus("🖼️ 표지(cover.jpg) 업로드 중...");
+            // URL -> Blob
+            const blob = await new Promise((resolve) => {
+                GM_xmlhttpRequest({
+                    method: "GET", url: thumbnailUrl, responseType: "blob", headers: { "Referer": document.URL },
+                    onload: (res) => resolve(res.status === 200 ? res.response : null),
+                    onerror: () => resolve(null)
+                });
+            });
+            
+            if (blob) {
+                // Re-use uploadResumable but with category info
+                // We need to pass category to uploadResumable somehow, or update it
+                // Actually uploadResumable accepts (blob, folderName, fileName, category) <- We need to update signature
+                await uploadResumable(blob, folderName, "cover.jpg", category); 
+            }
+        } catch(e) {
+            console.warn("Cover Upload Failed", e);
+        }
     }
 
     function updateLocalHistory(episodeNum) {
@@ -481,7 +576,8 @@ window.TokiSyncCore = function (GM_context) {
                     protocolVersion: 3, // [New] Major Protocol Version
                     clientVersion: CLIENT_VERSION, 
                     folderName: folderName, 
-                    fileName: fileName 
+                    fileName: fileName,
+                    category: arguments[3] // Pass Category from 4th arg
                 }),
                 headers: { "Content-Type": "text/plain" },
                 onload: (res) => {
@@ -577,7 +673,7 @@ window.TokiSyncCore = function (GM_context) {
             const info = getSeriesInfo();
             const targetFolderName = `[${info.id}] ${info.cleanTitle}`;
 
-            await saveInfoJson();
+            await saveInfoJson(true); // Force cover update on start
 
             const iframe = document.createElement('iframe');
             iframe.id = 'tokiDownloaderIframe';
@@ -623,9 +719,11 @@ window.TokiSyncCore = function (GM_context) {
                     iframeDocument = iframe.contentWindow.document;
                 }
 
-                if (site == "북토끼") {
+                if (site == "북토끼" || info.category === "Novel") {
                     const fileContent = iframeDocument.querySelector('#novel_content').innerText;
-                    zip.file(`${num} ${epCleanTitle}.txt`, fileContent);
+                    // zip.file(`${num} ${epCleanTitle}.txt`, fileContent); // Legacy
+                    await createEpub(zip, epCleanTitle, info.author || "Unknown", fileContent);
+                    zipFileName = `${numText.padStart(4, '0')} - ${epCleanTitle}.epub`; // Change extension
                 } else {
                     let imgLists = Array.from(iframeDocument.querySelectorAll('.view-padding div img'));
                     for (let j = 0; j < imgLists.length;) { if (imgLists[j].checkVisibility() === false) imgLists.splice(j, 1); else j++; }
@@ -707,7 +805,7 @@ window.TokiSyncCore = function (GM_context) {
 
                 setListItemStatus(currentLi, "☁️ 업로드 중...", "#bbdefb", "#0d47a1");
 
-                const uploadTask = uploadResumable(content, targetFolderName, zipFileName)
+                const uploadTask = uploadResumable(content, targetFolderName, zipFileName, info.category)
                     .then((seriesFolderId) => {
                         setListItemStatus(currentLi, "✅ 완료", "#e0e0e0", "green");
                         updateLocalHistory(parseInt(num));
@@ -758,28 +856,191 @@ window.TokiSyncCore = function (GM_context) {
     }
 
     // ... (메뉴 및 자동실행 코드) ...
+    // #region [6. Queue System & Worker] ===========================================
+    const QUEUE_KEY = "TOKI_QUEUE";
+    const LOCK_KEY = "TOKI_WORKER_LOCK"; // { tabId, timestamp }
+    const HEARTBEAT_KEY = "TOKI_WORKER_HEARTBEAT";
+    const MY_TAB_ID = Date.now() + Math.random().toString().slice(2, 5);
+    const LOCK_TIMEOUT = 10000; // 10초간 하트비트 없으면 락 해제
+
+    // [New] 탭 닫힘 방지
+    window.addEventListener('beforeunload', (e) => {
+        const lock = GM_getValue(LOCK_KEY, null);
+        if (lock && lock.tabId === MY_TAB_ID) {
+            e.preventDefault();
+            e.returnValue = '다운로드 중입니다! 창을 닫으면 작업이 중단됩니다.';
+        }
+    });
+
+    const QueueManager = {
+        getQueue: () => GM_getValue(QUEUE_KEY, []),
+        setQueue: (q) => GM_setValue(QUEUE_KEY, q),
+        enqueue: (task) => { // task: { id, title, url, episodes: [] }
+            const q = QueueManager.getQueue();
+            // 중복 체크 (같은 작품은 에피소드 병합하거나 무시)
+            const existing = q.find(t => t.id === task.id);
+            if (existing) {
+                alert("이미 대기열에 있는 작품입니다.");
+                return;
+            }
+            q.push(task);
+            QueueManager.setQueue(q);
+            updateStatus(`📝 대기열 등록 완료 (총 ${q.length}건)`);
+        },
+        peek: () => {
+            const q = QueueManager.getQueue();
+            return q.length > 0 ? q[0] : null;
+        },
+        dequeue: () => {
+             const q = QueueManager.getQueue();
+             const item = q.shift();
+             QueueManager.setQueue(q);
+             return item;
+        }
+    };
+
+    const WorkerLock = {
+        acquire: () => {
+            const now = Date.now();
+            const lock = GM_getValue(LOCK_KEY, null);
+            
+            // 락이 없거나, 타임아웃(좀비 프로세스)된 경우 획득
+            if (!lock || (now - lock.timestamp > LOCK_TIMEOUT)) {
+                GM_setValue(LOCK_KEY, { tabId: MY_TAB_ID, timestamp: now });
+                return true;
+            }
+            // 내가 이미 락을 가지고 있는 경우 (갱신)
+            if (lock.tabId === MY_TAB_ID) {
+                GM_setValue(LOCK_KEY, { tabId: MY_TAB_ID, timestamp: now });
+                return true;
+            }
+            return false;
+        },
+        release: () => {
+            const lock = GM_getValue(LOCK_KEY, null);
+            if (lock && lock.tabId === MY_TAB_ID) {
+                GM_deleteValue(LOCK_KEY);
+            }
+        },
+        amIWorker: () => {
+            const lock = GM_getValue(LOCK_KEY, null);
+            return lock && lock.tabId === MY_TAB_ID;
+        }
+    };
+
+    // 하트비트 루프 (내가 워커일 때만 실행)
+    setInterval(() => {
+        if (WorkerLock.amIWorker()) {
+            GM_setValue(LOCK_KEY, { tabId: MY_TAB_ID, timestamp: Date.now() });
+        }
+    }, 2000);
+
+    // 큐 감시 및 처리 루프 (메인 엔진)
+    async function startQueueProcessor() {
+        console.log(`🕵️ Queue Processor Started (Tab: ${MY_TAB_ID})`);
+        
+        setInterval(async () => {
+            // 1. 큐 확인
+            const task = QueueManager.peek();
+            if (!task) return; // 할 일 없음
+
+            // 2. 락 시도
+            if (!WorkerLock.acquire()) {
+                // 누군가 작업 중임. 나는 대기.
+                const lock = GM_getValue(LOCK_KEY);
+                // updateStatus(`⏳ 다른 탭에서 다운로드 중... (Tab: ${lock?.tabId?.slice(-4)})`); 
+                return; 
+            }
+
+            // 3. 작업 수행 (내가 워커)
+            if (document.getElementById('tokiDownloaderIframe')) return; // 이미 실행 중
+
+            // 3-1. 작업 시작 (큐에서 제거)
+            const currentTask = QueueManager.dequeue();
+            if (!currentTask) { WorkerLock.release(); return; }
+
+            try {
+                updateStatus(`🚀 <strong>[${currentTask.title}]</strong> 다운로드 시작`);
+                
+                // 페이지 이동 없이, iframe만 생성해서 처리해야 함.
+                // 하지만 tokiDownload 함수는 현재 페이지 돔을 긁으므로, 
+                // 1) 현재 페이지가 타겟 작품이면 바로 실행
+                // 2) 아니면, 해당 페이지로 이동(reload) 후 자동 실행? -> 이러면 탭이 새로고침되면서 로직 초기화됨.
+                
+                // [해결책] tokiDownload는 "현재 페이지의 리스트"를 긁습니다.
+                // 따라서, 큐 방식에서는 "메인 탭"이 워커 역할을 하려면 
+                // "타겟 URL을 Iframe으로 열어서 그 내부에서 리스트를 파싱" 하거나
+                // "현재 탭을 해당 URL로 이동" 시켜야 합니다.
+                
+                // 사용자가 "현재 탭"을 뷰어 용도로 쓰고 있다면 이동하면 안됨.
+                // 하지만 TokiSync는 보통 "만화 목록 페이지"에서 실행됨.
+                // 큐 로직은 "이어받기" 개념이므로, 현재 탭을 이동시키는 것이 가장 확실함.
+                
+                if (window.location.href !== currentTask.url) {
+                    updateStatus(`🔄 작업 처리를 위해 페이지 이동 중...`);
+                    await sleep(1000);
+                    // 락 유지한 채로 이동 -> 이동 후 로드되면 큐 확인해서 작업 재개
+                    // 이동 시 락이 끊길 수 있으므로, sessionStorage 등에 "작업 중" 플래그 필요?
+                    // -> 아니다, 락은 GM 저장소에 있고, 새 페이지 로드 시 락 타임아웃 전에 acquire하면 됨.
+                    window.location.href = currentTask.url; 
+                    return; 
+                }
+
+                // URL이 일치하면 다운로드 시작
+                startSilentAudio();
+                initStatusUI();
+                await tokiDownload(null, null, currentTask.episodes.length > 0 ? currentTask.episodes : null);
+                
+                // 작업 완료 후 락 해제 -> 다음 턴에 다음 작업 가져옴
+                alert(`[${currentTask.title}] 완료! 대기열을 확인합니다.`);
+                WorkerLock.release(); 
+                stopSilentAudio();
+
+
+            } catch (e) {
+                console.error(e);
+                updateStatus(`❌ 오류 발생: ${e.message}`);
+                WorkerLock.release(); // 에러 시 락 해제
+                stopSilentAudio();
+            }
+
+        }, 5000); // 5초마다 체크
+    }
+    
+    // 페이지 로드 시 자동 실행 (큐 확인)
+    startQueueProcessor();
+
+    // #endregion
+
     async function autoSyncDownloadManager() {
         if (!await checkConfig()) return;
-        startSilentAudio(); initStatusUI();
-
-        await saveInfoJson();
-
+        
+        // [Refactor] 즉시 실행 대신 큐에 등록
+        const info = getSeriesInfo();
         const history = await fetchHistoryFromCloud();
+        
         const allListItems = Array.from(document.querySelector('.list-body').querySelectorAll('li')).reverse();
         const missingEpisodes = [];
         allListItems.forEach(li => {
             const num = parseInt(li.querySelector('.wr-num').innerText);
             if (!history.includes(num)) missingEpisodes.push(num);
         });
+
         if (missingEpisodes.length === 0) {
-            updateStatus("<strong>🎉 동기화 완료!</strong>");
-            alert("이미 완료됨");
-            stopSilentAudio();
+            alert("이미 최신 상태입니다.");
             return;
         }
-        updateStatus(`<strong>☁️ 자동 동기화 시작</strong><br>총 ${missingEpisodes.length}개...`);
-        try { await tokiDownload(null, null, missingEpisodes); updateStatus("<strong>🎉 작업 완료!</strong>"); alert("완료"); } catch (e) { console.error(e); }
-        finally { stopSilentAudio(); setTimeout(() => document.getElementById('tokiStatusDisplay')?.remove(), 5000); }
+
+        const task = {
+            id: info.id,
+            title: info.cleanTitle,
+            url: window.location.href, // 중요: 재방문을 위해 URL 저장
+            episodes: missingEpisodes,
+            addedAt: Date.now()
+        };
+
+        QueueManager.enqueue(task);
+        // 등록 후 프로세서는 startQueueProcessor()에 의해 돎
     }
 
     async function batchDownloadManager() {
@@ -816,13 +1077,7 @@ window.TokiSyncCore = function (GM_context) {
         window.addEventListener('load', init);
     }
 
-    GM_registerMenuCommand('⚙️ 설정 (URL/Key)', openSettings);
-    GM_registerMenuCommand('🐞 디버그 모드', toggleDebugMode);
-    GM_registerMenuCommand('📊 서재 열기', openDashboard);
-    GM_registerMenuCommand('☁️ 자동 동기화', autoSyncDownloadManager);
-    GM_registerMenuCommand('🔢 범위 다운로드', batchDownloadManager);
-
-    GM_registerMenuCommand('1회성 다운로드', async () => {
+    async function manualDownloadManager() {
         if (!await checkConfig()) return;
         startSilentAudio(); initStatusUI();
         saveInfoJson().then(() => {
@@ -830,6 +1085,17 @@ window.TokiSyncCore = function (GM_context) {
             const e = prompt('끝?', s); if (!e) return;
             tokiDownload(s, e).finally(() => { stopSilentAudio(); setTimeout(() => document.getElementById('tokiStatusDisplay')?.remove(), 5000); });
         });
-    });
+    }
+
     // #endregion
+
+    // [New] Core API Return
+    return {
+        autoSyncDownloadManager,
+        batchDownloadManager,
+        manualDownloadManager,
+        openDashboard,
+        openSettings,
+        toggleDebugMode
+    };
 };

@@ -21,6 +21,7 @@
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_deleteValue
+// @grant        GM_addValueChangeListener
 // @grant        GM_registerMenuCommand
 // @require      https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js
 // @require      https://cdnjs.cloudflare.com/ajax/libs/jszip-utils/0.1.0/jszip-utils.js
@@ -111,50 +112,7 @@
 
 
     // #region 2. Core Script Loading (Content Caching) ==========================
-    // 강제 업데이트 메뉴
-    GM_registerMenuCommand('⚡️ 강제 업데이트 확인', () => {
-        GM_setValue(CACHE_KEY_TIME, 0);
-        GM_setValue(PINNED_VER_KEY, "");
-        GM_deleteValue(STORED_CORE_KEY);
-        alert("캐시를 초기화했습니다. 최신 버전을 확인합니다.");
-        location.reload();
-    });
-
-    // [DEBUG] Core 직접 주입 메뉴
-    GM_registerMenuCommand('🛠 [Debug] Core 직접 입력', () => {
-        const oldUI = document.getElementById('tokiDebugInputUI');
-        if (oldUI) oldUI.remove();
-
-        const div = document.createElement('div');
-        div.id = 'tokiDebugInputUI';
-        div.style.cssText = "position:fixed; top:10%; left:10%; width:80%; height:80%; background:white; z-index:999999; border:2px solid red; padding:20px; box-shadow:0 0 20px rgba(0,0,0,0.5); display:flex; flex-direction:column;";
-        
-        div.innerHTML = `
-            <h2 style="margin:0 0 10px 0; color:red;">🛠 Core Script Manual Injection</h2>
-            <p style="font-size:12px; color:#666;">여기에 tokiSyncCore.js 전체 코드를 붙여넣으세요. (기존 캐시 덮어씀)</p>
-            <textarea id="tokiDebugTextarea" style="flex:1; width:100%; margin-bottom:10px; font-family:monospace; font-size:11px;"></textarea>
-            <div style="display:flex; gap:10px;">
-                <button id="tokiDebugSaveBtn" style="flex:1; padding:10px; background:red; color:white; font-weight:bold; border:none; cursor:pointer;">💾 저장 및 실행</button>
-                <button id="tokiDebugCloseBtn" style="flex:0 0 100px; padding:10px; background:#ccc; border:none; cursor:pointer;">닫기</button>
-            </div>
-        `;
-        document.body.appendChild(div);
-
-        document.getElementById('tokiDebugCloseBtn').onclick = () => div.remove();
-        document.getElementById('tokiDebugSaveBtn').onclick = () => {
-            const content = document.getElementById('tokiDebugTextarea').value;
-            if (!content.trim()) { alert("내용이 비어있습니다."); return; }
-            
-            if (!content.includes("window.TokiSyncCore")) {
-                if(!confirm("⚠️ Core 스크립트 형식이 아닌 것 같습니다 (window.TokiSyncCore 미포함).\n그래도 저장하시겠습니까?")) return;
-            }
-
-            GM_setValue(STORED_CORE_KEY, content);
-            GM_setValue(PINNED_VER_KEY, "MANUAL_DEBUG"); // 버전 고정
-            alert("💾 Core 스크립트가 저장되었습니다.\n페이지를 새로고침하여 적용합니다.");
-            location.reload();
-        };
-    });
+    // [moved to executeScript for correct ordering]
 
     /**
      * 1. 저장된 스크립트 버전과 GitHub 최신 버전을 비교합니다.
@@ -308,16 +266,75 @@
             const runScript = new Function("window", scriptContent);
             runScript(window);
 
-                if (typeof window.TokiSyncCore === 'function') {
-                    window.TokiSyncCore({
-                        loaderVersion: "3.1.0-beta.251218.0004", // Viewer Optimization Update
-                        GM_registerMenuCommand: GM_registerMenuCommand,
-                        GM_xmlhttpRequest: GM_xmlhttpRequest,
-                        GM_setValue: GM_setValue,
-                        GM_getValue: GM_getValue,
-                        GM_deleteValue: GM_deleteValue,
-                        JSZip: JSZip
-                    });
+            if (typeof window.TokiSyncCore === 'function') {
+                const coreApi = window.TokiSyncCore({
+                    loaderVersion: "3.1.0-beta.251218.0004", // Viewer Optimization Update
+                    GM_registerMenuCommand: GM_registerMenuCommand,
+                    GM_xmlhttpRequest: GM_xmlhttpRequest,
+                    GM_setValue: GM_setValue,
+                    GM_getValue: GM_getValue,
+                    GM_deleteValue: GM_deleteValue,
+                    GM_addValueChangeListener: typeof GM_addValueChangeListener !== 'undefined' ? GM_addValueChangeListener : undefined,
+                    JSZip: JSZip
+                });
+
+                // [New] Centralized Menu Registration
+                if (coreApi) {
+                    GM_registerMenuCommand('☁️ 자동 동기화', coreApi.autoSyncDownloadManager);
+                    GM_registerMenuCommand('📊 서재 열기', coreApi.openDashboard);
+                    GM_registerMenuCommand('🔢 범위 다운로드', coreApi.batchDownloadManager);
+                    GM_registerMenuCommand('🐞 디버그 모드', coreApi.toggleDebugMode);
+
+                    if (GM_getValue(CFG_DEBUG_KEY, false)) {
+                        GM_registerMenuCommand('⚙️ 설정 (URL/FolderID)', coreApi.openSettings);
+                        GM_registerMenuCommand('🧪 1회성 다운로드', coreApi.manualDownloadManager);
+
+                        // [Loader Debug Menus]
+                        GM_registerMenuCommand('⚡️ 강제 업데이트 확인', () => {
+                            GM_setValue(CACHE_KEY_TIME, 0);
+                            GM_setValue(PINNED_VER_KEY, "");
+                            GM_deleteValue(STORED_CORE_KEY);
+                            alert("캐시를 초기화했습니다. 최신 버전을 확인합니다.");
+                            location.reload();
+                        });
+
+                        GM_registerMenuCommand('🛠 [Debug] Core 직접 입력', () => {
+                            const oldUI = document.getElementById('tokiDebugInputUI');
+                            if (oldUI) oldUI.remove();
+
+                            const div = document.createElement('div');
+                            div.id = 'tokiDebugInputUI';
+                            div.style.cssText = "position:fixed; top:10%; left:10%; width:80%; height:80%; background:white; z-index:999999; border:2px solid red; padding:20px; box-shadow:0 0 20px rgba(0,0,0,0.5); display:flex; flex-direction:column;";
+                            
+                            div.innerHTML = `
+                                <h2 style="margin:0 0 10px 0; color:red;">🛠 Core Script Manual Injection</h2>
+                                <p style="font-size:12px; color:#666;">여기에 tokiSyncCore.js 전체 코드를 붙여넣으세요. (기존 캐시 덮어씀)</p>
+                                <textarea id="tokiDebugTextarea" style="flex:1; width:100%; margin-bottom:10px; font-family:monospace; font-size:11px;"></textarea>
+                                <div style="display:flex; gap:10px;">
+                                    <button id="tokiDebugSaveBtn" style="flex:1; padding:10px; background:red; color:white; font-weight:bold; border:none; cursor:pointer;">💾 저장 및 실행</button>
+                                    <button id="tokiDebugCloseBtn" style="flex:0 0 100px; padding:10px; background:#ccc; border:none; cursor:pointer;">닫기</button>
+                                </div>
+                            `;
+                            document.body.appendChild(div);
+
+                            document.getElementById('tokiDebugCloseBtn').onclick = () => div.remove();
+                            document.getElementById('tokiDebugSaveBtn').onclick = () => {
+                                const content = document.getElementById('tokiDebugTextarea').value;
+                                if (!content.trim()) { alert("내용이 비어있습니다."); return; }
+                                
+                                if (!content.includes("window.TokiSyncCore")) {
+                                    if(!confirm("⚠️ Core 스크립트 형식이 아닌 것 같습니다 (window.TokiSyncCore 미포함).\n그래도 저장하시겠습니까?")) return;
+                                }
+
+                                GM_setValue(STORED_CORE_KEY, content);
+                                GM_setValue(PINNED_VER_KEY, "MANUAL_DEBUG"); // 버전 고정
+                                alert("💾 Core 스크립트가 저장되었습니다.\n페이지를 새로고침하여 적용합니다.");
+                                location.reload();
+                            };
+                        });
+                    }
+                }
+
             } else {
                 throw new Error("window.TokiSyncCore missing");
             }

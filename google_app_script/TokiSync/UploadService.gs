@@ -3,11 +3,14 @@
 // =======================================================
 
 function initResumableUpload(data, rootFolderId) {
-  const root = DriveApp.getFolderById(rootFolderId);
-  let folderId = findFolderId(data.folderName, rootFolderId);
-  if (!folderId) {
-    folderId = root.createFolder(data.folderName).getId();
-  }
+  // Use new helper with Category support
+  const seriesFolder = getOrCreateSeriesFolder(
+    rootFolderId,
+    data.folderName,
+    data.category,
+    true
+  );
+  const folderId = seriesFolder.getId();
 
   const url =
     "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable";

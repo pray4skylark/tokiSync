@@ -26,7 +26,15 @@ let vState = {
     spreads: [], 
     currentSpreadIndex: 0,
     settingsTimer: null,
-    preload: true
+    preload: true,
+    settingsTimer: null,
+    preload: true,
+    scrollMode: false, // Webtoon Mode
+    epubMode: false, // Novel Mode
+    textSettings: {
+        fontSize: 18,
+        lineHeight: 1.8
+    }
 };
 let nextBookPreload = null;
 
@@ -140,8 +148,33 @@ async function loadViewer(index, isContinuous = false) {
     // Initial UI
     container.innerHTML = '<div style="color:white; font-size:14px;">로딩 중... (0%)</div>';
     updateNavHandlers();
+    
+    // Reset Scroll Mode UI
+    if(vState.scrollMode) {
+        content.classList.add('scroll-mode');
+        container.classList.remove('viewer-image-container'); // Detach standard container logic
+        container.style.display = 'none'; // Hide standard container
+        
+        // Ensure scroll container exists
+        let scrollContainer = document.getElementById('viewerScrollContainer');
+        if(!scrollContainer) {
+            scrollContainer = document.createElement('div');
+            scrollContainer.id = 'viewerScrollContainer';
+            scrollContainer.className = 'viewer-scroll-container';
+            content.appendChild(scrollContainer);
+        }
+        scrollContainer.innerHTML = '<div style="color:white; font-size:14px; padding:20px;">로딩 중... (0%)</div>';
+        scrollContainer.style.display = 'flex';
+    } else {
+        content.classList.remove('scroll-mode');
+        container.classList.add('viewer-image-container');
+        container.style.display = 'flex';
+        const sc = document.getElementById('viewerScrollContainer');
+        if(sc) sc.style.display = 'none';
+    }
 
     try {
+        let result = null;
         let blobUrls = [];
         
         // Check Preload
@@ -153,14 +186,24 @@ async function loadViewer(index, isContinuous = false) {
             // Clear invalid preload
             if (nextBookPreload && nextBookPreload.index === index) nextBookPreload = null;
 
-            // Pass Total Size for Adaptive Logic
-            blobUrls = await fetchAndUnzip(book.id, book.size || 0, (progress) => {
+             // Pass Total Size for Adaptive Logic
+            result = await fetchAndUnzip(book.id, book.size || 0, (progress) => {
                 const el = container.querySelector('div');
                 if (el) el.innerText = progress;
             });
+            blobUrls = result; // Temp assignment checks are below
         }
 
-        if (!Array.isArray(blobUrls) || blobUrls.length === 0) throw new Error("이미지를 찾을 수 없습니다.");
+        if (!result || (result.type === 'images' && result.images.length === 0)) throw new Error("콘텐츠를 찾을 수 없습니다.");
+
+        if (result.type === 'epub') {
+            vState.epubMode = true;
+            renderEpubMode(result.content);
+            return; // Stop here for EPUB
+        } else {
+            vState.epubMode = false;
+            blobUrls = result.images;
+        }
 
         // Setup Images
         vState.images = blobUrls.map(url => ({ src: url, width: 0, height: 0, loaded: false }));
@@ -182,12 +225,73 @@ async function loadViewer(index, isContinuous = false) {
             vState.currentSpreadIndex = 0;
         }
 
-        renderCurrentSpread();
+        if (vState.scrollMode) {
+            renderScrollMode();
+            // Restore scroll position
+            const lastPage = getProgress(book.seriesId, book.id);
+             if (!isContinuous && lastPage > 0) {
+                 scrollToPage(lastPage);
+             }
+        } else {
+             // 1-page/2-page
+             recalcSpreads(false);
+             const lastPage = getProgress(book.seriesId, book.id);
+             if (!isContinuous && lastPage > 0 && lastPage < vState.images.length) {
+                 const spreadIdx = vState.spreads.findIndex(spread => spread.includes(lastPage));
+                 vState.currentSpreadIndex = spreadIdx >= 0 ? spreadIdx : 0;
+                 showToast(`📑 이어보기: ${lastPage + 1}페이지`);
+             } else {
+                 vState.currentSpreadIndex = 0;
+             }
+             renderCurrentSpread();
+        }
 
     } catch (e) {
         alert("뷰어 로드 실패: " + e.message);
         closeViewer();
     }
+}
+
+/* EPUB Rendering Logic */
+function renderEpubMode(htmlContent) {
+    const container = document.getElementById('viewerScrollContainer');
+    if (!container) {
+        const content = document.getElementById('viewerContent');
+        const sc = document.createElement('div');
+        sc.id = 'viewerScrollContainer';
+        sc.className = 'viewer-scroll-container epub-mode';
+        content.appendChild(sc);
+        // Ensure image container is hidden
+        const ic = document.getElementById('viewerImageContainer');
+        if(ic) ic.style.display = 'none';
+        content.classList.add('scroll-mode');
+    }
+    
+    const scrollContainer = document.getElementById('viewerScrollContainer');
+    scrollContainer.innerHTML = `<div class="epub-content">${htmlContent}</div>`;
+    scrollContainer.style.display = 'block';
+    
+    // Apply EPUB Settings (Loaded from Storage potentially)
+    applyTextSettings();
+}
+
+function applyTextSettings() {
+    const el = document.querySelector('.epub-content');
+    if (!el) return;
+    el.style.fontSize = `${vState.textSettings.fontSize}px`;
+    el.style.lineHeight = vState.textSettings.lineHeight;
+}
+
+function changeFontSize(delta) {
+    if (!vState.epubMode) return;
+    vState.textSettings.fontSize += delta;
+    if(vState.textSettings.fontSize < 12) vState.textSettings.fontSize = 12;
+    if(vState.textSettings.fontSize > 36) vState.textSettings.fontSize = 36;
+    
+    // Save
+    localStorage.setItem('toki_v_fontsize', vState.textSettings.fontSize);
+    applyTextSettings();
+    showToast(`글자 크기: ${vState.textSettings.fontSize}px`);
 }
 
 /**
@@ -340,6 +444,28 @@ async function fetchAndUnzip(fileId, totalSize, onProgress) {
         return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
     });
 
+    // Check for EPUB
+    if (zip.file("OEBPS/content.opf") || zip.file("OPS/content.opf") || zip.file("mimetype")) {
+        // EPUB Mode
+        console.log("📘 EPUB Detected");
+        let contentHtml = "";
+        
+        // Find Spine/Manifest (Simplified: Just find the chapter.xhtml we generated)
+        // Since we generated it, we know it's OEBPS/Text/chapter.xhtml
+        // But for generic support, search for .xhtml or .html files
+        let targetFile = zip.file("OEBPS/Text/chapter.xhtml"); 
+        if (!targetFile) {
+            // Fallback: Find first html/xhtml
+             const htmlFiles = files.filter(f => f.match(/\.(xhtml|html)$/i));
+             if (htmlFiles.length > 0) targetFile = zip.file(htmlFiles[0]);
+        }
+        
+        if (targetFile) {
+            contentHtml = await targetFile.async("string");
+            return { type: 'epub', content: contentHtml };
+        }
+    }
+
     const imageUrls = [];
     for (const filename of files) {
         if (filename.match(/\.(jpg|jpeg|png|webp|gif)$/i)) {
@@ -347,7 +473,7 @@ async function fetchAndUnzip(fileId, totalSize, onProgress) {
             imageUrls.push(URL.createObjectURL(blob));
         }
     }
-    return imageUrls;
+    return { type: 'images', images: imageUrls };
 }
 
 // Fallback for unknown size (Sequential)
@@ -637,6 +763,89 @@ function updateNavHandlers() {
     if(next) next.onclick = () => navigateViewer(vState.rtlMode ? -1 : 1);
 }
 
+/* Scroll Mode Logic */
+function renderScrollMode() {
+    const container = document.getElementById('viewerScrollContainer');
+    if (!container) return;
+    
+    container.innerHTML = '';
+    
+    // Intersection Observer for Current Page
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if(entry.isIntersecting) {
+                const index = parseInt(entry.target.getAttribute('data-index'));
+                updateScrollProgress(index);
+            }
+        });
+    }, { threshold: 0.5 }); // 50% visible
+
+    vState.images.forEach((imgData, index) => {
+        const img = document.createElement('img');
+        img.src = imgData.src;
+        img.loading = 'lazy'; // Native lazy load
+        img.className = 'viewer-page';
+        img.setAttribute('data-index', index);
+        
+        // Double Tap to Zoom (Optional, simplified)
+        
+        container.appendChild(img);
+        observer.observe(img);
+    });
+
+    // Initial update
+    updateSliderUI();
+}
+
+function updateScrollProgress(index) {
+    if (vState.currentSpreadIndex === index) return;
+    vState.currentSpreadIndex = index;
+    
+    // Update Counter
+    const counter = document.getElementById('pageCounter');
+    const total = vState.images.length;
+    if(counter) counter.innerText = `${index + 1} / ${total}`;
+    
+    // Save Progress
+    if(currentBookList[currentBookIndex]) {
+        saveProgress(currentBookList[currentBookIndex].seriesId, currentBookList[currentBookIndex].id, index);
+    }
+    
+    // Slider
+    const slider = document.getElementById('pageSlider');
+    if(slider) slider.value = index + 1;
+    const currentLabel = document.getElementById('sliderCurrent');
+    if(currentLabel) currentLabel.innerText = index + 1;
+
+    // Check Finish (Last Page)
+    if (index === total - 1) {
+        saveReadHistory(currentBookList[currentBookIndex].seriesId, currentBookList[currentBookIndex].id);
+    }
+    
+    // Preload Trigger (Last 3 images)
+    if (total - index <= 3) {
+        preloadNextEpisode();
+    }
+}
+
+function scrollToPage(index) {
+    const container = document.getElementById('viewerScrollContainer');
+    if(!container) return;
+    
+    const target = container.children[index];
+    if(target) {
+        target.scrollIntoView({ block: 'start' });
+    }
+}
+
+function toggleScrollMode() {
+    vState.scrollMode = !vState.scrollMode;
+    localStorage.setItem('toki_v_scroll', vState.scrollMode);
+    
+    // Refresh Viewer
+    loadViewer(currentBookIndex);
+}
+
 /* Settings Logic (Reused from Client.js but simplified) */
 /**
  * 로컬 스토리지에서 뷰어 설정을 로드하고 UI에 반영합니다.
@@ -647,11 +856,21 @@ function loadViewerSettings() {
 
     vState.rtlMode = (localStorage.getItem('toki_v_rtl') === 'true');
     vState.preload = (localStorage.getItem('toki_v_preload') !== 'false'); // Default true
+    vState.scrollMode = (localStorage.getItem('toki_v_scroll') === 'true'); // Load Scroll Mode
+    
+    // Load Text Settings
+    const savedFs = localStorage.getItem('toki_v_fontsize');
+    if(savedFs) vState.textSettings.fontSize = parseInt(savedFs);
     
     updateButtonStates();
 }
 
 function updateButtonStates() {
+    // Visibility Toggle
+    const isEpub = vState.epubMode;
+    document.querySelectorAll('.image-only').forEach(el => el.style.display = isEpub ? 'none' : '');
+    document.querySelectorAll('.epub-only').forEach(el => el.style.display = isEpub ? 'inline-block' : 'none');
+
     const setBtn = (id, active) => {
         const btn = document.getElementById(id);
         if(btn) active ? btn.classList.add('active') : btn.classList.remove('active');
@@ -661,6 +880,7 @@ function updateButtonStates() {
     setBtn('btnCover', vState.coverPriority);
     setBtn('btnRtl', vState.rtlMode);
     setBtn('btnPreload', vState.preload);
+    setBtn('btnScroll', vState.scrollMode); // Add Button State
 }
 
 function toggleViewMode() {
@@ -792,9 +1012,11 @@ function openEpisodeListFromViewer() {
 window.openEpisodeList = openEpisodeList;
 window.loadViewer = loadViewer;
 window.toggleViewMode = toggleViewMode;
+window.toggleScrollMode = toggleScrollMode; // Expose
 window.toggleCoverMode = toggleCoverMode;
 window.toggleRtlMode = toggleRtlMode;
 window.togglePreloadMode = togglePreloadMode;
+window.changeFontSize = changeFontSize;
 window.closeViewer = closeViewer;
 window.closeEpisodeModal = closeEpisodeModal;
 window.toggleControls = toggleControls;

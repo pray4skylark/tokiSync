@@ -38,103 +38,60 @@ function View_getSeriesList(folderId) {
  * @param {string} folderId - 라이브러리 루트 폴더 ID
  * @returns {Array<Object>} 생성된 시리즈 목록
  */
+/**
+ * 라이브러리 폴더 구조를 스캔하여 인덱스(시리즈 목록)를 생성합니다.
+ * Root > Category > Series 구조와 Legacy(Root > Series) 구조를 모두 지원합니다.
+ */
 function View_rebuildLibraryIndex(folderId) {
   if (!folderId) throw new Error("Folder ID is required");
 
   const root = DriveApp.getFolderById(folderId);
-  const seriesFolders = root.getFolders();
+  const folders = root.getFolders();
   const seriesList = [];
 
-  while (seriesFolders.hasNext()) {
-    try {
-      const folder = seriesFolders.next();
-      const folderName = folder.getName();
+  // Known Categories
+  const CATEGORIES = ["Webtoon", "Novel"];
 
-      if (folderName === INDEX_FILE_NAME) continue;
+  while (folders.hasNext()) {
+    const folder = folders.next();
+    const name = folder.getName();
 
-      let metadata = { status: "ONGOING", authors: [], summary: "" };
-      let seriesName = folderName;
-      let thumbnail = "";
-      let sourceId = "";
-      let booksCount = 0;
-      let booksCountDefined = false;
+    if (name === INDEX_FILE_NAME) continue;
 
-      const idMatch = folderName.match(/^\[(\d+)\]/);
-      if (idMatch) sourceId = idMatch[1];
-
-      const infoFiles = folder.getFilesByName("info.json");
-
-      if (infoFiles.hasNext()) {
+    // 1. Check if it's a Category Folder
+    if (CATEGORIES.includes(name)) {
+      const subFolders = folder.getFolders();
+      while (subFolders.hasNext()) {
         try {
-          const jsonContent = infoFiles.next().getBlob().getDataAsString();
-          const parsed = JSON.parse(jsonContent);
-
-          if (parsed.title) seriesName = parsed.title;
-
-          if (parsed.metadata) {
-            if (parsed.metadata.authors)
-              metadata.authors = parsed.metadata.authors;
-            if (parsed.metadata.status)
-              metadata.status = parsed.metadata.status;
-          } else {
-            if (parsed.author) metadata.authors = [parsed.author];
-            if (parsed.status) metadata.status = parsed.status;
-          }
-
-          if (parsed.thumbnail) thumbnail = parsed.thumbnail;
-          if (parsed.id) sourceId = parsed.id;
-
-          if (parsed.file_count !== undefined && parsed.file_count !== null) {
-            booksCount = parsed.file_count;
-            booksCountDefined = true;
-          }
-        } catch (e) {}
-      } else {
-        const match = folderName.match(/^\[(\d+)\]\s*(.+)/);
-        if (match) {
-          seriesName = match[2];
+          const s = processSeriesFolder(subFolders.next(), name);
+          if (s) seriesList.push(s);
+        } catch (e) {
+          Debug.log(`Error processing series in ${name}: ${e}`);
         }
       }
-
-      if (!booksCountDefined) {
-        try {
-          const files = folder.getFiles();
-          while (files.hasNext()) {
-            const f = files.next();
-            const name = f.getName();
-            if (name === "info.json" || name === INDEX_FILE_NAME) continue;
-            if (name.endsWith(".cbz") || name.endsWith(".zip")) booksCount++;
-          }
-          const subFolders = folder.getFolders();
-          while (subFolders.hasNext()) {
-            if (subFolders.next().getName() !== "info.json") booksCount++;
-          }
-        } catch (e) {}
+    }
+    // 2. Otherwise/Fallback: Treat as Legacy Series in Root
+    else {
+      try {
+        // Simple check: does it look like a series? (Has [ID] or info.json)
+        // We do a full process check, if valid it returns object, else null/partial
+        // But for performance, maybe check name pattern first?
+        // [ID] pattern is strong indicator.
+        if (name.match(/^\[(\d+)\]/)) {
+          const s = processSeriesFolder(folder, "Uncategorized");
+          if (s) seriesList.push(s);
+        }
+      } catch (e) {
+        Debug.log(`Error processing legacy series: ${e}`);
       }
-
-      const series = {
-        id: folder.getId(),
-        sourceId: sourceId,
-        name: seriesName,
-        booksCount: booksCount,
-        booksCountCurrent: 0,
-        metadata: metadata,
-        thumbnail: thumbnail,
-        url: folder.getUrl(),
-        created: folder.getDateCreated(),
-        lastModified: folder.getLastUpdated(),
-      };
-
-      seriesList.push(series);
-    } catch (e) {
-      console.log("Error processing folder: " + e);
     }
   }
 
   seriesList.sort(
     (a, b) => new Date(b.lastModified) - new Date(a.lastModified)
-  );
+  ); // Sort by Recent
 
+  // Save Lightweight Index
   const jsonString = JSON.stringify(seriesList);
   const indexFiles = root.getFilesByName(INDEX_FILE_NAME);
   if (indexFiles.hasNext()) {
@@ -144,4 +101,98 @@ function View_rebuildLibraryIndex(folderId) {
   }
 
   return seriesList;
+}
+
+/**
+ * [Helper] 단일 시리즈 폴더를 처리하여 메타데이터 객체를 반환합니다.
+ */
+function processSeriesFolder(folder, categoryContext) {
+  const folderName = folder.getName();
+  let metadata = {
+    status: "ONGOING",
+    authors: [],
+    summary: "",
+    category: categoryContext,
+  };
+  let seriesName = folderName;
+  let thumbnailId = ""; // Optimized: Use File ID instead of Base64
+  let thumbnailOld = ""; // Fallback
+  let sourceId = "";
+  let booksCount = 0;
+
+  // ID Parsing
+  const idMatch = folderName.match(/^\[(\d+)\]/);
+  if (idMatch) sourceId = idMatch[1];
+
+  // 1. Check for 'cover.jpg' (Preferred)
+  const coverFiles = folder.getFilesByName("cover.jpg");
+  if (coverFiles.hasNext()) {
+    thumbnailId = coverFiles.next().getId();
+  }
+
+  // 2. Parse info.json
+  const infoFiles = folder.getFilesByName("info.json");
+  if (infoFiles.hasNext()) {
+    try {
+      // To optimize scan time, we might skip parsing if we already have cover.jpg and just need name?
+      // But we need total count etc.
+      const content = infoFiles.next().getBlob().getDataAsString();
+      const parsed = JSON.parse(content);
+
+      if (parsed.title) seriesName = parsed.title;
+      if (parsed.id) sourceId = parsed.id;
+      if (parsed.file_count) booksCount = parsed.file_count;
+
+      // Metadata overrides
+      if (parsed.category) metadata.category = parsed.category;
+      if (parsed.status) metadata.status = parsed.status;
+      if (parsed.metadata && parsed.metadata.authors)
+        metadata.authors = parsed.metadata.authors;
+      else if (parsed.author) metadata.authors = [parsed.author];
+
+      // Fallback Thumbnail (URL or Base64 - avoid Base64 if possible in Index)
+      // If thumbnailId is empty, we might check parsed.thumbnail
+      // But we want to Avoid Base64.
+      if (!thumbnailId && parsed.thumbnail) {
+        if (parsed.thumbnail.startsWith("http"))
+          thumbnailOld = parsed.thumbnail;
+        // parsed.thumbnail might be base64. If so, ignore for index size optimization?
+        // Or keep it? The user wanted optimization.
+        // Let's Skip Base64 in Index. Only allow http links.
+      }
+    } catch (e) {}
+  } else {
+    // Fallback Name Parsing
+    const match = folderName.match(/^\[(\d+)\]\s*(.+)/);
+    if (match) seriesName = match[2];
+  }
+
+  // 3. Count Books (if not in info.json)
+  if (booksCount === 0) {
+    // Fast approximation? Or accurate scan?
+    // Accurate scan is slow. Let's try to trust info.json or just check file (slow).
+    // For optimization, trusting info.json is best.
+    // If 0, maybe just leave it 0 or do a quick check?
+    // Let's do a quick iterator check but limit it? No, explicit scan.
+    /* 
+        const files = folder.getFiles();
+        while(files.hasNext()) {
+            if (files.next().getMimeType() === MimeType.ZIP || files.next().getName().endsWith('.cbz')) booksCount++;
+        }
+        */
+    // Skip for performance unless critical.
+  }
+
+  return {
+    id: folder.getId(),
+    sourceId: sourceId,
+    name: seriesName,
+    booksCount: booksCount,
+    metadata: metadata,
+    thumbnailId: thumbnailId, // NEW
+    thumbnail: thumbnailOld, // Legacy/External URL
+    hasCover: !!thumbnailId,
+    lastModified: folder.getLastUpdated(),
+    category: metadata.category, // Top level access
+  };
 }

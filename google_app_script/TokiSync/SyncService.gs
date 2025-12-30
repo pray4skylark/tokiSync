@@ -6,16 +6,24 @@
 // 기능: 다운로드 기록 확인 (폴더/파일 스캔)
 function checkDownloadHistory(data, rootFolderId) {
   Debug.log(`🚀 checkDownloadHistory Start`);
-  // const root = DriveApp.getFolderById(rootFolderId); // Unused in this function
-  const folderId = findFolderId(data.folderName, rootFolderId);
+  // Use Helper with Category support (Create=false)
+  const seriesFolder = getOrCreateSeriesFolder(
+    rootFolderId,
+    data.folderName,
+    data.category,
+    false
+  );
 
-  if (!folderId) {
-    Debug.log(`❌ Folder not found in Root(${rootFolderId})`);
-    return createRes("success", [], Debug.getLogs()); // 폴더 없으면 기록 없음 + 로그
+  if (!seriesFolder) {
+    Debug.log(
+      `❌ Folder not found in Root(${rootFolderId}) or Category(${data.category})`
+    );
+    return createRes("success", [], Debug.getLogs());
   }
+  const folderId = seriesFolder.getId();
 
   Debug.log(`📂 Scanning Files in: ${folderId}`);
-  const seriesFolder = DriveApp.getFolderById(folderId); // Backup access check
+  // const seriesFolder = DriveApp.getFolderById(folderId); // Redundant
   const existingEpisodes = [];
 
   // 🚀 Optimization: Drive Advanced Service (Drive.Files.list)
@@ -64,15 +72,14 @@ function checkDownloadHistory(data, rootFolderId) {
 
 // 기능: 작품 정보(info.json) 저장
 function saveSeriesInfo(data, rootFolderId) {
-  const root = DriveApp.getFolderById(rootFolderId);
-  let seriesFolder;
-
-  const folderId = findFolderId(data.folderName, rootFolderId);
-  if (folderId) {
-    seriesFolder = DriveApp.getFolderById(folderId);
-  } else {
-    seriesFolder = root.createFolder(data.folderName);
-  }
+  // Use Helper with Category support (Create=true)
+  const seriesFolder = getOrCreateSeriesFolder(
+    rootFolderId,
+    data.folderName,
+    data.category,
+    true
+  );
+  // const root = DriveApp.getFolderById(rootFolderId); // Unused
 
   const fileName = "info.json";
   const files = seriesFolder.getFilesByName(fileName);
@@ -155,6 +162,111 @@ function updateLibraryStatus(data, rootFolderId) {
   if (changedCount > 0) {
     file.setContent(JSON.stringify(library));
   }
+}
 
-  return createRes("success", `Updated ${changedCount} items`);
+// =======================================================
+// 📦 마이그레이션 서비스 (Legacy -> v3.1 Structure)
+// =======================================================
+
+function migrateLegacyStructure(rootFolderId) {
+  const root = DriveApp.getFolderById(rootFolderId);
+  const webtoonFolder = getOrCreateSeriesFolder(
+    rootFolderId,
+    "Webtoon",
+    "Webtoon",
+    true
+  ); // Ensure Cat Folder
+  const novelFolder = getOrCreateSeriesFolder(
+    rootFolderId,
+    "Novel",
+    "Novel",
+    true
+  ); // Ensure Cat Folder
+
+  // Reuse helper? getOrCreateSeriesFolder creates Series folder.
+  // We just want ensure Category folders exist.
+  // Let's do it manually for clarity.
+  const ensureCat = (name) => {
+    const iter = root.getFoldersByName(name);
+    return iter.hasNext() ? iter.next() : root.createFolder(name);
+  };
+
+  const catWebtoon = ensureCat("Webtoon");
+  const catNovel = ensureCat("Novel");
+
+  const folders = root.getFolders();
+  const toMigrate = [];
+  const EXT = ["Webtoon", "Novel", "Libraries", "System"];
+
+  // 1. Collect Valid Folders (Snapshot)
+  while (folders.hasNext()) {
+    const folder = folders.next();
+    const name = folder.getName();
+    if (
+      !EXT.includes(name) &&
+      name !== "info.json" &&
+      name !== "library_index.json"
+    ) {
+      toMigrate.push(folder);
+    }
+  }
+
+  // 2. Process Migration
+  toMigrate.forEach((folder) => {
+    try {
+      const name = folder.getName();
+      Debug.log(`🔄 Migrating: ${name}`);
+
+      let category = "Webtoon"; // Default
+
+      // 1. Analyze info.json for Category & Thumbnail
+      const infoFiles = folder.getFilesByName("info.json");
+      if (infoFiles.hasNext()) {
+        const infoFile = infoFiles.next();
+        const content = infoFile.getBlob().getDataAsString();
+        try {
+          const json = JSON.parse(content);
+          if (
+            json.category === "Novel" ||
+            (json.metadata && json.metadata.category === "Novel")
+          ) {
+            category = "Novel";
+          }
+
+          // Extract Thumbnail
+          if (json.thumbnail && json.thumbnail.length > 500) {
+            // Assume Base64
+            const blob = Utilities.newBlob(
+              Utilities.base64Decode(json.thumbnail),
+              "image/jpeg",
+              "cover.jpg"
+            );
+            folder.createFile(blob);
+
+            // Update info.json to remove Base64
+            json.thumbnail = ""; // Clear it
+            infoFile.setContent(JSON.stringify(json, null, 2));
+            fixedThumbnails++;
+            Debug.log(`   -> Extracted Thumbnail`);
+          }
+        } catch (e) {
+          Debug.log(`   -> JSON Parse Error: ${e}`);
+        }
+      }
+
+      // 2. Move Folder
+      const targetCat = category === "Novel" ? catNovel : catWebtoon;
+      folder.moveTo(targetCat);
+      movedCount++;
+      Debug.log(`   -> Moved to ${category}`);
+    } catch (e) {
+      Debug.log(`   -> Migration Failed: ${e}`);
+    }
+  });
+
+  return createRes(
+    "success",
+    `Migration Complete. Moved: ${movedCount}, Thumbnails: ${fixedThumbnails}`,
+    Debug.getLogs()
+  );
 }

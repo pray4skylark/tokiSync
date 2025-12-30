@@ -163,9 +163,16 @@
 
             <!-- Row 2: Settings Toggles -->
             <div class="footer-row settings-row">
-                <button id="btnTwoPage" class="btn-toggle" onclick="toggleViewMode()">2쪽 보기</button>
-                <button id="btnCover" class="btn-toggle" onclick="toggleCoverMode()">표지 먼저</button>
-                <button id="btnRtl" class="btn-toggle" onclick="toggleRtlMode()">일본어(우좌)</button>
+                <!-- Image Mode Settings -->
+                <button id="btnTwoPage" class="btn-toggle image-only" onclick="toggleViewMode()">2쪽 보기</button>
+                <button id="btnCover" class="btn-toggle image-only" onclick="toggleCoverMode()">표지 먼저</button>
+                <button id="btnScroll" class="btn-toggle image-only" onclick="toggleScrollMode()">스크롤 보기</button>
+                <button id="btnRtl" class="btn-toggle image-only" onclick="toggleRtlMode()">일본어(우좌)</button>
+                
+                <!-- EPUB Mode Settings -->
+                <button class="btn-toggle epub-only" onclick="changeFontSize(-2)">글자 -</button>
+                <button class="btn-toggle epub-only" onclick="changeFontSize(2)">글자 +</button>
+                
                 <div class="divider"></div>
                 <button id="btnPreload" class="btn-toggle" onclick="togglePreloadMode()">미리 등</button>
             </div>

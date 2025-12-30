@@ -80,6 +80,50 @@ function findFolderId(folderName, rootFolderId) {
 }
 
 /**
+ * [New] 카테고리(Webtoon/Novel) 구조를 반영하여 시리즈 폴더를 찾거나 생성합니다.
+ * Legacy(Root 직속) 폴더가 있으면 그걸 우선 사용(마이그레이션 전 호환성).
+ */
+function getOrCreateSeriesFolder(
+  rootFolderId,
+  folderName,
+  category = "Webtoon",
+  createIfMissing = true
+) {
+  const root = DriveApp.getFolderById(rootFolderId);
+
+  // 1. Check Legacy (Root Direct)
+  const legacyId = findFolderId(folderName, rootFolderId);
+  if (legacyId) {
+    Debug.log(`♻️ Found Legacy Series Folder in Root: ${legacyId}`);
+    return DriveApp.getFolderById(legacyId);
+  }
+
+  if (!createIfMissing) return null;
+
+  // 2. Check/Create Category Folder
+  // category should be "Webtoon" or "Novel"
+  const catName = category || "Webtoon";
+  let catFolder;
+  const catIter = root.getFoldersByName(catName);
+  if (catIter.hasNext()) {
+    catFolder = catIter.next();
+  } else {
+    Debug.log(`📂 Creating Category Folder: ${catName}`);
+    catFolder = root.createFolder(catName);
+  }
+
+  // 3. Check Series in Category
+  const seriesId = findFolderId(folderName, catFolder.getId());
+  if (seriesId) {
+    return DriveApp.getFolderById(seriesId);
+  }
+
+  // 4. Create New Series in Category
+  Debug.log(`🆕 Creating New Series Folder in ${catName}: ${folderName}`);
+  return catFolder.createFolder(folderName);
+}
+
+/**
  * JSON 응답 객체(TextOutput)를 생성합니다.
  *
  * @param {string} status - 응답 상태 ('success' | 'error')
