@@ -48,37 +48,7 @@
     const CACHE_DURATION = 60 * 60 * 1000; // 1시간
     const CFG_DEBUG_KEY = "TOKI_DEBUG_MODE";
 
-    // #region 1. TokiView Integration (Handshake) ==============================
-    // 구글 스크립트 페이지(TokiView)인 경우
-    if (location.hostname.includes('google.com') || location.hostname.includes('googleusercontent.com')) {
-        if (document.title.includes('TokiView') || document.title.includes('TokiLibrary')) {
-            console.log("📂 TokiView detected. Listening for Handshake...");
 
-            // Handshake Listener
-            window.addEventListener("message", (event) => {
-                if (event.data.type === 'TOKI_PING') {
-                    const folderId = GM_getValue(CFG_FOLDER_ID);
-                    if (folderId) {
-                        // Ping 수신 시 Init으로 응답 (event.source가 있으면 거기로, 없으면 window로)
-                        // This fixes Parent -> Iframe communication
-                        const target = event.source || window;
-                        target.postMessage({ type: 'TOKI_INIT', folderId: folderId }, '*');
-                    }
-                }
-            });
-
-            // Legacy Fallback (500ms 후 1회 발송)
-            setTimeout(() => {
-                const folderId = GM_getValue(CFG_FOLDER_ID);
-                if (folderId) {
-                    window.postMessage({ type: 'TOKI_INIT', folderId: folderId }, '*');
-                    console.log("✅ (Fallback) Config injected:", folderId);
-                }
-            }, 500);
-            return; // Core 로드 중단
-        }
-    }
-    // #endregion ================================================================
 
     // #region 1-B. GitHub Pages (New Frontend) Integration
     if (location.hostname.includes('github.io') || location.hostname.includes('localhost') || location.hostname.includes('127.0.0.1')) {
