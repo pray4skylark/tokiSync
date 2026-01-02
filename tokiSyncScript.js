@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.0.0
+// @version      1.0.1
 // @description  Toki series sites -> Google Drive syncing tool (Loader) (GitHub CDN)
 // @author       pray4skylark
 // @updateURL    https://github.com/pray4skylark/tokiSync/raw/main/tokiSyncScript.js
@@ -41,7 +41,8 @@
     // ----------------------------------------------------------------
     const GITHUB_OWNER = 'pray4skylark';
     const GITHUB_REPO = 'tokiSync';
-    const CACHE_KEY_VER = 'TOKI_CACHE_VERSION_V3_4_2'; // Cache busting for v3.2.4.2
+    const CACHE_KEY_VER = 'TOKI_CACHE_VERSION_LEGACY';
+    const CACHE_KEY_TIME = 'TOKI_CACHE_TIME';
     const CACHE_KEY_SCRIPT = 'TOKI_CACHED_SCRIPT_CONTENT';
     const STORED_CORE_KEY = "TOKI_CORE_SCRIPT";
     const PINNED_VER_KEY = "TOKI_PINNED_VERSION";
