@@ -8,3 +8,4 @@ node_modules/
 
 # Analysis Files (Local only)
 old_*
+docs/js/backup/*
