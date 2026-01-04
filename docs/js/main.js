@@ -93,19 +93,75 @@ async function refreshDB(forceId = null, silent = false, bypassCache = false) {
     const btn = document.getElementById('refreshBtn');
 
     if (!silent) {
-        if(loader) loader.style.display = 'flex';
+        if(loader) {
+            loader.style.display = 'flex';
+            // Reset loader text
+            const txt = loader.querySelector('div:last-child');
+            if(txt) txt.innerText = "데이터 불러오는 중...";
+        }
         if(btn) btn.classList.add('spin-anim');
     }
 
     try {
-        const payload = { 
-            folderId: forceId || API.folderId 
-        };
-        if (bypassCache) payload.bypassCache = true;
+        let allSeries = [];
+        let continuationToken = null;
+        let step = 1;
 
-        const seriesList = await API.request('view_get_library', payload);
-        
-        renderGrid(seriesList);
+        // Loop for Continuation Token
+        while (true) {
+            const payload = { 
+                folderId: forceId || API.folderId 
+            };
+            if (bypassCache) payload.bypassCache = true;
+            if (continuationToken) payload.continuationToken = continuationToken;
+
+            const response = await API.request('view_get_library', payload);
+            
+            // Handle Response
+            // Response might be direct array (Legacy/Small) or object
+            
+            if (Array.isArray(response)) {
+                // Legacy or Simple Response
+                allSeries = allSeries.concat(response);
+                break; // Done
+            } 
+            else if (response) {
+                // Object Response (Standard v3.3+)
+                // 1. Accumulate List if present
+                if (response.list && Array.isArray(response.list)) {
+                    allSeries = allSeries.concat(response.list);
+                }
+
+                // 2. Check Status
+                if (response.status === 'continue') {
+                    if (response.continuationToken) {
+                        continuationToken = response.continuationToken;
+                        step++;
+                        // Update Loader
+                        const txt = loader ? loader.querySelector('div:last-child') : null;
+                        if(txt) txt.innerText = `데이터 불러오는 중... (Step ${step})`;
+                        // Loop again
+                        continue;
+                    } else {
+                        console.warn("[refreshDB] Continue status without token?");
+                        break; 
+                    }
+                } else if (!response.status || response.status === 'completed') {
+                    // Done
+                    break;
+                } else {
+                    // Unknown Status?
+                    console.warn("[refreshDB] Unknown Status:", response.status);
+                    break;
+                }
+            } else {
+                 // Unknown format
+                 console.warn("Unknown API Response:", response);
+                 break;
+            }
+        }
+
+        renderGrid(allSeries);
         showToast("📚 라이브러리 업데이트 완료");
 
     } catch (e) {
@@ -127,7 +183,13 @@ async function refreshDB(forceId = null, silent = false, bypassCache = false) {
  * @param {Array<Object>} seriesList - 시리즈 객체 배열
  */
 function renderGrid(seriesList) {
-    allSeries = seriesList || [];
+    // Safety: Ensure seriesList is an array
+    if (Array.isArray(seriesList)) {
+        allSeries = seriesList;
+    } else {
+        console.warn("[renderGrid] Expected array but got:", seriesList);
+        allSeries = [];
+    }
     const grid = document.getElementById('grid');
     grid.innerHTML = '';
 
