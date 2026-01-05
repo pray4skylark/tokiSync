@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.1.1
+// @version      1.1.2
 // @description  Toki series sites -> Google Drive syncing tool (Loader) (GitHub CDN)
 // @author       pray4skylark
 // @updateURL    https://github.com/pray4skylark/tokiSync/raw/main/tokiSyncScript.js

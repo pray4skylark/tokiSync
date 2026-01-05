@@ -15,11 +15,11 @@ window.TokiSyncCore = function (GM_context) {
     const JSZip = GM_context.JSZip;
     const PROTOCOL_VERSION = 3; // Major Version (Server Compatibility)
     const SCRIPT_NAME = "TokiSync Core";
-    const CLIENT_VERSION = "v1.1.1"; // Unified with Server/Viewer
+    const CLIENT_VERSION = "v1.1.2"; // Fix: Loop robustness
     const LOG_PREFIX = `[${SCRIPT_NAME}]`;
 
     // [New] 호환성 체크: Core가 요구하는 최소 로더 버전 확인
-    const MIN_LOADER_VERSION = "v1.1.1";
+    const MIN_LOADER_VERSION = "v1.1.2";
     const currentLoaderVer = GM_context.loaderVersion || "1.0.0"; // 없을 경우 구버전 간주
 
     if (currentLoaderVer < MIN_LOADER_VERSION) {
@@ -726,6 +726,8 @@ ${htmlBody}
 
             for (let i = 0; i < list.length; i++) {
                 const currentLi = list[i];
+                // [Robustness] Wrap individual episode in try-catch
+                try {
                 const zip = new JSZip();
                 const src = currentLi.querySelector('a').href;
                 const numText = currentLi.querySelector('.wr-num').innerText.trim();
@@ -762,25 +764,37 @@ ${htmlBody}
                     await sleep(3000);
                     iframeDocument = iframe.contentWindow.document;
                 }
-
-                if (site == "북토끼" || info.category === "Novel") {
-                    const fileContent = iframeDocument.querySelector('#novel_content').innerText;
-                    // zip.file(`${num} ${epCleanTitle}.txt`, fileContent); // Legacy
-                    await createEpub(zip, epCleanTitle, info.author || "Unknown", fileContent);
-                    zipFileName = `${numText.padStart(4, '0')} - ${epCleanTitle}.epub`; // Change extension
-                } else {
-                    let imgLists = Array.from(iframeDocument.querySelectorAll('.view-padding div img'));
-                    for (let j = 0; j < imgLists.length;) { if (imgLists[j].checkVisibility() === false) imgLists.splice(j, 1); else j++; }
-                    if (imgLists.length === 0) {
-                        await pauseForCaptcha(iframe); await sleep(3000);
-                        iframeDocument = iframe.contentWindow.document;
-                        imgLists = Array.from(iframeDocument.querySelectorAll('.view-padding div img'));
+                
+                // [Robustness] Prevent script crash on single failure
+                // try { <--- Removed broken try
+                    if (site == "북토끼" || info.category === "Novel") {
+                        const fileContent = iframeDocument.querySelector('#novel_content')?.innerText;
+                         if (!fileContent) {
+                             failedLog.push("Critial: Novel Content Not Found");
+                             throw new Error("Novel Content Not Found");
+                         }
+                        // zip.file(`${num} ${epCleanTitle}.txt`, fileContent); // Legacy
+                        await createEpub(zip, epCleanTitle, info.author || "Unknown", fileContent);
+                        zipFileName = `${numText.padStart(4, '0')} - ${epCleanTitle}.epub`; // Change extension
+                    } else {
+                        let imgLists = Array.from(iframeDocument.querySelectorAll('.view-padding div img'));
                         for (let j = 0; j < imgLists.length;) { if (imgLists[j].checkVisibility() === false) imgLists.splice(j, 1); else j++; }
-                        if (imgLists.length === 0) throw new Error("이미지 0개");
-                    }
+                        
+                        if (imgLists.length === 0) {
+                            // Retry once more after delay
+                            await sleep(2000);
+                            imgLists = Array.from(iframeDocument.querySelectorAll('.view-padding div img'));
+                             if (imgLists.length === 0) {
+                                 // Instead of crashing, upload checking log
+                                 failedLog.push("CRITICAL: 0 Images Found (Captcha or Layout Change?)");
+                                 throw new Error("이미지 0개 발견 (Skip)");
+                             }
+                        }
 
-                    setListItemStatus(currentLi, `🖼️ 이미지 0/${imgLists.length}`, "#fff9c4", "#d32f2f");
-                    updateStatus(`[${targetFolderName}]<br><strong>${epCleanTitle}</strong><br>이미지 ${imgLists.length}장 수집 중...`);
+                        setListItemStatus(currentLi, `🖼️ 이미지 0/${imgLists.length}`, "#fff9c4", "#d32f2f");
+                        updateStatus(`[${targetFolderName}]<br><strong>${epCleanTitle}</strong><br>이미지 ${imgLists.length}장 수집 중...`);
+                        // ... Rest of image processing
+
 
                     const fetchAndAddToZip = (imgSrc, j, ext, retryCount = 3) => new Promise((resolve, reject) => {
                         GM_xmlhttpRequest({
@@ -879,6 +893,13 @@ ${htmlBody}
 
                 const trackedTask = uploadTask.then(() => activeUploads.delete(trackedTask)).catch(() => activeUploads.delete(trackedTask));
                 activeUploads.add(trackedTask);
+                
+                } catch (epError) {
+                    console.error(`[Episode Error] ${epError.message}`);
+                    setListItemStatus(currentLi, "❌ 실패 (Skip)", "#ffcdd2", "#b71c1c");
+                    updateStatus(`⚠️ <strong>개별 항목 오류</strong>: ${epError.message}`);
+                    // Continue to next episode
+                }
             }
 
             if (activeUploads.size > 0) {
