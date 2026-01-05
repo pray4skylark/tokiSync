@@ -1,4 +1,4 @@
-// 🚀 TokiSync Core Logic v3.1.0-beta.251218.0004
+// 🚀 TokiSync Core Logic v1.1.2
 // This script is loaded dynamically by the Loader.
 
 window.TokiSyncCore = function (GM_context) {
@@ -23,7 +23,7 @@ window.TokiSyncCore = function (GM_context) {
     const currentLoaderVer = GM_context.loaderVersion || "1.0.0"; // 없을 경우 구버전 간주
 
     if (currentLoaderVer < MIN_LOADER_VERSION) {
-        console.error(`❌ Loader is outdated! (Current: ${currentLoaderVer}, Required: ${MIN_LOADER_VERSION})`);
+         console.error(`❌ Loader is outdated! (Current: ${currentLoaderVer}, Required: ${MIN_LOADER_VERSION})`);
         alert(`[TokiSync] 로더 업데이트가 필요합니다!\n\n현재 로더 버전이 낮아 새로운 기능을 실행할 수 없습니다.\nTampermonkey에서 스크립트 업데이트를 진행해주세요.\n(현재: ${currentLoaderVer} / 필요: ${MIN_LOADER_VERSION})`);
         return; // Core 실행 중단
     }
