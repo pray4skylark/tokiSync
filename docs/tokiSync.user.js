@@ -1,9 +1,11 @@
 // ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.2.1
+// @version      1.2.2
 // @description  Toki series sites -> Google Drive syncing tool (Bundled)
 // @author       pray4skylark
+// @updateURL    https://raw.githubusercontent.com/pray4skylark/tokiSync/main/docs/tokiSync.user.js
+// @downloadURL  https://raw.githubusercontent.com/pray4skylark/tokiSync/main/docs/tokiSync.user.js
 // @match        https://*.com/webtoon/*
 // @match        https://*.com/novel/*
 // @match        https://*.net/comic/*
@@ -235,7 +237,7 @@ async function uploadToGAS(blob, folderName, fileName, options = {}) {
     
     // Constants
     const CHUNK_SIZE = 20 * 1024 * 1024; // 20MB
-    const CLIENT_VERSION = "0.0.3-new_core";
+    const CLIENT_VERSION = "1.2.2";
     const totalSize = blob.size;
     let uploadUrl = "";
 
@@ -700,8 +702,11 @@ function parseListItem(li) {
     let src = "";
     
     if (linkEl) {
-        // Clean title: Remove spans (often used for badges/icons)
-        title = linkEl.innerHTML.replace(/<span[\s\S]*?\/span>/g, '').trim();
+        // Clean title: Remove spans and fix redundant patterns
+        title = linkEl.innerHTML.replace(/<span[\s\S]*?\/span>/g, '')
+            .replace(/\s+/g, ' ')               // Remove extra spaces
+            .replace(/(\d+)\s*-\s*(\1)/, '$1')  // Fix "255 - 255" -> "255"
+            .trim();
         src = linkEl.href;
     }
 
@@ -1054,10 +1059,16 @@ async function tokiDownload(startIndex, lastIndex, policy = 'folderInCbz') {
                  rootFolder = `[${seriesId}] ${first.title} ~ ${last.title}`;
             }
         } else {
-             // Single item, use its title but try to guess series title? 
-             // Without extraction logic, we just use the item title for now, 
-             // but user wants [ID] Folder.
              rootFolder = `[${seriesId}] ${first.title}`;
+        }
+
+        // [Fix] Append Range [Start-End] for Local Merged Files (folderInCbz / zipOfCbzs)
+        // GAS Upload uses individual files so no range needed in folder name
+        if (buildingPolicy === 'folderInCbz' || buildingPolicy === 'zipOfCbzs') {
+            const startNum = parseInt(first.num);
+            const endNum = parseInt(last.num);
+            const rangeStr = (list.length > 1) ? ` [${startNum}-${endNum}]` : ` [${startNum}]`;
+            rootFolder += rangeStr;
         }
 
         // Create IFrame
@@ -1095,16 +1106,20 @@ async function tokiDownload(startIndex, lastIndex, policy = 'folderInCbz') {
             // Post-Process for Non-Default Policies
             if (buildingPolicy !== 'folderInCbz') {
                 // Build the individual chapter file
-                // Title for file: Cleaned title used in folder structure is best, 
-                // but processItem adds to builder internal structure. 
-                // The filename should be: "{seriesTitle} {num} {chapterTitle}" or just "{num} {chapterTitle}" inside zip
-                // Let's use item.title for filename for now to be safe, or construct it.
+             
+                // Clean Filename Logic
+                // 1. GAS Upload (Drive): Format "0001 - 1화" (Remove Series Title)
+                // 2. Local Individual: Format "0001 - SeriesTitle 1화" (Keep Full Title)
                 
-                let fileTitle = item.title;
-                if (seriesTitle && fileTitle.startsWith(seriesTitle)) {
-                    fileTitle = fileTitle.replace(seriesTitle, '').trim();
+                let chapterTitle = item.title;
+                
+                // Only clean (remove series title) if uploading to Drive
+                if (destination === 'drive' && seriesTitle && chapterTitle.startsWith(seriesTitle)) {
+                    chapterTitle = chapterTitle.replace(seriesTitle, '').trim();
                 }
-                const fullFilename = `${item.num} ${fileTitle}`;
+
+                // Final Filename: "0001 - Title"
+                const fullFilename = `${item.num} - ${chapterTitle}`;
 
                 const innerZip = await currentBuilder.build({ title: fullFilename, author: site });
                 const blob = await innerZip.generateAsync({ type: "blob" });
@@ -1114,9 +1129,8 @@ async function tokiDownload(startIndex, lastIndex, policy = 'folderInCbz') {
                     masterZip.file(`${fullFilename}.${extension}`, blob);
                 } else if (buildingPolicy === 'individual') {
                     // Immediate Save (Local or Drive based on destination)
-                    // Pass metadata for GAS: folderName (Series Title) and Category
                     await saveFile(blob, fullFilename, destination, extension, {
-                        folderName: rootFolder,
+                        folderName: rootFolder, // [ID] Series Title
                         category: category
                     }); 
                 }

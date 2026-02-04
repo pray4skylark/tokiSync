@@ -1,6 +1,6 @@
 {
   "name": "tokisync",
-  "version": "1.0.0",
+  "version": "1.2.2",
   "description": "**북토끼, 뉴토끼, 마나토끼**의 콘텐츠를 **구글 드라이브로 직접 업로드**하고, **전용 웹 뷰어**를 통해 편리하게 관리/열람할 수 있는 올인원 솔루션입니다.",
   "type": "module",
   "main": "tokiSyncCore.js",

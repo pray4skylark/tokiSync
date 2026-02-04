@@ -13,8 +13,11 @@ export function parseListItem(li) {
     let src = "";
     
     if (linkEl) {
-        // Clean title: Remove spans (often used for badges/icons)
-        title = linkEl.innerHTML.replace(/<span[\s\S]*?\/span>/g, '').trim();
+        // Clean title: Remove spans and fix redundant patterns
+        title = linkEl.innerHTML.replace(/<span[\s\S]*?\/span>/g, '')
+            .replace(/\s+/g, ' ')               // Remove extra spaces
+            .replace(/(\d+)\s*-\s*(\1)/, '$1')  // Fix "255 - 255" -> "255"
+            .trim();
         src = linkEl.href;
     }
 

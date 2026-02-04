@@ -1,97 +1,66 @@
-# Core Module Handover Report (v1.2.0)
+# Core Module Handover Report (v1.2.2)
 
-**Role:** Core Developer
-**Scope:** `src/core/*` (Integrated `downloader.js`, `gas.js`, `ui.js`, etc.)
-**Status:** **v1.2.0 Integrated & Deployed** (Main Branch)
-
----
-
-## 🚀 Recent Major Changes (v1.2.0)
-
-### 1. Core Integration
-
-- **Merged:** `new_core` and `old_core` logic merged into `src/core`.
-- **Single Build:** Webpack config updated to build `tokiSync.user.js` from `src/core/index.js`.
-
-### 2. Security & Auth
-
-- **API Key Enforcement:** All GAS requests (Upload, History, View) require `apiKey`.
-- **Properties Service:** API Key is stored in GAS Script Properties (not hardcoded).
-
-### 3. Viewer Integration (Zero-Config)
-
-- **Auto-Injection:** UserScript automatically injects `GAS URL`, `FolderID`, `API Key` to the Viewer via `postMessage`.
-- **Retry Logic (Pending):** A fix for timing issues is planned (see below).
+**Role:** Core Developer  
+**Scope:** `src/core/*` (Integrated `downloader.js`, `gas.js`, `ui.js`, etc.)  
+**Status:** **v1.2.2 Released** (Bug Fixes & Auto-Update)
 
 ---
 
-## ⚡️ Critical Next Steps (For Next Agent)
+## 🚀 Released Changes (v1.2.2)
 
-### 1. [Priority] API Key Injection Fix
+### 1. Critical Bug Fixes (Completed)
 
-- **Issue:** The configuration injection (`postMessage`) from UserScript to Viewer fails due to race conditions (timing).
-- **Plan:** **Implement Retry Mechanism**
-- **Detailed Plan:** Please refer to **`implementation_plan.md`** in `~/.gemini/antigravity/brain/...`.
-- **Action:**
-  1. Read `implementation_plan.md`.
-  2. Modify `src/core/index.js` to implement the retry loop.
-  3. Build & Commit.
+- **Filename Logic (Split Policy):**
+  - **Local Download:** `[ID] Title [1-100].cbz` (Added Range)
+  - **GAS Upload:** `0001 - 1화.cbz` (Removed Series Title for clean Drive structure)
+- **Title Parsing:**
+  - Fixed redundant title bug (`255 - 255 화` -> `255 화`) via improved Regex.
+- **Auto-Update:**
+  - Added `@updateURL` & `@downloadURL` pointing to GitHub `main` branch.
 
-### 2. [Optimization] Thumbnail Stability
+### 2. Version Synchronization
 
-- **Issue:** The `main` branch viewer handles thumbnails more stably than `v1.2.0` despite the same GAS backend.
-- **Reference:** See `task.md` -> **Phase 4**.
-- **Action:** Compare legacy vs current viewer code and port stability fixes (e.g., caching, pre-fetching strategies).
+- **UserScript:** `v1.2.2` (Header)
+- **Internal Client:** `v1.2.2` (`gas.js` - `CLIENT_VERSION`)
+- **Package:** `v1.2.2` (`package.json`)
 
 ---
 
-## 🧹 Cleanup Required (Before Next Release)
+## 🚨 Ongoing / Pending Tasks
 
-**Issue:** Temporary build artifacts and development folders were accidentally committed to GitHub.
+### 1. [Optimization] Thumbnail Stability
 
-### Files/Folders to Delete:
-
-1. `docs/488.tokiSync.user.js` - Temporary build artifact
-2. `docs/tokiDownloader.user.js` - Legacy build (replaced by `tokiSync.user.js`)
-3. `src/new_core/` - Development folder (merged into `src/core`)
-
-### Action Plan:
-
-```bash
-# Remove files from Git
-git rm docs/488.tokiSync.user.js
-git rm docs/tokiDownloader.user.js
-git rm -r src/new_core
-
-# Update .gitignore to prevent future accidents
-echo "docs/*Downloader.user.js" >> .gitignore
-echo "docs/[0-9]*.user.js" >> .gitignore
-
-# Commit
-git commit -m "chore: remove temporary build artifacts and dev folders"
-git push origin main
-```
+- **Issue:** The `main` branch viewer handles thumbnails more stably than `v1.2.0+` despite the same GAS backend.
+- **Plan:** Compare legacy vs current viewer code and port stability fixes (e.g., caching, pre-fetching strategies).
+- **Status:** **Postponed** (Focus was on critical filename bugs).
 
 ---
 
 ## 🛠 Module Status Overview
 
-### `src/core/index.js` (Entry Point)
+### `src/core/downloader.js`
 
-- **Role:** Handshake with Viewer, Config Injection, API Proxy.
-- **Status:** **Needs Fix** (Retry logic).
+- **Status:** **Stable**
+- **Updates:** Implemented conditional filename logic for Local vs GAS.
 
-### `src/core/gas.js` (GAS Service)
+### `src/core/parser.js`
 
-- **Role:** Handle Uploads & History Check.
-- **Status:** Stable. Enforces `apiKey`.
+- **Status:** **Stable**
+- **Updates:** Enhanced regex for cleaner title extraction.
 
-### `src/core/ui.js` (UI System)
+### `src/core/gas.js`
 
-- **Role:** `LogBox` (Overlay Logs) & `Notifier` (OS Alerts).
-- **Status:** Stable & Implemented.
+- **Status:** **Stable**
+- **Updates:** Updated `CLIENT_VERSION` to match release.
 
-### `src/core/downloader.js` (Core Logic)
+### `src/core/index.js`
 
-- **Role:** Download Controller.
-- **Status:** Stable. Supports 4 policies (`folderInCbz`, `gasUpload` etc).
+- **Status:** **Stable**
+- **Updates:** Handshake retry logic implemented (v1.2.1).
+
+---
+
+## 📝 Next Steps for Reviewer
+
+1. **Verify Auto-Update:** Install v1.2.2 and check if Tampermonkey detects future updates.
+2. **Thumbnail Investigation:** Resume the postponed stability task.

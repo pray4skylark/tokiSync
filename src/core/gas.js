@@ -20,7 +20,7 @@ export async function uploadToGAS(blob, folderName, fileName, options = {}) {
     
     // Constants
     const CHUNK_SIZE = 20 * 1024 * 1024; // 20MB
-    const CLIENT_VERSION = "0.0.3-new_core";
+    const CLIENT_VERSION = "1.2.2";
     const totalSize = blob.size;
     let uploadUrl = "";
 
