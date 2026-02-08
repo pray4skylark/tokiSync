@@ -2,7 +2,8 @@
 // 🛠 Viewer Utility Functions (Isolated)
 // =======================================================
 
-const INDEX_FILE_NAME = "library_index.json";
+// const INDEX_FILE_NAME declared in View_LibraryService.gs
+// const INDEX_FILE_NAME = "library_index.json";
 
 /**
  * Viewer 전용 권한 확인 함수

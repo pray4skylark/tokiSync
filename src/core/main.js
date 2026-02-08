@@ -32,6 +32,50 @@ export function main() {
                  alert("팝업 차단을 해제해주세요.");
              }
         });
+
+        GM_registerMenuCommand('🔄 썸네일 최적화 변환 (v1.4.0)', async () => {
+            if(!confirm("이 작업은 기존 다운로드된 작품들의 썸네일을 새로운 최적화 폴더(_Thumbnails)로 이동시킵니다.\n실행하시겠습니까? (서버 부하가 발생할 수 있습니다)")) return;
+            
+            const config = getConfig();
+            const win = window.open("", "MigrationLog", "width=600,height=800");
+            win.document.write("<h3>🚀 v1.4.0 Migration Started...</h3><pre id='log'></pre>");
+            
+            try {
+                // Trigger GAS Migration
+                GM_xmlhttpRequest({
+                    method: 'POST',
+                    url: config.gasUrl,
+                    data: JSON.stringify({
+                        type: 'view_migrate_thumbnails', // New Action
+                        folderId: config.folderId,
+                        apiKey: config.apiKey
+                    }),
+                    onload: (res) => {
+                        try {
+                            const result = JSON.parse(res.responseText);
+                            if(result.status === 'success') {
+                                const logs = result.body.join('\n');
+                                win.document.getElementById('log').innerText = logs;
+                                alert("✅ 마이그레이션이 완료되었습니다!\n이제 Viewer에서 썸네일이 정상적으로 표시됩니다.");
+                            } else {
+                                win.document.getElementById('log').innerText = "Failed: " + result.error;
+                                alert("❌ 오류 발생: " + result.error);
+                            }
+                        } catch (e) {
+                            // GAS returned HTML error instead of JSON
+                            win.document.getElementById('log').innerText = res.responseText;
+                            alert("❌ GAS 서버 오류 (JSON 파싱 실패)\n로그 창을 확인해주세요.");
+                        }
+                    },
+                    onerror: (err) => {
+                         win.document.getElementById('log').innerText = "Network Error";
+                         alert("❌ 네트워크 오류");
+                    }
+                });
+            } catch(e) {
+                alert("오류: " + e.message);
+            }
+        });
     }
 
     // 1-1. Bridge Listener (New: Direct Access Proxy)

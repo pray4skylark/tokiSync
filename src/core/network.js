@@ -233,12 +233,53 @@ async function getOrCreateFolder(folderName, parentId, token, category = 'Webtoo
 }
 
 /**
+ * Finds or creates the centralized '_Thumbnails' folder
+ */
+async function getOrCreateThumbnailFolder(token, parentId) {
+    const thumbName = '_Thumbnails';
+    const searchUrl = `https://www.googleapis.com/drive/v3/files?` +
+        `q=name='${thumbName}' and '${parentId}' in parents and trashed=false and mimeType='application/vnd.google-apps.folder'` +
+        `&fields=files(id,name)`;
+    
+    const result = await new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: searchUrl,
+            headers: { 'Authorization': `Bearer ${token}` },
+            onload: (res) => resolve(JSON.parse(res.responseText)),
+            onerror: reject
+        });
+    });
+
+    if (result.files && result.files.length > 0) {
+        return result.files[0].id; // Found
+    }
+
+    // Create
+    console.log(`[DirectUpload] Creating folder: ${thumbName}`);
+    const createResult = await new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+            method: 'POST',
+            url: 'https://www.googleapis.com/drive/v3/files',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            data: JSON.stringify({
+                name: thumbName,
+                mimeType: 'application/vnd.google-apps.folder',
+                parents: [parentId]
+            }),
+            onload: (res) => resolve(JSON.parse(res.responseText)),
+            onerror: reject
+        });
+    });
+    return createResult.id;
+}
+
+/**
  * Uploads file directly to Google Drive
- * @param {Blob} blob - File content
- * @param {string} folderName - Series folder name (e.g. "[123] Title")
- * @param {string} fileName - File name
- * @param {Object} metadata - Additional metadata (category, etc.)
- * @returns {Promise<void>}
+ * v1.4.0: Centralized Thumbnail Support
  */
 export async function uploadDirect(blob, folderName, fileName, metadata = {}) {
     try {
@@ -247,24 +288,80 @@ export async function uploadDirect(blob, folderName, fileName, metadata = {}) {
         const config = getConfig();
         const token = await getToken();
         
-        // Determine category (default: Webtoon)
+        // Determine category
         const category = metadata.category || (fileName.endsWith('.epub') ? 'Novel' : 'Webtoon');
-        console.log(`[DirectUpload] Category: ${category}`);
         
-        // 1. Get or create series folder (with category support)
+        // 1. Get Series Folder ID (Always needed for info.json and content)
         const seriesFolderId = await getOrCreateFolder(folderName, config.folderId, token, category);
         
-        // 2. Upload file using multipart upload with Blob
+        let targetFolderId = seriesFolderId;
+        let finalFileName = fileName;
+
+        // 2. [v1.4.0] Centralized Thumbnail Logic
+        if (fileName === 'cover.jpg' || fileName === 'Cover.jpg') {
+            console.log('[DirectUpload] 🖼️ Detected Cover Image -> Redirecting to _Thumbnails');
+            
+            // Extract Series ID: "[12345] Title" -> "12345"
+            const idMatch = folderName.match(/^\[(\d+)\]/);
+            if (idMatch) {
+                const seriesId = idMatch[1];
+                finalFileName = `${seriesId}.jpg`;
+                targetFolderId = await getOrCreateThumbnailFolder(token, config.folderId);
+                console.log(`[DirectUpload] Target: _Thumbnails/${finalFileName}`);
+                
+                // Check for existing file and delete to prevent duplicates
+                try {
+                    const searchUrl = `https://www.googleapis.com/drive/v3/files?` +
+                        `q=name='${finalFileName}' and '${targetFolderId}' in parents and trashed=false` +
+                        `&fields=files(id,name)`;
+                    
+                    const searchResult = await new Promise((resolve, reject) => {
+                        GM_xmlhttpRequest({
+                            method: 'GET',
+                            url: searchUrl,
+                            headers: { 'Authorization': `Bearer ${token}` },
+                            onload: (res) => resolve(JSON.parse(res.responseText)),
+                            onerror: reject
+                        });
+                    });
+                    
+                    // Delete existing files (there might be duplicates)
+                    if (searchResult.files && searchResult.files.length > 0) {
+                        console.log(`[DirectUpload] Found ${searchResult.files.length} existing file(s), deleting...`);
+                        for (const file of searchResult.files) {
+                            await new Promise((resolve, reject) => {
+                                GM_xmlhttpRequest({
+                                    method: 'DELETE',
+                                    url: `https://www.googleapis.com/drive/v3/files/${file.id}`,
+                                    headers: { 'Authorization': `Bearer ${token}` },
+                                    onload: () => {
+                                        console.log(`[DirectUpload] Deleted old file: ${file.id}`);
+                                        resolve();
+                                    },
+                                    onerror: reject
+                                });
+                            });
+                        }
+                    }
+                } catch (deleteError) {
+                    console.warn('[DirectUpload] Failed to check/delete existing file:', deleteError);
+                    // Continue anyway - upload will create duplicate but system still works
+                }
+            } else {
+                console.warn('[DirectUpload] Could not extract Series ID, uploading to series folder as fallback.');
+            }
+        }
+
+        // 3. Upload File
         const boundary = '-------314159265358979323846';
         const delimiter = `\r\n--${boundary}\r\n`;
         const closeDelim = `\r\n--${boundary}--`;
         
         const fileMetadata = {
-            name: fileName,
-            parents: [seriesFolderId]
+            name: finalFileName,
+            parents: [targetFolderId]
         };
         
-        // Build multipart body parts as separate Blobs
         const metadataPart = new Blob([
             delimiter,
             'Content-Type: application/json\r\n\r\n',
@@ -274,11 +371,7 @@ export async function uploadDirect(blob, folderName, fileName, metadata = {}) {
         ], { type: 'text/plain' });
         
         const closePart = new Blob([closeDelim], { type: 'text/plain' });
-        
-        // Combine all parts into single Blob
         const multipartBody = new Blob([metadataPart, blob, closePart]);
-        
-        console.log(`[DirectUpload] Multipart body size: ${multipartBody.size} bytes`);
         
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
@@ -292,19 +385,13 @@ export async function uploadDirect(blob, folderName, fileName, metadata = {}) {
                 binary: true,
                 onload: (response) => {
                     if (response.status >= 200 && response.status < 300) {
-                        console.log(`[DirectUpload] ✅ Upload successful: ${fileName}`);
+                        console.log(`[DirectUpload] ✅ Upload successful: ${finalFileName}`);
                         resolve();
                     } else {
-                        console.error(`[DirectUpload] Upload failed:`, response.status, response.statusText);
-                        console.error(`[DirectUpload] Response:`, response.responseText);
-                        reject(new Error(`Upload failed: ${response.status} ${response.statusText}`));
+                        reject(new Error(`Upload failed: ${response.status}`));
                     }
                 },
-                onerror: (error) => {
-                    console.error(`[DirectUpload] ❌ Upload failed:`, error);
-                    reject(error);
-                },
-                ontimeout: () => reject(new Error('Upload timeout'))
+                onerror: reject
             });
         });
         

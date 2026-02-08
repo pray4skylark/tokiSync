@@ -45,6 +45,9 @@ function View_Dispatcher(data) {
       if (!data.seriesList) throw new Error("seriesList is required");
       View_saveIndex(data.folderId, data.seriesList);
       resultBody = { saved: true };
+    } else if (action === "view_migrate_thumbnails") {
+      // v1.4.0 Migration
+      resultBody = Migrate_MoveThumbnails(data.folderId);
     } else {
       throw new Error("Unknown Viewer Action: " + action);
     }

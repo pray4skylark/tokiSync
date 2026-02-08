@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.3.5
+// @version      1.4.0
 // @description  Toki series sites -> Google Drive syncing tool (Bundled)
 // @author       pray4skylark
 // @updateURL    https://raw.githubusercontent.com/pray4skylark/tokiSync/main/docs/tokiSync.user.js
@@ -466,12 +466,53 @@ async function getOrCreateFolder(folderName, parentId, token, category = 'Webtoo
 }
 
 /**
+ * Finds or creates the centralized '_Thumbnails' folder
+ */
+async function getOrCreateThumbnailFolder(token, parentId) {
+    const thumbName = '_Thumbnails';
+    const searchUrl = `https://www.googleapis.com/drive/v3/files?` +
+        `q=name='${thumbName}' and '${parentId}' in parents and trashed=false and mimeType='application/vnd.google-apps.folder'` +
+        `&fields=files(id,name)`;
+    
+    const result = await new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: searchUrl,
+            headers: { 'Authorization': `Bearer ${token}` },
+            onload: (res) => resolve(JSON.parse(res.responseText)),
+            onerror: reject
+        });
+    });
+
+    if (result.files && result.files.length > 0) {
+        return result.files[0].id; // Found
+    }
+
+    // Create
+    console.log(`[DirectUpload] Creating folder: ${thumbName}`);
+    const createResult = await new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+            method: 'POST',
+            url: 'https://www.googleapis.com/drive/v3/files',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            data: JSON.stringify({
+                name: thumbName,
+                mimeType: 'application/vnd.google-apps.folder',
+                parents: [parentId]
+            }),
+            onload: (res) => resolve(JSON.parse(res.responseText)),
+            onerror: reject
+        });
+    });
+    return createResult.id;
+}
+
+/**
  * Uploads file directly to Google Drive
- * @param {Blob} blob - File content
- * @param {string} folderName - Series folder name (e.g. "[123] Title")
- * @param {string} fileName - File name
- * @param {Object} metadata - Additional metadata (category, etc.)
- * @returns {Promise<void>}
+ * v1.4.0: Centralized Thumbnail Support
  */
 async function uploadDirect(blob, folderName, fileName, metadata = {}) {
     try {
@@ -480,24 +521,80 @@ async function uploadDirect(blob, folderName, fileName, metadata = {}) {
         const config = getConfig();
         const token = await getToken();
         
-        // Determine category (default: Webtoon)
+        // Determine category
         const category = metadata.category || (fileName.endsWith('.epub') ? 'Novel' : 'Webtoon');
-        console.log(`[DirectUpload] Category: ${category}`);
         
-        // 1. Get or create series folder (with category support)
+        // 1. Get Series Folder ID (Always needed for info.json and content)
         const seriesFolderId = await getOrCreateFolder(folderName, config.folderId, token, category);
         
-        // 2. Upload file using multipart upload with Blob
+        let targetFolderId = seriesFolderId;
+        let finalFileName = fileName;
+
+        // 2. [v1.4.0] Centralized Thumbnail Logic
+        if (fileName === 'cover.jpg' || fileName === 'Cover.jpg') {
+            console.log('[DirectUpload] 🖼️ Detected Cover Image -> Redirecting to _Thumbnails');
+            
+            // Extract Series ID: "[12345] Title" -> "12345"
+            const idMatch = folderName.match(/^\[(\d+)\]/);
+            if (idMatch) {
+                const seriesId = idMatch[1];
+                finalFileName = `${seriesId}.jpg`;
+                targetFolderId = await getOrCreateThumbnailFolder(token, config.folderId);
+                console.log(`[DirectUpload] Target: _Thumbnails/${finalFileName}`);
+                
+                // Check for existing file and delete to prevent duplicates
+                try {
+                    const searchUrl = `https://www.googleapis.com/drive/v3/files?` +
+                        `q=name='${finalFileName}' and '${targetFolderId}' in parents and trashed=false` +
+                        `&fields=files(id,name)`;
+                    
+                    const searchResult = await new Promise((resolve, reject) => {
+                        GM_xmlhttpRequest({
+                            method: 'GET',
+                            url: searchUrl,
+                            headers: { 'Authorization': `Bearer ${token}` },
+                            onload: (res) => resolve(JSON.parse(res.responseText)),
+                            onerror: reject
+                        });
+                    });
+                    
+                    // Delete existing files (there might be duplicates)
+                    if (searchResult.files && searchResult.files.length > 0) {
+                        console.log(`[DirectUpload] Found ${searchResult.files.length} existing file(s), deleting...`);
+                        for (const file of searchResult.files) {
+                            await new Promise((resolve, reject) => {
+                                GM_xmlhttpRequest({
+                                    method: 'DELETE',
+                                    url: `https://www.googleapis.com/drive/v3/files/${file.id}`,
+                                    headers: { 'Authorization': `Bearer ${token}` },
+                                    onload: () => {
+                                        console.log(`[DirectUpload] Deleted old file: ${file.id}`);
+                                        resolve();
+                                    },
+                                    onerror: reject
+                                });
+                            });
+                        }
+                    }
+                } catch (deleteError) {
+                    console.warn('[DirectUpload] Failed to check/delete existing file:', deleteError);
+                    // Continue anyway - upload will create duplicate but system still works
+                }
+            } else {
+                console.warn('[DirectUpload] Could not extract Series ID, uploading to series folder as fallback.');
+            }
+        }
+
+        // 3. Upload File
         const boundary = '-------314159265358979323846';
         const delimiter = `\r\n--${boundary}\r\n`;
         const closeDelim = `\r\n--${boundary}--`;
         
         const fileMetadata = {
-            name: fileName,
-            parents: [seriesFolderId]
+            name: finalFileName,
+            parents: [targetFolderId]
         };
         
-        // Build multipart body parts as separate Blobs
         const metadataPart = new Blob([
             delimiter,
             'Content-Type: application/json\r\n\r\n',
@@ -507,11 +604,7 @@ async function uploadDirect(blob, folderName, fileName, metadata = {}) {
         ], { type: 'text/plain' });
         
         const closePart = new Blob([closeDelim], { type: 'text/plain' });
-        
-        // Combine all parts into single Blob
         const multipartBody = new Blob([metadataPart, blob, closePart]);
-        
-        console.log(`[DirectUpload] Multipart body size: ${multipartBody.size} bytes`);
         
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
@@ -525,19 +618,13 @@ async function uploadDirect(blob, folderName, fileName, metadata = {}) {
                 binary: true,
                 onload: (response) => {
                     if (response.status >= 200 && response.status < 300) {
-                        console.log(`[DirectUpload] ✅ Upload successful: ${fileName}`);
+                        console.log(`[DirectUpload] ✅ Upload successful: ${finalFileName}`);
                         resolve();
                     } else {
-                        console.error(`[DirectUpload] Upload failed:`, response.status, response.statusText);
-                        console.error(`[DirectUpload] Response:`, response.responseText);
-                        reject(new Error(`Upload failed: ${response.status} ${response.statusText}`));
+                        reject(new Error(`Upload failed: ${response.status}`));
                     }
                 },
-                onerror: (error) => {
-                    console.error(`[DirectUpload] ❌ Upload failed:`, error);
-                    reject(error);
-                },
-                ontimeout: () => reject(new Error('Upload timeout'))
+                onerror: reject
             });
         });
         
@@ -1409,6 +1496,22 @@ function getImageList(iframeDocument, protocolDomain) {
     }).filter(src => src !== null); // Remove nulls
 }
 
+/**
+ * Extract thumbnail URL from series detail page
+ * @returns {string|null} Thumbnail URL or null if not found
+ */
+function getThumbnailUrl() {
+    // Target: <img itemprop="image" content="[ORIGINAL_URL]" src="[THUMB_URL]">
+    const img = document.querySelector('img[itemprop="image"]');
+    if (!img) {
+        console.warn('[Parser] Thumbnail image not found');
+        return null;
+    }
+    
+    // Prefer 'content' attribute (original quality), fallback to 'src' (thumbnail)
+    return img.getAttribute('content') || img.src;
+}
+
 ;// ./src/core/detector.js
 function detectSite() {
     const currentURL = document.URL;
@@ -1760,6 +1863,31 @@ async function tokiDownload(startIndex, lastIndex, policy = 'folderInCbz') {
             rootFolder += rangeStr;
         }
 
+        // [v1.4.0] Upload Series Thumbnail (if uploading to Drive)
+        if (destination === 'drive') {
+            try {
+                const thumbnailUrl = getThumbnailUrl();
+                if (thumbnailUrl) {
+                    logger.log('📷 시리즈 썸네일 업로드 중...');
+                    const thumbResponse = await fetch(thumbnailUrl);
+                    const thumbBlob = await thumbResponse.blob();
+                    
+                    // Upload as 'cover.jpg' - network.js will auto-redirect to _Thumbnails/{ID}.jpg
+                    // saveFile(data, filename, type, extension, metadata)
+                    // → fullFileName = "cover.jpg"
+                    await saveFile(thumbBlob, 'cover', 'drive', 'jpg', { 
+                        category,
+                        folderName: rootFolder  // Target folder for upload
+                    });
+                    logger.success('✅ 썸네일 업로드 완료');
+                } else {
+                    logger.log('⚠️  썸네일을 찾을 수 없습니다 (건너뜀)', 'warn');
+                }
+            } catch (thumbError) {
+                logger.error(`썸네일 업로드 실패 (계속 진행): ${thumbError.message}`);
+            }
+        }
+
         // Create IFrame
         const iframe = document.createElement('iframe');
         iframe.width = 600; iframe.height = 600;
@@ -1824,7 +1952,35 @@ async function tokiDownload(startIndex, lastIndex, policy = 'folderInCbz') {
                     }); 
                 }
             }
+            
+            // [v1.4.0] Add completion badge to list item (real-time feedback)
+            if (item.element && !item.element.querySelector('.toki-badge')) {
+                const badge = document.createElement('span');
+                badge.className = 'toki-badge';
+                badge.innerText = '✅';
+                badge.style.marginLeft = '5px';
+                badge.style.fontSize = '12px';
+                
+                // Target: .wr-subject > a (link element)
+                const linkEl = item.element.querySelector('.wr-subject > a');
+                if (linkEl) {
+                    linkEl.prepend(badge);
+                } else {
+                    // Fallback
+                    const titleEl = item.element.querySelector('.wr-subject, .item-subject, .title');
+                    if (titleEl) {
+                        titleEl.prepend(badge);
+                    } else {
+                        item.element.appendChild(badge);
+                    }
+                }
+                
+                // Visual feedback
+                item.element.style.opacity = '0.6';
+                item.element.style.backgroundColor = 'rgba(0, 255, 0, 0.05)';
+            }
         }
+
 
         // Cleanup
         iframe.remove();
@@ -1841,7 +1997,7 @@ async function tokiDownload(startIndex, lastIndex, policy = 'folderInCbz') {
         }
 
         logger.success(`✅ 다운로드 완료!`);
-        Notifier.notify('TokiSync', '다운로드 완료!');
+        Notifier.notify('TokiSync', `다운로드 완료! (${list.length}개 항목)`);
 
     } catch (error) {
         console.error(error);
@@ -1925,6 +2081,50 @@ function main() {
              } else {
                  alert("팝업 차단을 해제해주세요.");
              }
+        });
+
+        GM_registerMenuCommand('🔄 썸네일 최적화 변환 (v1.4.0)', async () => {
+            if(!confirm("이 작업은 기존 다운로드된 작품들의 썸네일을 새로운 최적화 폴더(_Thumbnails)로 이동시킵니다.\n실행하시겠습니까? (서버 부하가 발생할 수 있습니다)")) return;
+            
+            const config = getConfig();
+            const win = window.open("", "MigrationLog", "width=600,height=800");
+            win.document.write("<h3>🚀 v1.4.0 Migration Started...</h3><pre id='log'></pre>");
+            
+            try {
+                // Trigger GAS Migration
+                GM_xmlhttpRequest({
+                    method: 'POST',
+                    url: config.gasUrl,
+                    data: JSON.stringify({
+                        type: 'view_migrate_thumbnails', // New Action
+                        folderId: config.folderId,
+                        apiKey: config.apiKey
+                    }),
+                    onload: (res) => {
+                        try {
+                            const result = JSON.parse(res.responseText);
+                            if(result.status === 'success') {
+                                const logs = result.body.join('\n');
+                                win.document.getElementById('log').innerText = logs;
+                                alert("✅ 마이그레이션이 완료되었습니다!\n이제 Viewer에서 썸네일이 정상적으로 표시됩니다.");
+                            } else {
+                                win.document.getElementById('log').innerText = "Failed: " + result.error;
+                                alert("❌ 오류 발생: " + result.error);
+                            }
+                        } catch (e) {
+                            // GAS returned HTML error instead of JSON
+                            win.document.getElementById('log').innerText = res.responseText;
+                            alert("❌ GAS 서버 오류 (JSON 파싱 실패)\n로그 창을 확인해주세요.");
+                        }
+                    },
+                    onerror: (err) => {
+                         win.document.getElementById('log').innerText = "Network Error";
+                         alert("❌ 네트워크 오류");
+                    }
+                });
+            } catch(e) {
+                alert("오류: " + e.message);
+            }
         });
     }
 

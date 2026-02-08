@@ -1,5 +1,5 @@
 import { sleep, waitIframeLoad, saveFile, getCommonPrefix } from './utils.js';
-import { getListItems, parseListItem, getNovelContent, getImageList } from './parser.js';
+import { getListItems, parseListItem, getNovelContent, getImageList, getThumbnailUrl } from './parser.js';
 import { detectSite } from './detector.js';
 import { EpubBuilder } from './epub.js';
 import { CbzBuilder } from './cbz.js';
@@ -172,6 +172,31 @@ export async function tokiDownload(startIndex, lastIndex, policy = 'folderInCbz'
             rootFolder += rangeStr;
         }
 
+        // [v1.4.0] Upload Series Thumbnail (if uploading to Drive)
+        if (destination === 'drive') {
+            try {
+                const thumbnailUrl = getThumbnailUrl();
+                if (thumbnailUrl) {
+                    logger.log('📷 시리즈 썸네일 업로드 중...');
+                    const thumbResponse = await fetch(thumbnailUrl);
+                    const thumbBlob = await thumbResponse.blob();
+                    
+                    // Upload as 'cover.jpg' - network.js will auto-redirect to _Thumbnails/{ID}.jpg
+                    // saveFile(data, filename, type, extension, metadata)
+                    // → fullFileName = "cover.jpg"
+                    await saveFile(thumbBlob, 'cover', 'drive', 'jpg', { 
+                        category,
+                        folderName: rootFolder  // Target folder for upload
+                    });
+                    logger.success('✅ 썸네일 업로드 완료');
+                } else {
+                    logger.log('⚠️  썸네일을 찾을 수 없습니다 (건너뜀)', 'warn');
+                }
+            } catch (thumbError) {
+                logger.error(`썸네일 업로드 실패 (계속 진행): ${thumbError.message}`);
+            }
+        }
+
         // Create IFrame
         const iframe = document.createElement('iframe');
         iframe.width = 600; iframe.height = 600;
@@ -236,7 +261,35 @@ export async function tokiDownload(startIndex, lastIndex, policy = 'folderInCbz'
                     }); 
                 }
             }
+            
+            // [v1.4.0] Add completion badge to list item (real-time feedback)
+            if (item.element && !item.element.querySelector('.toki-badge')) {
+                const badge = document.createElement('span');
+                badge.className = 'toki-badge';
+                badge.innerText = '✅';
+                badge.style.marginLeft = '5px';
+                badge.style.fontSize = '12px';
+                
+                // Target: .wr-subject > a (link element)
+                const linkEl = item.element.querySelector('.wr-subject > a');
+                if (linkEl) {
+                    linkEl.prepend(badge);
+                } else {
+                    // Fallback
+                    const titleEl = item.element.querySelector('.wr-subject, .item-subject, .title');
+                    if (titleEl) {
+                        titleEl.prepend(badge);
+                    } else {
+                        item.element.appendChild(badge);
+                    }
+                }
+                
+                // Visual feedback
+                item.element.style.opacity = '0.6';
+                item.element.style.backgroundColor = 'rgba(0, 255, 0, 0.05)';
+            }
         }
+
 
         // Cleanup
         iframe.remove();
@@ -253,7 +306,7 @@ export async function tokiDownload(startIndex, lastIndex, policy = 'folderInCbz'
         }
 
         logger.success(`✅ 다운로드 완료!`);
-        Notifier.notify('TokiSync', '다운로드 완료!');
+        Notifier.notify('TokiSync', `다운로드 완료! (${list.length}개 항목)`);
 
     } catch (error) {
         console.error(error);
