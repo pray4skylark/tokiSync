@@ -17,7 +17,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: '../../dist-viewer', // 루트 기준 dist-viewer 폴더
+    outDir: '../../docs', // 루트 기준 docs 폴더 (GitHub Pages)
     emptyOutDir: true,
     assetsDir: 'assets',
     rollupOptions: {
