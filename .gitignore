@@ -21,3 +21,4 @@ docs/[0-9]*.user.js
 
 # Consolidated Handover File
 PROJECT_HANDOVER_MASTER.md
+.DS_Store
