@@ -17,7 +17,10 @@ export function useTouch() {
 
   // 플로팅 UI 영역인지 확인 (헤더, 푸터, 모달 등)
   const isUIElement = (el) => {
-    return el?.closest('.glass-controls, [class*="z-[4000]"], button, input, a');
+    if (el?.closest('.glass-controls, [class*="z-[4000]"], button, input')) return true;
+    // <a> 태그는 뷰어 콘텐츠(v-html) 내부가 아닌 경우만 UI 요소로 판정
+    if (el?.closest('a') && !el?.closest('#viewer-container')) return true;
+    return false;
   };
 
   const onTouchStart = (e) => {

@@ -100,16 +100,19 @@ export function main() {
                     method: options.method || 'GET',
                     url: url,
                     headers: options.headers,
-                    responseType: 'blob', // Always get blob for binary safety
+                    data: options.data, // Support POST body
+                    responseType: options.responseType || undefined, // Default to text/json unless blob requested
                     onload: async (res) => {
                         let payload = null;
                         
-                        // Convert Blob to ArrayBuffer for postMessage transfer
+                        // Handle Blob vs Text
                         if (res.response instanceof Blob) {
                             payload = await blobToArrayBuffer(res.response);
                         } else {
-                            // Fallback for text/json
+                            // Text or JSON
                             payload = res.responseText;
+                            // Attempt JSON parse if content-type says so? 
+                            // No, let the viewer parse it. Bridge should just transport.
                         }
 
                         sourceWindow.postMessage({
