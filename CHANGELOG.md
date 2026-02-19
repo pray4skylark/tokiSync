@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.5.0] - 2026-02-19
+
+### 📱 Unified Menu Modal (Modern UI)
+
+- **Centralized Control**: 기존의 산재된 Tampermonkey 메뉴(다운로드, 설정, 마이그레이션 등)를 **단일 통합 모달**로 통합했습니다.
+- **Improved UX**:
+  - **FAB (Floating Action Button)**: 화면 우측 하단 버튼으로 언제든지 호출 가능.
+  - **Keyboard Shortcut**: `Ctrl + Shift + T` 단축키 지원.
+  - **Accordion Layout**: 다운로드/동기화/설정 카테고리화.
+
+### 🎥 Viewer 2.0 (Cinematic Update)
+
+- **Tech Stack Overhaul**: 기존 HTML/jQuery 기반에서 **Vue 3 + Tailwind CSS** 아키텍처로 완전히 리베이스(Rebase)되었습니다.
+- **Cinematic Experience**:
+  - **Glassmorphism**: 전체 UI에 글래스모피즘(`backdrop-blur`) 디자인 적용.
+  - **Immersive Details**: 3D 커버 아트와 배경 흐림 효과가 적용된 에피소드 상세 페이지 신설.
+- **Unified Engine**: 웹툰(스크롤), 만화(페이지/스프레드), 소설(텍스트) 뷰어를 하나의 **SPA(Single Page Application)** 엔진으로 통합.
+- **Dexie.js Cache**: IndexedDB 기반의 오프라인 데이터 캐싱 도입.
+
+### ⚠️ Deferred Features
+
+- **Advanced Metadata**: 태그/작가 정보 수집 기능은 v1.6.0으로 연기되었습니다.
+- **Smart Sync**: 중복 다운로드 방지 로직은 다음 버전에서 고도화될 예정입니다.
+
 ## [v1.4.0] - 2026-02-09
 
 ### 🖼️ Thumbnail Optimization

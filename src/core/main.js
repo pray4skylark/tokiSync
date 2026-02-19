@@ -1,7 +1,7 @@
 import { tokiDownload } from './downloader.js';
-import { detectSite } from './detector.js';
-import { showConfigModal, getConfig } from './config.js';
-import { LogBox, markDownloadedItems } from './ui.js';
+import { detectSite, getMaxEpisodes, parseEpisodeRange } from './detector.js'; // Need to export getMaxEpisodes/parseEpisodeRange if possible, or implement logic here.
+import { showConfigModal, getConfig, setConfig } from './config.js';
+import { LogBox, markDownloadedItems, MenuModal } from './ui.js';
 import { fetchHistory } from './gas.js';
 import { getListItems, parseListItem } from './parser.js';
 import { getOAuthToken } from './network.js';
@@ -9,84 +9,184 @@ import { getOAuthToken } from './network.js';
 import { getCommonPrefix, blobToArrayBuffer } from './utils.js';
 
 export function main() {
-    console.log("🚀 TokiDownloader Loaded (New Core)");
+    console.log("🚀 TokiDownloader Loaded (New Core v1.5.0)");
     
-    // 1. Global Settings (Always available)
-    if (typeof GM_registerMenuCommand !== 'undefined') {
-        GM_registerMenuCommand('설정', () => showConfigModal());
-        GM_registerMenuCommand('로그창 토글', () => LogBox.getInstance().toggle());
+    const logger = LogBox.getInstance();
 
-        GM_registerMenuCommand('Viewer 열기 (설정 전송)', () => {
-             const config = getConfig();
-             const viewerUrl = "https://pray4skylark.github.io/tokiSync/";
-             const win = window.open(viewerUrl, "_blank");
-             
-             if(win) {
-                 // Try to send config periodically until success or timeout
-                 let attempts = 0;
-                 const interval = setInterval(() => {
-                     attempts++;
-                     win.postMessage({ type: 'TOKI_CONFIG', config: config }, '*');
-                     if(attempts > 10) clearInterval(interval);
-                 }, 500);
-             } else {
-                 alert("팝업 차단을 해제해주세요.");
-             }
-        });
+    // -- Helper Functions for Menu Actions --
 
-        GM_registerMenuCommand('🔄 썸네일 최적화 변환 (v1.4.0)', async () => {
-            if(!confirm("이 작업은 기존 다운로드된 작품들의 썸네일을 새로운 최적화 폴더(_Thumbnails)로 이동시킵니다.\n실행하시겠습니까? (서버 부하가 발생할 수 있습니다)")) return;
-            
-            const config = getConfig();
-            const win = window.open("", "MigrationLog", "width=600,height=800");
-            win.document.write("<h3>🚀 v1.4.0 Migration Started...</h3><pre id='log'></pre>");
-            
-            try {
-                // Trigger GAS Migration
-                GM_xmlhttpRequest({
-                    method: 'POST',
-                    url: config.gasUrl,
-                    data: JSON.stringify({
-                        type: 'view_migrate_thumbnails', // New Action
-                        folderId: config.folderId,
-                        apiKey: config.apiKey
-                    }),
-                    onload: (res) => {
-                        try {
-                            const result = JSON.parse(res.responseText);
-                            if(result.status === 'success') {
-                                const logs = result.body.join('\n');
-                                win.document.getElementById('log').innerText = logs;
-                                alert("✅ 마이그레이션이 완료되었습니다!\n이제 Viewer에서 썸네일이 정상적으로 표시됩니다.");
-                            } else {
-                                win.document.getElementById('log').innerText = "Failed: " + result.body;
-                                alert("❌ 오류 발생: " + result.body);
-                            }
-                        } catch (e) {
-                            // GAS returned HTML error instead of JSON
-                            win.document.getElementById('log').innerText = res.responseText;
-                            alert("❌ GAS 서버 오류 (JSON 파싱 실패)\n로그 창을 확인해주세요.");
+    const openViewer = () => {
+         const config = getConfig();
+         const viewerUrl = "https://pray4skylark.github.io/tokiSync/";
+         const win = window.open(viewerUrl, "_blank");
+         
+         if(win) {
+             let attempts = 0;
+             const interval = setInterval(() => {
+                 attempts++;
+                 win.postMessage({ type: 'TOKI_CONFIG', config: config }, '*');
+                 if(attempts > 10) clearInterval(interval);
+             }, 500);
+         } else {
+             alert("팝업 차단을 해제해주세요.");
+         }
+    };
+
+    const runThumbnailMigration = async () => {
+        if(!confirm("이 작업은 기존 다운로드된 작품들의 썸네일을 새로운 최적화 폴더(_Thumbnails)로 이동시킵니다.\n실행하시겠습니까? (서버 부하가 발생할 수 있습니다)")) return;
+        
+        const config = getConfig();
+        const win = window.open("", "MigrationLog", "width=600,height=800");
+        win.document.write("<h3>🚀 v1.4.0 Migration Started...</h3><pre id='log'></pre>");
+        
+        try {
+            GM_xmlhttpRequest({
+                method: 'POST',
+                url: config.gasUrl,
+                data: JSON.stringify({
+                    type: 'view_migrate_thumbnails',
+                    folderId: config.folderId,
+                    apiKey: config.apiKey
+                }),
+                onload: (res) => {
+                    try {
+                        const result = JSON.parse(res.responseText);
+                        if(result.status === 'success') {
+                            const logs = result.body.join('\n');
+                            win.document.getElementById('log').innerText = logs;
+                            alert("✅ 마이그레이션이 완료되었습니다!");
+                        } else {
+                            win.document.getElementById('log').innerText = "Failed: " + result.body;
+                            alert("❌ 오류 발생: " + result.body);
                         }
-                    },
-                    onerror: (err) => {
-                         win.document.getElementById('log').innerText = "Network Error";
-                         alert("❌ 네트워크 오류");
+                    } catch (e) {
+                        win.document.getElementById('log').innerText = res.responseText;
+                        alert("❌ GAS 서버 오류");
                     }
-                });
-            } catch(e) {
-                alert("오류: " + e.message);
+                },
+                onerror: (err) => {
+                     win.document.getElementById('log').innerText = "Network Error";
+                     alert("❌ 네트워크 오류");
+                }
+            });
+        } catch(e) {
+            alert("오류: " + e.message);
+        }
+    };
+
+    const runFilenameMigration = async () => {
+        if (!confirm('현재 작품의 파일명을 표준화하시겠습니까?\n(예: "0001 - 1화.cbz" -> "0001 - 제목 1화.cbz")')) return;
+        
+        const idMatch = document.URL.match(/\/(novel|webtoon|comic)\/([0-9]+)/);
+        const seriesId = idMatch ? idMatch[2] : null;
+
+        if (!seriesId) {
+            alert('시리즈 ID를 찾을 수 없습니다.');
+            return;
+        }
+
+        try {
+            logger.show();
+            logger.log('이름 변경 작업 요청 중...');
+            
+            const token = await getOAuthToken(); // FIXME: OAuth or API Key? Config uses API Key usually.
+            const config = getConfig();
+            
+            if (!config.gasUrl) {
+                alert('GAS URL이 설정되지 않았습니다.');
+                return;
             }
+
+            GM_xmlhttpRequest({
+                method: "POST",
+                url: config.gasUrl,
+                data: JSON.stringify({
+                    type: 'view_migrate_filenames',
+                    seriesId: seriesId,
+                    folderId: config.folderId,
+                    apiKey: config.apiKey
+                }),
+                headers: {
+                    // "Authorization": `Bearer ${token}`, // If using OAuth
+                    "Content-Type": "application/json"
+                },
+                onload: (res) => {
+                    try {
+                        const result = JSON.parse(res.responseText);
+                        if (result.status === 'success') {
+                            const logs = Array.isArray(result.body) ? result.body.join('\n') : result.body;
+                            logger.success(`작업 완료!\n로그:\n${logs}`);
+                            alert(`작업이 완료되었습니다.`);
+                        } else {
+                            logger.error(`작업 실패: ${result.body}`);
+                            alert(`실패: ${result.body}`);
+                        }
+                    } catch (parseErr) {
+                        logger.error(`응답 파싱 실패: ${parseErr.message}`);
+                    }
+                },
+                onerror: (err) => {
+                    logger.error(`네트워크 오류: ${err.statusText}`);
+                    alert('네트워크 오류 발생');
+                }
+            });
+        } catch (e) {
+            alert('오류 발생: ' + e.message);
+            console.error(e);
+        }
+    };
+
+    // -- 1. Initialize MenuModal --
+    new MenuModal({
+        onDownload: () => {}, // Not used directly, specific methods below
+        downloadAll: () => {
+            const config = getConfig();
+            tokiDownload(undefined, undefined, config.policy);
+        },
+        downloadRange: (start, end) => {
+            const config = getConfig();
+            tokiDownload(start, end, config.policy);
+        },
+        openViewer: openViewer,
+        openSettings: () => showConfigModal(),
+        toggleLog: () => logger.toggle(),
+        getConfig: getConfig,
+        setConfig: setConfig,
+        getEpisodeRange: () => {
+            const list = getListItems();
+            if (list.length > 0) {
+                const first = parseListItem(list[0]);
+                const last = parseListItem(list[list.length - 1]);
+                const min = Math.min(parseInt(first.num), parseInt(last.num));
+                const max = Math.max(parseInt(first.num), parseInt(last.num));
+                return { min, max };
+            }
+            return { min: 1, max: 100 };
+        },
+        migrateFilenames: runFilenameMigration,
+        migrateThumbnails: runThumbnailMigration
+    });
+
+
+    // -- 2. Register Legacy Menu Commands (Fallback) --
+    if (typeof GM_registerMenuCommand !== 'undefined') {
+        GM_registerMenuCommand('⚙️ 설정 (Settings)', () => showConfigModal());
+        GM_registerMenuCommand('📜 로그창 토글 (Log)', () => logger.toggle());
+        GM_registerMenuCommand('🌐 Viewer 열기', openViewer);
+        GM_registerMenuCommand('📥 전체 다운로드', () => {
+            const config = getConfig();
+            tokiDownload(undefined, undefined, config.policy);
         });
+        GM_registerMenuCommand('📂 파일명 표준화 (Migration)', runFilenameMigration);
     }
 
-    // 1-1. Bridge Listener (New: Direct Access Proxy)
+    // -- 3. Bridge Listener --
     window.addEventListener("message", async (event) => {
         if (event.data.type === 'TOKI_BRIDGE_REQUEST') {
             const { requestId, url, options } = event.data;
             const sourceWindow = event.source;
             const origin = event.origin;
 
-            // Simple Origin Check (Allow GitHub Pages & Localhost)
             if (!origin.includes("github.io") && !origin.includes("localhost") && !origin.includes("127.0.0.1")) {
                 console.warn("[Bridge] Blocked request from unknown origin:", origin);
                 return;
@@ -95,24 +195,18 @@ export function main() {
             console.log(`[Bridge] Proxying request: ${url}`);
 
             try {
-                // Execute GM_xmlhttpRequest
                 GM_xmlhttpRequest({
                     method: options.method || 'GET',
                     url: url,
                     headers: options.headers,
-                    data: options.data, // Support POST body
-                    responseType: options.responseType || undefined, // Default to text/json unless blob requested
+                    data: options.data,
+                    responseType: options.responseType || undefined,
                     onload: async (res) => {
                         let payload = null;
-                        
-                        // Handle Blob vs Text
                         if (res.response instanceof Blob) {
                             payload = await blobToArrayBuffer(res.response);
                         } else {
-                            // Text or JSON
                             payload = res.responseText;
-                            // Attempt JSON parse if content-type says so? 
-                            // No, let the viewer parse it. Bridge should just transport.
                         }
 
                         sourceWindow.postMessage({
@@ -142,34 +236,9 @@ export function main() {
     });
 
     const siteInfo = detectSite();
-    if(!siteInfo) return; // Not a target page
+    if(!siteInfo) return; 
 
-    // 2. Site Specific Commands
-    if (typeof GM_registerMenuCommand !== 'undefined') {
-        GM_registerMenuCommand('전체 다운로드', () => {
-            const config = getConfig();
-            tokiDownload(undefined, undefined, config.policy);
-        });
-        
-        GM_registerMenuCommand('N번째 회차부터', () => {
-             const start = prompt('몇번째 회차부터 저장할까요?', 1);
-             if(start) {
-                 const config = getConfig();
-                 tokiDownload(parseInt(start), undefined, config.policy);
-             }
-        });
-
-        GM_registerMenuCommand('N번째 회차부터 N번째 까지', () => {
-             const start = prompt('몇번째 회차부터 저장할까요?', 1);
-             const end = prompt('몇번째 회차까지 저장할까요?', 2);
-             if(start && end) {
-                 const config = getConfig();
-                 tokiDownload(parseInt(start), parseInt(end), config.policy);
-             }
-        });
-    }
-
-    // 3. History Sync (Async)
+    // -- 4. History Sync (Async) --
     console.log('[TokiSync] Starting history sync...');
     (async () => {
         try {
@@ -180,11 +249,9 @@ export function main() {
                 return;
             }
 
-            // Replicate RootFolder Logic (Series Title Resolution)
             const first = parseListItem(list[0]);
             const last = parseListItem(list[list.length - 1]);
 
-            // Extract Series ID from URL
             const idMatch = document.URL.match(/\/(novel|webtoon|comic)\/([0-9]+)/);
             const seriesId = idMatch ? idMatch[2] : "0000";
 
@@ -202,12 +269,10 @@ export function main() {
                 rootFolder = `[${seriesId}] ${first.title}`;
             }
 
-            // Determine Category
             let category = 'Webtoon';
             if (siteInfo.site === '북토끼') category = 'Novel';
             else if (siteInfo.site === '마나토끼') category = 'Manga';
 
-            // Fetch & Mark
             console.log(`[TokiSync] Fetching history for: ${rootFolder} (${category})`);
             const history = await fetchHistory(rootFolder, category);
             console.log(`[TokiSync] Received ${history.length} history items:`, history);
@@ -219,73 +284,6 @@ export function main() {
         } catch (e) {
             console.warn('[TokiSync] History check failed:', e);
         }
-
-        // [v1.4.0] File Name Migration Menu
-        GM_registerMenuCommand('📂 파일명 표준화 (v1.4.0)', async () => {
-            if (!confirm('현재 작품의 파일명을 표준화하시겠습니까?\n(예: "0001 - 1화.cbz" -> "0001 - 제목 1화.cbz")')) return;
-            
-            // Extract Series ID
-            const idMatch = document.URL.match(/\/(novel|webtoon|comic)\/([0-9]+)/);
-            const seriesId = idMatch ? idMatch[2] : null;
-
-            if (!seriesId) {
-                alert('시리즈 ID를 찾을 수 없습니다.');
-                return;
-            }
-
-            try {
-                const logger = LogBox.getInstance();
-                logger.show();
-                logger.log('이름 변경 작업 요청 중...');
-                
-                const token = await getOAuthToken();
-                const config = getConfig();
-                
-                if (!config.gasUrl) {
-                    alert('GAS URL이 설정되지 않았습니다.');
-                    return;
-                }
-
-                GM_xmlhttpRequest({
-                    method: "POST",
-                    url: config.gasUrl,
-                    data: JSON.stringify({
-                        type: 'view_migrate_filenames',
-                        seriesId: seriesId,
-                        folderId: config.folderId, // Required by View_Dispatcher signature
-                        apiKey: config.apiKey
-                    }),
-                    headers: {
-                        "Authorization": `Bearer ${token}`,
-                        "Content-Type": "application/json"
-                    },
-                    onload: (res) => {
-                        try {
-                            const result = JSON.parse(res.responseText);
-                            if (result.status === 'success') {
-                                console.log('[Migration] Logs:', result.body);
-                                const logsStr = Array.isArray(result.body) ? result.body.join('\n') : result.body;
-                                LogBox.getInstance().success(`작업 완료!\n로그:\n${logsStr}`);
-                                alert(`작업이 완료되었습니다.\n로그:\n${logsStr}`);
-                            } else {
-                                LogBox.getInstance().error(`작업 실패: ${result.body}`);
-                                alert(`실패: ${result.body}`);
-                            }
-                        } catch (parseErr) {
-                            LogBox.getInstance().error(`응답 파싱 실패: ${parseErr.message}`);
-                        }
-                    },
-                    onerror: (err) => {
-                        LogBox.getInstance().error(`네트워크 오류: ${err.statusText}`);
-                        alert('네트워크 오류 발생');
-                    }
-                });
-            } catch (e) {
-                alert('오류 발생: ' + e.message);
-                console.error(e);
-            }
-        });
-
     })();
 }
 

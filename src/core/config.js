@@ -25,6 +25,8 @@ export function getConfig() {
  */
 export function setConfig(key, value) {
     GM_setValue(key, value);
+    // Optional: Dispatch event for other components to react?
+    // For now, simple set is enough.
 }
 
 /**

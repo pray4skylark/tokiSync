@@ -19,22 +19,5 @@ docs/js/backup/*
 docs/*Downloader.user.js
 docs/[0-9]*.user.js
 
-# Agent & Handover Files
-AGENT_HANDOVER_GUIDE.md
-HANDOVER_BRIDGE.md
-HANDOVER_CORE.md
-CORE_CONTEXT.md
-GAS_DEPLOY.md
-integrated_plan.md
-project_rules.md
-todo.md
-
-# Specifications
-SPEC.md
-SPEC_METADATA_v1.5.0.md
-SPEC_SMART_SYNC_v1.5.0.md
-SPEC_UI_MODAL_v1.5.0.md
-SPEC_VIEWER_v1.5.0.md
-UX_CURRENT_SPEC.md
-UX_HANDOVER_SPEC.md
-VIEWER_UX_CURRENT_SPEC.md
+# Consolidated Handover File
+PROJECT_HANDOVER_MASTER.md
