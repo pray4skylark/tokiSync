@@ -220,6 +220,11 @@ const saveCloudConfig = () => {
 const initApp = async () => {
   isInitialLoading.value = true;
 
+  // 0. Sync gasConfig (loaded from localStorage) → config reactive so SettingsPanel shows saved values
+  config.deploymentId = gasConfig.baseUrl;
+  config.folderId = gasConfig.folderId;
+  config.apiKey = gasConfig.apiKey;
+
   // 1. Setup Bridge (Zero-Config listener)
   initBridge((url, folderId, apiKey) => {
     // Sync config reactive so SettingsPanel reflects the injected values

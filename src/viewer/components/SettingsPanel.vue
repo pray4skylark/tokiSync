@@ -6,7 +6,7 @@
           <h3 class="text-[10px] font-black text-[#00d084] uppercase tracking-[0.4em] mb-8 text-center md:text-left">Cloud Gateway</h3>
           <div class="space-y-4">
             <input v-model="config.deploymentId" placeholder="GAS App ID" class="w-full bg-black/40 border border-white/5 p-4 rounded-2xl text-xs outline-none focus:ring-1 focus:ring-blue-500 transition-all text-white">
-            <input v-model="config.apiKey" placeholder="Security Key" class="w-full bg-black/40 border border-white/5 p-4 rounded-2xl text-xs outline-none focus:ring-1 focus:ring-blue-500 transition-all text-white">
+            <input v-model="config.apiKey" type="password" placeholder="Security Key" class="w-full bg-black/40 border border-white/5 p-4 rounded-2xl text-xs outline-none focus:ring-1 focus:ring-blue-500 transition-all text-white">
             <input v-model="config.folderId" placeholder="Drive Folder ID" class="w-full bg-black/40 border border-white/5 p-4 rounded-2xl text-xs outline-none focus:ring-1 focus:ring-blue-500 transition-all text-white">
             <button @click="saveCloudConfig" class="w-full bg-[#00d084]/20 hover:bg-[#00d084]/30 border border-[#00d084]/30 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest text-[#00d084] transition-all">Save Config</button>
           </div>
