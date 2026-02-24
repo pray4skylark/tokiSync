@@ -53,6 +53,14 @@ function View_Dispatcher(data) {
       if (!data.seriesId)
         throw new Error("seriesId is required for filename migration");
       resultBody = Migrate_RenameFiles(data.seriesId, data.folderId);
+    } else if (action === "view_history_get") {
+      if (!folderId) throw new Error("folderId is required for history");
+      resultBody = View_getReadHistory(folderId);
+      return resultBody; // Already wrapped in createRes
+    } else if (action === "view_history_save") {
+      if (!folderId) throw new Error("folderId is required for history");
+      resultBody = View_saveReadHistory(data, folderId);
+      return resultBody; // Already wrapped in createRes
     } else {
       throw new Error("Unknown Viewer Action: " + action);
     }

@@ -169,8 +169,25 @@ async function getChunk(fileId, offset, length) {
   return await request('view_get_chunk', { fileId, offset, length });
 }
 
+
 // Initialize from localStorage on module load
 loadFromLocalStorage();
+
+/**
+ * 읽기 이력 불러오기 (Drive)
+ * @returns {Promise<Array>} 이력 배열
+ */
+async function getReadHistory() {
+  return await request('view_history_get', {});
+}
+
+/**
+ * 읽기 이력 저장 (Drive, 전체 덮어쓰기)
+ * @param {Array} history - merge 완료된 이력 배열
+ */
+async function saveReadHistory(history) {
+  return await request('view_history_save', { history });
+}
 
 export function useGAS() {
   return {
@@ -181,5 +198,7 @@ export function useGAS() {
     getLibrary,
     getBooks,
     getChunk,
+    getReadHistory,
+    saveReadHistory,
   };
 }

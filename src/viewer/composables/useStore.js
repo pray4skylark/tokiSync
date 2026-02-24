@@ -7,10 +7,14 @@ import { useFetcher } from './useFetcher.js';
 // --- Dexie.js (Offline-First Cache) ---
 const db = new Dexie('ViewerHubDB');
 db.version(1).stores({ library: '++id, title, type, fileId, progress' });
+db.version(2).stores({
+  library: '++id, title, type, fileId, progress',
+  readHistory: 'episodeId, seriesId, lastReadAt',
+});
 
 // --- Sub-Composables ---
 const { isConnected, initBridge, bridgeFetch } = useBridge();
-const { gasConfig, setConfig, isConfigured, getLibrary, getBooks } = useGAS();
+const { gasConfig, setConfig, isConfigured, getLibrary, getBooks, getReadHistory, saveReadHistory } = useGAS();
 const { downloadProgress, isDownloading, fetchAndUnzip, cleanupBlobUrls, formatSize } = useFetcher();
 
 // --- Singleton State ---
@@ -217,6 +221,47 @@ const saveCloudConfig = () => {
 /**
  * Initialize the app: setup Bridge, load config, fetch library
  */
+// --- Read History Helpers ---
+
+/**
+ * 로컬(Dexie)과 원격(Drive) 이력을 merge
+ * 동일 episodeId는 lastReadAt이 최신인 것을 채택
+ */
+function mergeHistory(local, remote) {
+  const map = new Map();
+  for (const entry of remote) map.set(entry.episodeId, entry);
+  for (const entry of local) {
+    const existing = map.get(entry.episodeId);
+    if (!existing || entry.lastReadAt > existing.lastReadAt) {
+      map.set(entry.episodeId, entry);
+    }
+  }
+  return [...map.values()];
+}
+
+/** Drive에서 이력 pull → 로컬과 merge → Dexie 저장 */
+async function syncHistoryFromDrive() {
+  if (!isConfigured()) return;
+  try {
+    const remote = await getReadHistory();
+    if (!Array.isArray(remote)) return;
+    const local = await db.readHistory.toArray();
+    const merged = mergeHistory(local, remote);
+    await db.readHistory.bulkPut(merged);
+    console.log(`[History] Drive sync 완료: ${merged.length}개`);
+  } catch (e) {
+    console.warn('[History] Drive pull 실패 (로컬 이력 사용):', e);
+  }
+}
+
+/** Dexie 이력 전체를 Drive에 push */
+async function pushHistoryToDrive() {
+  if (!isConfigured()) return;
+  const all = await db.readHistory.toArray();
+  await saveReadHistory(all);
+  console.log(`[History] Drive push 완료: ${all.length}개`);
+}
+
 const initApp = async () => {
   isInitialLoading.value = true;
 
@@ -240,12 +285,15 @@ const initApp = async () => {
   if (isConfigured()) {
     notify('🚀 저장된 설정으로 연결합니다...');
     await refreshLibrary();
+    // 3. 이력 Drive sync (백그라운드, 실패해도 무시)
+    syncHistoryFromDrive().catch(e => console.warn('[History] 초기 sync 실패:', e));
   } else {
     // Wait a bit for potential UserScript injection
     await new Promise(r => setTimeout(r, 1000));
     if (isConfigured()) {
       notify('🚀 저장된 설정으로 연결합니다...');
       await refreshLibrary();
+      syncHistoryFromDrive().catch(e => console.warn('[History] 초기 sync 실패:', e));
     } else {
       // No config found — show settings or config modal
       console.log('⚠️ GAS 설정이 필요합니다.');
@@ -282,12 +330,15 @@ const openSeries = async (item) => {
   // Fetch episodes from GAS
   try {
     const books = await getBooks(item.id);
+    // 로컬 이력에서 읽음 여부 확인
+    const localHistory = await db.readHistory.where('seriesId').equals(item.id).toArray();
+    const readSet = new Set(localHistory.map(h => h.episodeId));
     episodes.value = (books || []).map(book => ({
       ...book,
       seriesId: item.id,
       title: book.name,
       thumbnail: getThumbnailUrl(book),
-      isRead: false, // TODO: check read history
+      isRead: readSet.has(book.id),
     }));
   } catch (e) {
     console.error('Episode Fetch Error:', e);
@@ -312,6 +363,21 @@ const startReading = async (ep) => {
   showViewerControls.value = false;
   showEpisodeModal.value = false;
   window.scrollTo(0, 0);
+
+  // 열람 이력 기록 (Dexie)
+  try {
+    await db.readHistory.put({
+      episodeId: ep.id,
+      seriesId: ep.seriesId || selectedItem.value?.id || '',
+      lastReadAt: new Date().toISOString(),
+      progress: 0,
+    });
+    // 에피소드 목록에서 isRead 즉시 반영
+    const target = episodes.value.find(e => e.id === ep.id);
+    if (target) target.isRead = true;
+  } catch (e) {
+    console.warn('[History] 로컬 이력 기록 실패:', e);
+  }
 
   // Fetch and unzip the file
   try {
@@ -356,6 +422,8 @@ const exitViewer = () => {
   viewerContent.value = null;
   currentView.value = 'episodes';
   forceCloudSync();
+  // Drive에 이력 push (비동기, 실패해도 무시)
+  pushHistoryToDrive().catch(e => console.warn('[History] Drive push 실패:', e));
 };
 
 const goBackToLibrary = () => {
