@@ -11,6 +11,21 @@ db.version(2).stores({
   library: '++id, title, type, fileId, progress',
   readHistory: 'episodeId, seriesId, lastReadAt',
 });
+db.version(3).stores({
+  library: '++id, title, type, fileId, progress',
+  readHistory: 'episodeId, seriesId, lastReadAt',
+  libraryCache: 'id',            // 단일 레코드 { id:'default', data:[], cachedAt }
+  episodeCache: '[seriesId+id], seriesId, cachedAt', // 에피소드 목록 (seriesId 단위)
+});
+
+// --- Cache TTL (ms) ---
+const LIBRARY_TTL = 60 * 60 * 1000;   // 1시간
+const EPISODE_TTL = 30 * 60 * 1000;   // 30분
+
+/** TTL 초과 여부 확인 */
+function isStale(cachedAt, ttl) {
+  return !cachedAt || Date.now() - cachedAt > ttl;
+}
 
 // --- Sub-Composables ---
 const { isConnected, initBridge, bridgeFetch } = useBridge();
@@ -309,12 +324,31 @@ const initApp = async () => {
 const refreshLibrary = async (bypassCache = false) => {
   isSyncing.value = true;
   try {
+    // 1. Dexie 캐시 확인
+    if (!bypassCache) {
+      const cached = await db.libraryCache.get('default');
+      if (cached && !isStale(cached.cachedAt, LIBRARY_TTL)) {
+        libraryItems.value = cached.data;
+        console.log(`[Cache] 라이브러리 캐시 히트 (${cached.data.length}개)`);
+        isSyncing.value = false;
+        return;
+      }
+    }
+    // 2. GAS에서 불러오기 + Dexie에 저장
     const seriesList = await getLibrary({ bypassCache });
     libraryItems.value = seriesList;
+    await db.libraryCache.put({ id: 'default', data: seriesList, cachedAt: Date.now() });
     notify('📚 라이브러리 업데이트 완료');
   } catch (e) {
     console.error('Library Fetch Error:', e);
-    notify(`❌ 로드 실패: ${e.message}`);
+    // GAS 실패 시 만료된 캐시라도 사용
+    const staleCache = await db.libraryCache.get('default').catch(() => null);
+    if (staleCache?.data?.length) {
+      libraryItems.value = staleCache.data;
+      notify('⚠️ 오프라인: 캐시된 라이브러리 표시 중');
+    } else {
+      notify(`❌ 로드 실패: ${e.message}`);
+    }
   } finally {
     isSyncing.value = false;
   }
@@ -327,23 +361,53 @@ const openSeries = async (item) => {
   cleanupBlobUrls();   // Clear old content cache
   window.scrollTo(0, 0);
 
-  // Fetch episodes from GAS
+  // 에피소드 목록 불러오기 (Dexie 캐시 우선)
   try {
-    const books = await getBooks(item.id);
-    // 로컬 이력에서 읽음 여부 확인
     const localHistory = await db.readHistory.where('seriesId').equals(item.id).toArray();
     const readSet = new Set(localHistory.map(h => h.episodeId));
-    episodes.value = (books || []).map(book => ({
+
+    const attachMeta = (book) => ({
       ...book,
       seriesId: item.id,
       title: book.name,
       thumbnail: getThumbnailUrl(book),
       isRead: readSet.has(book.id),
-    }));
+    });
+
+    // 에피소드 정렬 (GAS View_BookService와 동일한 기준)
+    const sortEpisodes = (arr) => arr.slice().sort((a, b) => {
+      const numA = a.number || 0;
+      const numB = b.number || 0;
+      if (numA === numB) return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+      return numA - numB;
+    });
+
+    // 1. Dexie 캐시 확인
+    const cachedEps = await db.episodeCache.where('seriesId').equals(item.id).toArray();
+    if (cachedEps.length > 0 && !isStale(cachedEps[0].cachedAt, EPISODE_TTL)) {
+      console.log(`[Cache] 에피소드 캐시 히트 (${cachedEps.length}개)`);
+      episodes.value = sortEpisodes(cachedEps).map(attachMeta);
+      return;
+    }
+
+    // 2. GAS에서 불러오기 + Dexie에 저장 (GAS가 이미 정렬해서 줌)
+    const books = await getBooks(item.id);
+    const now = Date.now();
+    await db.episodeCache.bulkPut(
+      (books || []).map(b => ({ ...b, seriesId: item.id, cachedAt: now }))
+    );
+    episodes.value = (books || []).map(attachMeta);
   } catch (e) {
     console.error('Episode Fetch Error:', e);
-    notify(`❌ 회차 로드 실패: ${e.message}`);
-    episodes.value = [];
+    // GAS 실패 시 만료 캐시 사용
+    const staleEps = await db.episodeCache.where('seriesId').equals(item.id).toArray().catch(() => []);
+    if (staleEps.length > 0) {
+      episodes.value = staleEps.map(b => ({ ...b, title: b.name, thumbnail: getThumbnailUrl(b) }));
+      notify('⚠️ 오프라인: 캐시된 회차 목록 표시 중');
+    } else {
+      notify(`❌ 회차 로드 실패: ${e.message}`);
+      episodes.value = [];
+    }
   }
 };
 
