@@ -1,6 +1,6 @@
 {
   "name": "tokisync",
-  "version": "1.5.0",
+  "version": "1.5.5",
   "description": "**북토끼, 뉴토끼, 마나토끼**의 콘텐츠를 **구글 드라이브로 직접 업로드**하고, **전용 웹 뷰어**를 통해 편리하게 관리/열람할 수 있는 올인원 솔루션입니다.",
   "type": "module",
   "main": "tokiSyncCore.js",
@@ -10,9 +10,10 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "serve-docs": "npx http-server docs --cors",
-    "build": "npm run build:core && npm run build:viewer",
+    "build": "npm run build:core && npm run build:viewer && npm run build:gas",
     "build:core": "webpack --config webpack.core.config.cjs",
     "build:viewer": "vite build",
+    "build:gas": "node google_app_script/build_bundle.cjs",
     "dev:viewer": "vite --host",
     "watch:viewer": "vite build --watch",
     "gas:login": "clasp login",

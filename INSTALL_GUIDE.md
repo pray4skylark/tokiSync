@@ -1,6 +1,6 @@
-# TokiSync v1.2.0 설치 가이드
+# TokiSync v1.5.5 설치 가이드
 
-이 가이드는 **TokiSync v1.2.0** (API Key 보안 적용 버전)의 설치 및 설정 방법을 안내합니다.
+이 가이드는 **TokiSync v1.5.5**의 설치 및 설정 방법을 안내합니다.
 
 ## ✅ 사전 준비
 
@@ -15,8 +15,8 @@
 ### 1-1. 프로젝트 생성 및 코드 복사
 
 1. [Google Apps Script](https://script.google.com/) 접속 -> **새 프로젝트**.
-2. 프로젝트 이름: `TokiSync Server v1.2.0`.
-3. `google_app_script/TokiSync_Server_Bundle.gs` 파일 내용을 복사하여 `Code.gs`에 붙여넣기.
+2. 프로젝트 이름: `TokiSync Server v1.5.5`.
+3. 👉 **[TokiSync_Server_Bundle.gs (서버 코드)](https://pray4skylark.github.io/tokiSync/TokiSync_Server_Bundle.gs)** 링크 클릭 후 화면의 전체 내용을 복사하여 `Code.gs`에 붙여넣기.
 4. **저장** (Ctrl+S).
 
 ### 1-1-b. appsscript.json 매니페스트 설정 (중요)

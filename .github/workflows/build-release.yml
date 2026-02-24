@@ -28,16 +28,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build UserScript & Viewer
+      - name: Build All (UserScript, Viewer, GAS Bundle)
         run: |
-          npm run build:viewer
-          npm run build:core
+          npm run build
           # Prepare unified distribution directory for GitHub Pages
           mkdir -p _site
           # Core UserScript
           cp docs/tokiSync.user.js _site/
           # Viewer Application
           cp -r docs/* _site/
+          # GAS Bundle
+          cp google_app_script/TokiSync_Server_Bundle.gs _site/
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
