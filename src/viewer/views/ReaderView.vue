@@ -45,7 +45,7 @@
     <!-- Navigation Interaction Zones (Page 모드 또는 소설 Scroll 모드) -->
     <div v-if="viewerData.mode !== 'scroll' || isNovelMode" class="fixed inset-0 z-40 pointer-events-none" @wheel.passive="handleWheel">
       <div v-if="viewerData.mode !== 'scroll'" @click="handlePrev" class="nav-zone nav-left pointer-events-auto"></div>
-      <div @click="toggleViewerUI" class="nav-zone nav-center pointer-events-auto"></div>
+      <div @click="toggleViewerUI" class="nav-zone nav-center" :class="viewerData.mode === 'scroll' ? 'pointer-events-none' : 'pointer-events-auto'"></div>
       <div v-if="viewerData.mode !== 'scroll'" @click="handleNext" class="nav-zone nav-right pointer-events-auto"></div>
     </div>
 
@@ -96,7 +96,7 @@
 
       <!-- Text (Novel) Content -->
       <template v-if="viewerContent?.type === 'text'">
-        <div v-if="viewerData.mode === 'scroll'" class="max-w-3xl w-full py-20 px-16">
+        <div v-if="viewerData.mode === 'scroll'" class="max-w-3xl w-full py-16 px-5 md:px-10">
           <div class="novel-scroll-content opacity-90 tracking-tight font-medium text-current"
                :style="{ fontSize: novelSettings.fontSize + 'px', lineHeight: String(novelSettings.lineHeight) }"
                v-html="viewerContent.content"></div>
@@ -134,30 +134,25 @@
 
         <!-- Novel Settings Row -->
         <div v-if="isNovelMode" class="novel-settings-row">
-          <!-- Theme Buttons -->
-          <button class="theme-btn theme-btn-light" :class="{ active: novelSettings.theme === 'light' }" @click.stop="setNovelTheme('light')" title="Light"></button>
-          <button class="theme-btn theme-btn-sepia" :class="{ active: novelSettings.theme === 'sepia' }" @click.stop="setNovelTheme('sepia')" title="Sepia"></button>
-          <button class="theme-btn theme-btn-dark" :class="{ active: novelSettings.theme === 'dark' }" @click.stop="setNovelTheme('dark')" title="Dark"></button>
-
-          <span style="width:1px; height:20px; background:rgba(255,255,255,0.1); margin:0 4px;"></span>
-
-          <!-- Font Size -->
-          <button class="font-btn" @click.stop="adjustFontSize(-2)">A-</button>
-          <span class="font-size-label">{{ novelSettings.fontSize }}</span>
-          <button class="font-btn" @click.stop="adjustFontSize(2)">A+</button>
-
-          <span style="width:1px; height:20px; background:rgba(255,255,255,0.1); margin:0 4px;"></span>
-
-          <!-- Line Height -->
-          <span class="font-size-label" style="min-width:auto;">줄</span>
-          <input type="range" min="1.4" max="3.0" step="0.1" :value="novelSettings.lineHeight"
-                 @input="setLineHeight(parseFloat($event.target.value))"
-                 class="w-20 accent-[#3498db] h-1 rounded-full bg-zinc-800 appearance-none cursor-pointer">
-
-          <span style="width:1px; height:20px; background:rgba(255,255,255,0.1); margin:0 4px;"></span>
-
-          <!-- Two-Page Spread (Desktop) -->
-          <button class="font-btn hidden md:flex" @click.stop="toggleNovelSpread" :style="novelSettings.spread ? 'background:rgba(52,152,219,0.3); color:#3498db;' : ''" title="두 페이지 보기">📖</button>
+          <!-- Row 1: 테마 색상 + 폰트 크기 -->
+          <div class="novel-settings-subrow">
+            <button class="theme-btn theme-btn-light" :class="{ active: novelSettings.theme === 'light' }" @click.stop="setNovelTheme('light')" title="Light"></button>
+            <button class="theme-btn theme-btn-sepia" :class="{ active: novelSettings.theme === 'sepia' }" @click.stop="setNovelTheme('sepia')" title="Sepia"></button>
+            <button class="theme-btn theme-btn-dark"  :class="{ active: novelSettings.theme === 'dark' }"  @click.stop="setNovelTheme('dark')"  title="Dark"></button>
+            <span class="novel-sep"></span>
+            <button class="font-btn" @click.stop="adjustFontSize(-2)">A-</button>
+            <span class="font-size-label">{{ novelSettings.fontSize }}</span>
+            <button class="font-btn" @click.stop="adjustFontSize(2)">A+</button>
+          </div>
+          <!-- Row 2: 줄 간격 + 2쪽보기 -->
+          <div class="novel-settings-subrow">
+            <span class="font-size-label" style="min-width:auto;">줄</span>
+            <input type="range" min="1.4" max="3.0" step="0.1" :value="novelSettings.lineHeight"
+                   @input="setLineHeight(parseFloat($event.target.value))"
+                   class="w-28 accent-[#3498db] h-1 rounded-full bg-zinc-800 appearance-none cursor-pointer">
+            <span class="novel-sep"></span>
+            <button class="font-btn" @click.stop="toggleNovelSpread" :style="novelSettings.spread ? 'background:rgba(52,152,219,0.3); color:#3498db;' : ''" title="두 페이지 보기">📖</button>
+          </div>
         </div>
       </div>
     </transition>
