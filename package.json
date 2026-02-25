@@ -10,7 +10,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "serve-docs": "npx http-server docs --cors",
-    "build": "npm run build:core && npm run build:viewer && npm run build:gas",
+    "build": "npm run build:viewer && npm run build:core && npm run build:gas",
     "build:core": "webpack --config webpack.core.config.cjs",
     "build:viewer": "vite build",
     "build:gas": "node google_app_script/build_bundle.cjs",

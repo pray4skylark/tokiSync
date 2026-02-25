@@ -26,3 +26,5 @@ docs/
 # Consolidated Handover File
 PROJECT_HANDOVER_MASTER.md
 .DS_Store
+# Generated GAS Bundle (CI가 빌드 후 GitHub Pages에 배포)
+google_app_script/TokiSync_Server_Bundle.gs
