@@ -19,7 +19,7 @@ export async function uploadToGAS(blob, folderName, fileName, options = {}) {
     const config = getConfig();
     if (!isConfigValid()) throw new Error("GAS 설정이 누락되었습니다. 메뉴에서 설정을 완료해주세요.");
     
-    // Try Direct Upload first (Fixed: now uses Blob instead of String.fromCharCode)
+    // Try Direct Upload first
     try {
         console.log('[Upload] Attempting Direct Drive API upload...');
         await uploadDirect(blob, folderName, fileName, options);
@@ -32,6 +32,39 @@ export async function uploadToGAS(blob, folderName, fileName, options = {}) {
     // Fallback to GAS Relay
     console.log('[Upload] Using GAS relay fallback...');
     await uploadViaGASRelay(blob, folderName, fileName, options);
+}
+
+/**
+ * 업로드 완료 후 GAS의 _toki_cache.json을 갱신합니다 (비동기, fire-and-forget)
+ * 에피소드 c30치 다운로드 완료 후 한 번만 호출하세요.
+ */
+export async function refreshCacheAfterUpload(folderName, category = 'Unknown') {
+    const config = getConfig();
+    if (!config.gasUrl || !config.folderId) return;
+    console.log(`[Cache] 업로드 완료 → Drive 캐시 갱신 요청 (${folderName})`);
+    return new Promise((resolve) => {
+        GM_xmlhttpRequest({
+            method: 'POST',
+            url: config.gasUrl,
+            data: JSON.stringify({
+                type: 'view_update_cache',
+                folderId: config.folderId,
+                folderName,
+                category,
+                apiKey: config.apiKey,
+                protocolVersion: 3,
+            }),
+            headers: { 'Content-Type': 'text/plain' },
+            onload: (res) => {
+                try {
+                    const json = JSON.parse(res.responseText);
+                    console.log('[Cache] 갱신 결과:', json.body);
+                } catch (_) {}
+                resolve();
+            },
+            onerror: () => resolve(),
+        });
+    });
 }
 
 /**

@@ -6,7 +6,7 @@ import { CbzBuilder } from './cbz.js';
 import { LogBox, Notifier } from './ui.js';
 import { getConfig } from './config.js';
 import { startSilentAudio, stopSilentAudio } from './anti_sleep.js';
-import { fetchHistory } from './gas.js';
+import { fetchHistory, refreshCacheAfterUpload } from './gas.js';
 
 // Sleep Policy Presets
 const SLEEP_POLICIES = {
@@ -372,6 +372,13 @@ export async function tokiDownload(startIndex, lastIndex, policy = 'folderInCbz'
         } else if (buildingPolicy === 'zipOfCbzs' && masterZip) {
             logger.log("Master ZIP 파일 생성 및 저장 중...");
             await saveFile(masterZip, rootFolder, 'local', 'zip', { category }); 
+        }
+
+        // [v1.5.5] 배치 완료 후 Drive 캐시 단일 갱신 (에피소드마다 호출하지 않음)
+        if (destination === 'drive') {
+            refreshCacheAfterUpload(rootFolder, category).catch(e =>
+                console.warn('[Cache] 배치 완료 직후 캐시 갱신 실패 (무시):', e.message)
+            );
         }
 
         logger.success(`✅ 다운로드 완료!`);

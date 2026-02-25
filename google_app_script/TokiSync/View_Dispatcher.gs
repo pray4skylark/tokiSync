@@ -61,6 +61,22 @@ function View_Dispatcher(data) {
       if (!folderId) throw new Error("folderId is required for history");
       resultBody = View_saveReadHistory(data, folderId);
       return resultBody; // Already wrapped in createRes
+    } else if (action === "view_update_cache") {
+      // UserScript 업로드 완료 후 호출 — folderName 기반으로 캐시 갱신
+      if (!data.folderName)
+        throw new Error("folderName is required for cache update");
+      const seriesFolder = getOrCreateSeriesFolder(
+        folderId,
+        data.folderName,
+        data.category || "Unknown",
+        false,
+      );
+      if (!seriesFolder) {
+        resultBody = { updated: false, reason: "folder not found" };
+      } else {
+        View_getBooks(seriesFolder.getId(), true); // bypassCache=true → 재스캔 + 캐시 기록
+        resultBody = { updated: true, seriesId: seriesFolder.getId() };
+      }
     } else {
       throw new Error("Unknown Viewer Action: " + action);
     }

@@ -154,8 +154,8 @@ async function getLibrary(options = {}) {
  * @param {string} seriesId - Series folder ID
  * @returns {Promise<Array>} Book list
  */
-async function getBooks(seriesId) {
-  return await request('view_get_books', { seriesId });
+async function getBooks(seriesId, bypassCache = false) {
+  return await request('view_get_books', { seriesId, bypassCache });
 }
 
 /**

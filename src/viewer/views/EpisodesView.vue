@@ -13,6 +13,7 @@
           <div class="flex gap-8">
             <button v-if="episodes.length > 0" @click="startReading(episodes[0])" class="bg-white text-black px-20 py-6 rounded-[32px] font-black shadow-2xl transition-all hover:bg-blue-500 hover:text-white hover:scale-105 active:scale-95 tracking-[0.2em] text-sm uppercase">Read Now</button>
             <button @click="goBackToLibrary" class="bg-white/5 text-zinc-600 px-12 py-6 rounded-[32px] font-black border border-white/5 transition-all hover:bg-white/10 hover:text-white tracking-widest text-xs uppercase">Back</button>
+            <button @click="refreshEpisodes" :disabled="isSyncing" title="회차 목록 새로고침" class="bg-white/5 text-zinc-600 w-16 h-16 md:w-20 md:h-20 rounded-full border border-white/5 transition-all hover:bg-white/10 hover:text-white flex items-center justify-center text-xl disabled:opacity-40" :class="{ 'animate-spin': isSyncing }">🔄</button>
           </div>
         </div>
       </div>
@@ -48,7 +49,7 @@
 
 <script setup>
 import { useStore } from '../composables/useStore';
-const { selectedItem, episodes, isSyncing, startReading, goBackToLibrary, getThumbnailUrl, formatSize } = useStore();
+const { selectedItem, episodes, isSyncing, startReading, goBackToLibrary, refreshEpisodes, getThumbnailUrl, formatSize } = useStore();
 
 function getFileIcon(ep) {
   const name = (ep.name || '').toLowerCase();

@@ -354,7 +354,7 @@ const refreshLibrary = async (bypassCache = false) => {
   }
 };
 
-const openSeries = async (item) => {
+const openSeries = async (item, bypassCache = false) => {
   selectedItem.value = item;
   currentView.value = 'episodes';
   episodes.value = []; // Clear stale episodes immediately
@@ -384,14 +384,14 @@ const openSeries = async (item) => {
 
     // 1. Dexie 캐시 확인
     const cachedEps = await db.episodeCache.where('seriesId').equals(item.id).toArray();
-    if (cachedEps.length > 0 && !isStale(cachedEps[0].cachedAt, EPISODE_TTL)) {
+    if (!bypassCache && cachedEps.length > 0 && !isStale(cachedEps[0].cachedAt, EPISODE_TTL)) {
       console.log(`[Cache] 에피소드 캐시 히트 (${cachedEps.length}개)`);
       episodes.value = sortEpisodes(cachedEps).map(attachMeta);
       return;
     }
 
     // 2. GAS에서 불러오기 + Dexie에 저장 (GAS가 이미 정렬해서 줌)
-    const books = await getBooks(item.id);
+    const books = await getBooks(item.id, bypassCache);
     const now = Date.now();
     await db.episodeCache.bulkPut(
       (books || []).map(b => ({ ...b, seriesId: item.id, cachedAt: now }))
@@ -409,6 +409,10 @@ const openSeries = async (item) => {
       episodes.value = [];
     }
   }
+};
+
+const refreshEpisodes = () => {
+  if (selectedItem.value) openSeries(selectedItem.value, true);
 };
 
 const startReading = async (ep) => {
@@ -682,7 +686,7 @@ export function useStore() {
 
     // Methods
     notify, forceCloudSync, saveCloudConfig, initApp,
-    openSeries, startReading, exitViewer, goBackToLibrary,
+    openSeries, refreshEpisodes, startReading, exitViewer, goBackToLibrary,
     goToNextEpisode, goToPrevEpisode,
     toggleViewerUI, setViewerMode,
     handleWheel, handleNext, handlePrev, onScrollUpdate,
