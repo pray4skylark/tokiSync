@@ -1,0 +1,24 @@
+# Project: tokiSync
+# This file contains Gemini's project-specific memory and instructions.
+# Add rules here to override or supplement the global ~/.gemini/GEMINI.md rules.
+
+## Project Identity & Architecture
+- **Architecture**: 
+  - Backend: Google Apps Script (Stateless API).
+  - Bridge: Tampermonkey UserScript (Core logic, DOM Scraping, `GM_xmlhttpRequest` for Direct Drive Access).
+  - Frontend (Viewer): Vue 3 (Composition API) + Tailwind CSS SPA, hosted on GitHub Pages.
+- **Storage**: Dexie.js for offline viewer cache.
+
+## Coding Conventions & Rules
+- **Backend (GAS)**: Must remain stateless. Do NOT use `PropertiesService` for user settings; everything must be payload-driven.
+- **Frontend (Viewer)**: Adhere to the "Cinematic" design philosophy (Glassmorphism, blur effects, entry animations). Use Vue 3 Composition API.
+- **File Naming Standard**: Google Drive folders must use `[ID] Series Title` format. Files must use `Number - Title` format.
+
+## Workflows & Build Commands
+- **Viewer Build**: `npm run build:viewer` (Uses Vite, outputs to `docs/` for GitHub Pages).
+- **Core Script Build**: `npm run build:core` (Uses Webpack).
+- **GAS Deployment**: `npm run build:gas` and `npm run gas:push` (Uses Clasp).
+- **All Builds**: `npm run build` runs all the above. Always ensure builds pass before committing (`User prefers build tests before commits`).
+
+## Additional Context
+- Refer to `PROJECT_HANDOVER_MASTER.md` for the single source of truth regarding project specifications, roadmap, and UI/UX requirements.

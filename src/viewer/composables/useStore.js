@@ -62,6 +62,16 @@ const tabs = [
   { label: 'Novel', value: 'novel' },
 ];
 
+// --- Global App Theme ---
+const _savedTheme = localStorage.getItem('TOKI_APP_THEME') || 'dark';
+const appTheme = ref(_savedTheme);
+document.documentElement.setAttribute('data-theme', _savedTheme);
+const toggleTheme = () => {
+  appTheme.value = appTheme.value === 'dark' ? 'light' : 'dark';
+  localStorage.setItem('TOKI_APP_THEME', appTheme.value);
+  document.documentElement.setAttribute('data-theme', appTheme.value);
+};
+
 const libraryItems = ref([]);
 const selectedItem = ref(null);
 const currentEpisode = ref(null);
@@ -92,6 +102,28 @@ const currentEpisodeIndex = computed(() => {
 });
 const hasNextEpisode = computed(() => currentEpisodeIndex.value < episodes.value.length - 1);
 const hasPrevEpisode = computed(() => currentEpisodeIndex.value > 0);
+
+// 현재 시리즈에서 가장 최근에 읽은 에피소드 (readHistory의 lastReadAt 기준)
+const lastReadEpisode = ref(null);
+
+async function refreshLastReadEpisode() {
+  if (!selectedItem.value) { lastReadEpisode.value = null; return; }
+  try {
+    const history = await db.readHistory
+      .where('seriesId').equals(selectedItem.value.id)
+      .toArray();
+    if (!history.length) { lastReadEpisode.value = null; return; }
+    // 가장 최근 읽은 episodeId 찾기
+    const latest = history.sort((a, b) => b.lastReadAt.localeCompare(a.lastReadAt))[0];
+    const ep = episodes.value.find(e => e.id === latest.episodeId);
+    lastReadEpisode.value = ep || null;
+  } catch (e) {
+    lastReadEpisode.value = null;
+  }
+}
+
+// episodes가 로드될 때마다 lastReadEpisode 갱신
+watch(episodes, () => refreshLastReadEpisode(), { immediate: true });
 
 const filteredLibrary = computed(() => libraryItems.value.filter(item => {
   const cat = item.category || (item.metadata ? item.metadata.category : 'Unknown');
@@ -652,11 +684,15 @@ export function useStore() {
     // Config & Settings
     config, gasConfig, viewerDefaults, viewerData, novelSettings,
 
+    // Global Theme
+    appTheme, toggleTheme,
+
     // Data
     searchQuery, currentTab, tabs,
     libraryItems, filteredLibrary, selectedItem,
     episodes, currentEpisode, currentEpisodeIndex,
     currentPage, scrollProgress, totalPages, newItem,
+    lastReadEpisode,
 
     // Viewer Content
     viewerContent, downloadProgress, isDownloading,

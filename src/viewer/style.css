@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&family=Noto+Sans+KR:wght@300;400;500;700;900&display=swap");
 
 @tailwind base;
 @tailwind components;
@@ -13,26 +13,78 @@
   --text-secondary: #a1a1aa;
 }
 
+/* ── 전역 테마: data-theme 속성 기반 ── */
+:root,
+html[data-theme="dark"] {
+  --t-bg: #121212;
+  --t-surface: #1e1e1e;
+  --t-surface-hover: #2a2a2a;
+  --t-border: #333333;
+  --t-text: #ffffff;
+  --t-text-sub: #a0a0a0;
+  --t-text-muted: #757575;
+  --t-accent: #4f9ef8; /* 밝고 쨍한 파란색 */
+  --t-glass-bg: rgba(18, 18, 18, 0.85);
+  --t-glass-border: rgba(255, 255, 255, 0.1);
+  --t-btn-primary-bg: #facc15; /* 스크린샷의 쨍한 노란색 */
+  --t-btn-primary-text: #111827;
+  --t-btn-continue-bg: rgba(255, 255, 255, 0.1);
+  --t-btn-continue-text: #ffffff;
+  --t-btn-ghost-bg: transparent;
+  --t-btn-ghost-text: #a0a0a0;
+  --t-sort-active-bg: #333333;
+  --t-sort-active-text: #ffffff;
+  --t-sort-inactive: #757575;
+  --t-thumb-bg: #2a2a2a;
+  --t-list-header-bg: rgba(255, 255, 255, 0.06); /* 레퍼런스: dark:bg-white/10 */
+}
+
+html[data-theme="light"] {
+  --t-bg: #f8f9fa; /* 아주 밝은 회백색 배경 (가시성 극대화) */
+  --t-surface: #ffffff; /* 순백색 표면 */
+  --t-surface-hover: #f1f3f5; /* 확실한 호버 피드백 */
+  --t-border: #e9ecef; /* 부드럽지만 명확한 경계선 */
+  --t-text: #212529; /* 거의 검은색에 가까운 텍스트 */
+  --t-text-sub: #495057; /* 짙은 회색 서브 텍스트 */
+  --t-text-muted: #adb5bd; /* 연한 회색 보조 텍스트 */
+  --t-accent: #3b82f6; /* 스크린샷의 선명한 파란색 체크 */
+  --t-glass-bg: rgba(255, 255, 255, 0.9);
+  --t-glass-border: rgba(0, 0, 0, 0.08);
+  --t-btn-primary-bg: #ffc200; /* 스크린샷의 쨍한 카카오 옐로우 */
+  --t-btn-primary-text: #000000;
+  --t-btn-continue-bg: #f1f3f5;
+  --t-btn-continue-text: #212529;
+  --t-btn-ghost-bg: transparent;
+  --t-btn-ghost-text: #495057;
+  --t-sort-active-bg: #e9ecef; /* 정렬 버튼 활성화 (회색 타원) */
+  --t-sort-active-text: #212529;
+  --t-sort-inactive: #adb5bd;
+  --t-thumb-bg: #e9ecef;
+  --t-list-header-bg: rgba(0, 0, 0, 0.04); /* 레퍼런스: bg-black/5 */
+}
+
 body {
   font-family:
+    "Noto Sans KR",
     "Inter",
     -apple-system,
     sans-serif;
-  background-color: var(--app-bg);
-  color: var(--text-primary);
+  background-color: var(--t-bg);
+  color: var(--t-text);
   overflow-x: hidden;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 /* UI Decorators */
 .glass-header {
-  background: rgba(15, 15, 16, 0.85);
+  background: var(--t-glass-bg);
   backdrop-filter: blur(20px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid var(--t-glass-border);
 }
 .glass-controls {
-  background: rgba(28, 28, 30, 0.8);
+  background: var(--t-glass-bg);
   backdrop-filter: blur(24px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--t-glass-border);
 }
 .aspect-cover {
   aspect-ratio: 1 / 1.45;
