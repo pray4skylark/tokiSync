@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.5.6] - 2026-03-05
+
+### 🛠 배포(Deployment) 안정화 및 파이프라인 개편
+
+- 기존 GitHub Actions의 Artifact 덮어쓰기 방식으로 인한 '호스팅 초기화(404 에러)' 충돌 문제 해결.
+- `peaceiris/actions-gh-pages` 플러그인을 도입하여 `gh-pages` 브랜치 전용 배포로 마이그레이션.
+- Push(`dev`) 환경과 Release(`stable`) 환경이 완전히 독립적인 경로로 병합되도록 구조 개선.
+
+### 💾 GAS 구글 드라이브 스토리지 누수 방지
+
+- Drive 단일 폴더 내 중복 파일 무한 생성 버그 픽스 (`index.json`, `cover.jpg` 등).
+- 기존 파일 덮어쓰기 로직에 순회(`while`)를 추가하여, 잔존하는 동일 이름의 복제 좀비 파일들을 자동으로 휴지통(Trash)으로 폐기하도록 최적화.
+
+### 🧩 메타데이터(Config) 링크 갱신
+
+- Tampermonkey 스크립트의 404 오작동 업데이트 경로(`@updateURL` 등)를 정상적으로 작동하는 `gh-pages` 호스팅 주소(`https://pray4skylark.github.io/tokiSync/tokiSync.user.js`)로 복구 완료.
+
+### 📋 프로젝트 마스터 룰 업데이트
+
+- AI 코딩 어시스턴트의 명령어 접근 및 빌드 권한에 대한 엄격한 규칙 세분화 적용 (`.geminirules`).
+
 ## [v1.5.5] - 2026-03-03
 
 ### 🎨 EpisodesView 전면 재설계
