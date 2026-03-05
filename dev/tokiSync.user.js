@@ -4,8 +4,8 @@
 // @version      1.5.5
 // @description  Toki series sites -> Google Drive syncing tool (Bundled)
 // @author       pray4skylark
-// @updateURL    https://raw.githubusercontent.com/pray4skylark/tokiSync/main/docs/tokiSync.user.js
-// @downloadURL  https://raw.githubusercontent.com/pray4skylark/tokiSync/main/docs/tokiSync.user.js
+// @updateURL    https://pray4skylark.github.io/tokiSync/tokiSync.user.js
+// @downloadURL  https://pray4skylark.github.io/tokiSync/tokiSync.user.js
 // @match        https://*.com/webtoon/*
 // @match        https://*.com/novel/*
 // @match        https://*.net/comic/*

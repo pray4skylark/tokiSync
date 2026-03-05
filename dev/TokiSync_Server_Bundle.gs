@@ -1,4 +1,4 @@
-/* ⚙️ TokiSync Server Code Bundle v1.0.0 (Generated: 2026-03-04T02:46:50.976Z) */
+/* ⚙️ TokiSync Server Code Bundle v1.0.0 (Generated: 2026-03-05T01:47:24.433Z) */
 
 /* ========================================================================== */
 /* FILE: Main.gs */
@@ -398,6 +398,7 @@ function saveSeriesInfo(data, rootFolderId) {
 
   if (files.hasNext()) {
     files.next().setContent(jsonString);
+    while (files.hasNext()) files.next().setTrashed(true);
   } else {
     seriesFolder.createFile(fileName, jsonString, MimeType.PLAIN_TEXT);
   }
@@ -656,16 +657,14 @@ function initResumableUpload(data, rootFolderId) {
     rootFolderId,
     data.folderName,
     data.category,
-    true
+    true,
   );
   const folderId = seriesFolder.getId();
 
-  // [Fix] Prevent Duplicate Covers: Delete existing cover.jpg if uploading a new one
-  if (data.fileName === "cover.jpg") {
-    const existing = seriesFolder.getFilesByName("cover.jpg");
-    while (existing.hasNext()) {
-      existing.next().setTrashed(true);
-    }
+  // [Fix] Prevent Duplicate Files: Delete existing file with the same name before uploading a new one
+  const existing = seriesFolder.getFilesByName(data.fileName);
+  while (existing.hasNext()) {
+    existing.next().setTrashed(true);
   }
 
   const url =
@@ -678,8 +677,8 @@ function initResumableUpload(data, rootFolderId) {
       data.fileName.endsWith(".jpg") || data.fileName.endsWith(".jpeg")
         ? "image/jpeg"
         : data.fileName.endsWith(".epub")
-        ? "application/epub+zip"
-        : "application/zip",
+          ? "application/epub+zip"
+          : "application/zip",
   };
 
   const params = {
@@ -954,12 +953,13 @@ function View_getBooks(seriesId, bypassCache = false) {
     const existingCache = folder.getFilesByName(CACHE_FILE_NAME);
     if (existingCache.hasNext()) {
       existingCache.next().setContent(cacheContent);
+      while (existingCache.hasNext()) existingCache.next().setTrashed(true);
     } else {
       folder.createFile(CACHE_FILE_NAME, cacheContent, MimeType.PLAIN_TEXT);
     }
 
     console.log(
-      `[View_getBooks] Series: ${seriesId}, Total: ${totalFiles}, Returned: ${books.length} (Cache Updated)`
+      `[View_getBooks] Series: ${seriesId}, Total: ${totalFiles}, Returned: ${books.length} (Cache Updated)`,
     );
     return books;
   } catch (e) {
@@ -1024,14 +1024,14 @@ function View_getFileChunk(fileId, offset, length) {
       };
     } else {
       throw new Error(
-        `Drive API Failed: ${response.getResponseCode()} ${response.getContentText()}`
+        `Drive API Failed: ${response.getResponseCode()} ${response.getContentText()}`,
       );
     }
   } catch (e) {
     // Fallback to DriveApp if API fails (e.g. scope issue) - Optional but Risky for memory
     console.warn(
       "Drive API Partial Fetch failed, falling back to DriveApp (High Memory Risk): " +
-        e
+        e,
     );
     const file = DriveApp.getFileById(fileId);
     const blob = file.getBlob();
@@ -1215,8 +1215,15 @@ function View_saveIndex(folderId, list) {
   const root = DriveApp.getFolderById(folderId);
   const jsonString = JSON.stringify(list);
   const files = root.getFilesByName(INDEX_FILE_NAME);
-  if (files.hasNext()) files.next().setContent(jsonString);
-  else root.createFile(INDEX_FILE_NAME, jsonString, MimeType.PLAIN_TEXT);
+  if (files.hasNext()) {
+    files.next().setContent(jsonString);
+    // 중복 파일이 존재할 경우 삭제 (처음 한 개 이후의 파일들)
+    while (files.hasNext()) {
+      files.next().setTrashed(true);
+    }
+  } else {
+    root.createFile(INDEX_FILE_NAME, jsonString, MimeType.PLAIN_TEXT);
+  }
 }
 
 /**
@@ -1368,6 +1375,7 @@ function View_saveReadHistory(data, folderId) {
     const files = folder.getFilesByName(HISTORY_FILE_NAME);
     if (files.hasNext()) {
       files.next().setContent(jsonString);
+      while (files.hasNext()) files.next().setTrashed(true);
     } else {
       folder.createFile(HISTORY_FILE_NAME, jsonString, MimeType.PLAIN_TEXT);
     }
