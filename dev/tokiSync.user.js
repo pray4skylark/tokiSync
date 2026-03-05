@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.5.5
+// @version      1.5.6
 // @description  Toki series sites -> Google Drive syncing tool (Bundled)
 // @author       pray4skylark
 // @updateURL    https://pray4skylark.github.io/tokiSync/tokiSync.user.js
@@ -2734,7 +2734,7 @@ async function fetchImages(imageUrls) {
 
 
 function main() {
-    console.log("🚀 TokiDownloader Loaded (New Core v1.5.5)");
+    console.log("🚀 TokiDownloader Loaded (New Core v1.5.6)");
     
     const logger = LogBox.getInstance();
 
