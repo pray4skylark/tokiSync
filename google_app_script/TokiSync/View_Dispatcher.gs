@@ -31,6 +31,10 @@ function View_Dispatcher(data) {
       const bypassCache =
         data.bypassCache === true || action === "view_refresh_cache";
       resultBody = View_getBooks(data.seriesId, bypassCache);
+    } else if (action === "view_get_books_by_cache") {
+      // [v1.6.0] Task A-4: Fast path cache retrieval
+      if (!data.cacheFileId) throw new Error("cacheFileId is required for direct cache access");
+      resultBody = View_getBooksByCacheId(data.cacheFileId);
     } else if (action === "view_get_chunk") {
       if (!data.fileId) throw new Error("fileId is required");
       // Chunk logic
@@ -53,6 +57,20 @@ function View_Dispatcher(data) {
       if (!data.seriesId)
         throw new Error("seriesId is required for filename migration");
       resultBody = Migrate_RenameFiles(data.seriesId, data.folderId);
+    } else if (action === "view_get_merge_index") {
+      // [v1.6.1] Fast Path Fallback: Get Merge Index Fragment directly
+      if (!data.folderId || !data.sourceId) throw new Error("folderId and sourceId are required for merge index");
+      const rootFolder = DriveApp.getFolderById(data.folderId);
+      const mFolders = rootFolder.getFoldersByName("_MergeIndex");
+      resultBody = { found: false, data: null };
+      if (mFolders.hasNext()) {
+          const mFolder = mFolders.next();
+          const fragFiles = mFolder.getFilesByName(`_toki_merge_${data.sourceId}.json`);
+          if (fragFiles.hasNext()) {
+              const fragContent = fragFiles.next().getBlob().getDataAsString();
+              resultBody = { found: true, data: JSON.parse(fragContent) };
+          }
+      }
     } else if (action === "view_history_get") {
       if (!folderId) throw new Error("folderId is required for history");
       resultBody = View_getReadHistory(folderId);
@@ -74,8 +92,78 @@ function View_Dispatcher(data) {
       if (!seriesFolder) {
         resultBody = { updated: false, reason: "folder not found" };
       } else {
-        View_getBooks(seriesFolder.getId(), true); // bypassCache=true → 재스캔 + 캐시 기록
-        resultBody = { updated: true, seriesId: seriesFolder.getId() };
+        const seriesId = seriesFolder.getId();
+        const booksArray = View_getBooks(seriesId, true); // bypassCache=true → 재스캔 + 캐시 기록
+        const itemsCount = booksArray ? booksArray.length : 0;
+        
+        // [v1.6.1] Merge Index Fragment Creation
+        try {
+            const rootFolder = DriveApp.getFolderById(folderId);
+            
+            // 1. Find or create _MergeIndex folder
+            let mergeFolder;
+            const mFolders = rootFolder.getFoldersByName("_MergeIndex");
+            if (mFolders.hasNext()) {
+                mergeFolder = mFolders.next();
+            } else {
+                mergeFolder = rootFolder.createFolder("_MergeIndex");
+            }
+            
+            // 2. Extract sourceId & find cacheFileId
+            const folderName = seriesFolder.getName();
+            const idMatch = folderName.match(/^\[(\d+)\]/);
+            const sourceId = idMatch ? idMatch[1] : seriesId; // Fallback to drive ID if no stamp
+            
+            let cacheFileId = "";
+            let retries = 3;
+            while (retries > 0) {
+                const cacheFiles = seriesFolder.getFilesByName("_toki_cache.json");
+                if (cacheFiles.hasNext()) {
+                    cacheFileId = cacheFiles.next().getId();
+                    break;
+                }
+                Utilities.sleep(1500); // Wait 1.5s for Drive eventual consistency
+                retries--;
+            }
+            
+            if (cacheFileId) {
+                // 3. Create or Update Fragment File
+                const fragName = `_toki_merge_${sourceId}.json`;
+                
+                // [v1.6.2] Enrich fragment with full series metadata for dynamic Insert support
+                // Allows SweepMergeIndex to add brand-new series without a full rebuild.
+                const seriesFolderName = seriesFolder.getName();
+                // Extract clean title from "[12345] 작품명" → "작품명"
+                const titleClean = seriesFolderName.replace(/^\[\d+\]\s*/, '').trim();
+                
+                const fragData = JSON.stringify({
+                    id: seriesId,
+                    sourceId: sourceId,
+                    name: titleClean,
+                    folderName: seriesFolderName,
+                    url: seriesFolder.getUrl(),
+                    created: seriesFolder.getDateCreated().toISOString(),
+                    cacheFileId: cacheFileId,
+                    itemsCount: itemsCount,
+                    lastUpdated: new Date().toISOString()
+                });
+                
+                const existingFrags = mergeFolder.getFilesByName(fragName);
+                if (existingFrags.hasNext()) {
+                    const frag = existingFrags.next();
+                    frag.setContent(fragData); // Update existing
+                } else {
+                    mergeFolder.createFile(fragName, fragData, MimeType.PLAIN_TEXT);
+                }
+                Debug.log(`[MergeIndex] Created fragment for ${sourceId} / ${cacheFileId}`);
+            }
+            
+            resultBody = { updated: true, seriesId: seriesId, mergeStatus: "success" };
+        } catch (mergeErr) {
+            Debug.log(`[MergeIndex] Error creating fragment: ${mergeErr.toString()}`);
+            // Non-fatal, let the response succeed but return the error for debugging
+            resultBody = { updated: true, seriesId: seriesId, mergeStatus: "failed", error: mergeErr.toString() };
+        }
       }
     } else {
       throw new Error("Unknown Viewer Action: " + action);

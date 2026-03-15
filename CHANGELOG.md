@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.6.0] - 2026-03-15
+
+### ✨ Kavita 호환성 강화 및 배치 다운로드 시스템
+
+- **CBZ 구조 표준화**: 이미지를 루트 폴더에 직접 배치하고 `ComicInfo.xml` 메타데이터를 자동 생성하여 Kavita 등 외부 뷰어 호환성 극대화.
+- **5개 단위 배치(Batching) 다운로드**: 대량 다운로드 시 브라우저 메모리 부족으로 인한 크래시를 방지하기 위해 `zipOfCbzs` 사용 시 5화마다 ZIP 파일을 생성하여 저장하도록 로직 개선.
+- **정책 정비**: `folderInCbz` 정책 폐기 (사용 시 자동으로 `zipOfCbzs` 배치 모드로 전환).
+
 ## [v1.5.6] - 2026-03-05
 
 ### 🛠 배포(Deployment) 안정화 및 파이프라인 개편

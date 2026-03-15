@@ -6,10 +6,10 @@ import { fetchHistory } from './gas.js';
 import { getListItems, parseListItem } from './parser.js';
 import { getOAuthToken } from './network.js';
 
-import { getCommonPrefix, blobToArrayBuffer } from './utils.js';
+import { getCommonPrefix, blobToArrayBuffer, saveFile } from './utils.js';
 
 export function main() {
-    console.log("🚀 TokiDownloader Loaded (New Core v1.5.6)");
+    console.log("🚀 TokiDownloader Loaded (New Core v1.6.0)");
     
     const logger = LogBox.getInstance();
 
@@ -141,11 +141,11 @@ export function main() {
         onDownload: () => {}, // Not used directly, specific methods below
         downloadAll: () => {
             const config = getConfig();
-            tokiDownload(undefined, undefined, config.policy);
+            tokiDownload(undefined, config.policy);
         },
-        downloadRange: (start, end) => {
+        downloadRange: (spec) => {
             const config = getConfig();
-            tokiDownload(start, end, config.policy);
+            tokiDownload(spec, config.policy);
         },
         openViewer: openViewer,
         openSettings: () => showConfigModal(),
@@ -164,7 +164,17 @@ export function main() {
             return { min: 1, max: 100 };
         },
         migrateFilenames: runFilenameMigration,
-        migrateThumbnails: runThumbnailMigration
+        migrateThumbnails: runThumbnailMigration,
+        testNativeDownload: async () => {
+            try {
+                const testBlob = new Blob(["TokiSync Native Mode Test File"], { type: "text/plain" });
+                await saveFile(testBlob, "test", "native", "txt", { folderName: "_Test" });
+                return true;
+            } catch (e) {
+                console.error("[Native Test Failed]", e);
+                return false;
+            }
+        }
     });
 
 
@@ -175,7 +185,7 @@ export function main() {
         GM_registerMenuCommand('🌐 Viewer 열기', openViewer);
         GM_registerMenuCommand('📥 전체 다운로드', () => {
             const config = getConfig();
-            tokiDownload(undefined, undefined, config.policy);
+            tokiDownload(undefined, config.policy);
         });
         GM_registerMenuCommand('📂 파일명 표준화 (Migration)', runFilenameMigration);
     }

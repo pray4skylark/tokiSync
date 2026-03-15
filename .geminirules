@@ -8,10 +8,11 @@
 
 **0. CONTEXT INITIALIZATION MANDATE:** 새로운 세션 시작 시 무조건 `PROJECT_HANDOVER_MASTER.md`를 먼저 읽고 컨텍스트를 복구할 것.
 
-**1. PROPOSE BEFORE IMPLEMENTATION:** 코딩 작업 시 분석 -> 단계별 계획 출력 -> **사용자 승인 대기** 과정을 거칠 것. 승인 전 코드 작성 금지.
+**1. STOP & PLAN (CRITICAL):** - 모든 코딩 작업 전에 반드시 `[PLANNING PHASE]`라는 머리말을 달고 분석 결과와 단계별 계획을 먼저 발표할 것. 
+- 사용자가 "실행하세요" 또는 "Proceed"라고 말하기 전까지는 어떠한 `code block` 생성이나 파일 수정 행위도 일절 금지함. (승인 대기 필수)
 
 **2. OPERATION CLASSIFICATION (NEW):** 명령어 실행 권한을 다음과 같이 엄격히 구분한다.
-   - 🚫 **PROHIBITED (Deployment/Destructive):** `npm run build`, `clasp push`, `rm -rf`, `git push` 등 배포 및 파괴적 명령은 직접 실행 금지. 사용자에게 텍스트로 가이드할 것.
+   - 🚫 **PROHIBITED (Deployment/Destructive):** `clasp push`, `rm -rf`, `git push` 등 배포 및 파괴적 명령은 직접 실행 금지. 사용자에게 텍스트로 가이드할 것.
    - ✅ **ALLOWED (Diagnostic/Read-only):** `ls`, `pwd`, `cat`, `grep`, `find`, `git status`, `npm list` 등 환경 파악 및 파일 확인용 명령어는 자유롭게 실행하여 컨텍스트를 파악할 것.
    - ⚠️ **CONDITIONAL (Development):** `npm test`, `npm run lint` 등 안전한 검증용 명령은 계획 단계에서 승인받은 경우 실행 가능.
 

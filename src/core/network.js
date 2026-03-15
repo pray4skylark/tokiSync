@@ -28,6 +28,7 @@ async function fetchToken() {
                 apiKey: config.apiKey
             }),
             headers: { 'Content-Type': 'text/plain' },
+            timeout: 30000,
             onload: (response) => {
                 console.log('[DirectUpload] Token response status:', response.status);
                 console.log('[DirectUpload] Token response text:', response.responseText);
@@ -38,7 +39,7 @@ async function fetchToken() {
                     
                     if (result.status === 'success') {
                         console.log('[DirectUpload] Token received successfully');
-                        resolve(result.body.token); // Fixed: body instead of data
+                        resolve(result.body.token);
                     } else {
                         console.error('[DirectUpload] Token fetch failed:', result.error);
                         console.error('[DirectUpload] Debug logs:', result.logs);
@@ -55,8 +56,8 @@ async function fetchToken() {
                 reject(new Error('Token request failed'));
             },
             ontimeout: () => {
-                console.error('[DirectUpload] Request timeout');
-                reject(new Error('Token request timeout'));
+                console.error('[DirectUpload] Token request timed out (30s)');
+                reject(new Error('[DirectUpload] 토큰 요청 타임아웃 (30초)'));
             }
         });
     });
@@ -106,6 +107,7 @@ async function getOrCreateFolder(folderName, parentId, token, category = 'Webtoo
             method: 'GET',
             url: legacySearchUrl,
             headers: { 'Authorization': `Bearer ${token}` },
+            timeout: 30000,
             onload: (res) => {
                 try {
                     resolve(JSON.parse(res.responseText));
@@ -113,7 +115,8 @@ async function getOrCreateFolder(folderName, parentId, token, category = 'Webtoo
                     reject(e);
                 }
             },
-            onerror: reject
+            onerror: reject,
+            ontimeout: () => reject(new Error('[DirectUpload] 레거시 폴더 검색 타임아웃 (30초)'))
         });
     });
     
@@ -133,6 +136,7 @@ async function getOrCreateFolder(folderName, parentId, token, category = 'Webtoo
             method: 'GET',
             url: categorySearchUrl,
             headers: { 'Authorization': `Bearer ${token}` },
+            timeout: 30000,
             onload: (res) => {
                 try {
                     resolve(JSON.parse(res.responseText));
@@ -140,7 +144,8 @@ async function getOrCreateFolder(folderName, parentId, token, category = 'Webtoo
                     reject(e);
                 }
             },
-            onerror: reject
+            onerror: reject,
+            ontimeout: () => reject(new Error('[DirectUpload] 카테고리 폴더 검색 타임아웃 (30초)'))
         });
     });
     
@@ -164,6 +169,7 @@ async function getOrCreateFolder(folderName, parentId, token, category = 'Webtoo
                     mimeType: 'application/vnd.google-apps.folder',
                     parents: [parentId]
                 }),
+                timeout: 30000,
                 onload: (res) => {
                     try {
                         resolve(JSON.parse(res.responseText));
@@ -171,7 +177,8 @@ async function getOrCreateFolder(folderName, parentId, token, category = 'Webtoo
                         reject(e);
                     }
                 },
-                onerror: reject
+                onerror: reject,
+                ontimeout: () => reject(new Error('[DirectUpload] 카테고리 폴더 생성 타임아웃 (30초)'))
             });
         });
         categoryFolderId = createCategoryResult.id;
@@ -201,6 +208,7 @@ async function getOrCreateFolder(folderName, parentId, token, category = 'Webtoo
             method: 'GET',
             url: seriesSearchUrl,
             headers: { 'Authorization': `Bearer ${token}` },
+            timeout: 30000,
             onload: (res) => {
                 try {
                     resolve(JSON.parse(res.responseText));
@@ -208,7 +216,8 @@ async function getOrCreateFolder(folderName, parentId, token, category = 'Webtoo
                     reject(e);
                 }
             },
-            onerror: reject
+            onerror: reject,
+            ontimeout: () => reject(new Error('[DirectUpload] 시리즈 폴더 검색 타임아웃 (30초)'))
         });
     });
     
@@ -243,6 +252,7 @@ async function getOrCreateFolder(folderName, parentId, token, category = 'Webtoo
                 mimeType: 'application/vnd.google-apps.folder',
                 parents: [categoryFolderId]
             }),
+            timeout: 30000,
             onload: (res) => {
                 try {
                     resolve(JSON.parse(res.responseText));
@@ -250,7 +260,8 @@ async function getOrCreateFolder(folderName, parentId, token, category = 'Webtoo
                     reject(e);
                 }
             },
-            onerror: reject
+            onerror: reject,
+            ontimeout: () => reject(new Error('[DirectUpload] 시리즈 폴더 생성 타임아웃 (30초)'))
         });
     });
     
@@ -271,8 +282,10 @@ async function getOrCreateThumbnailFolder(token, parentId) {
             method: 'GET',
             url: searchUrl,
             headers: { 'Authorization': `Bearer ${token}` },
+            timeout: 30000,
             onload: (res) => resolve(JSON.parse(res.responseText)),
-            onerror: reject
+            onerror: reject,
+            ontimeout: () => reject(new Error('[DirectUpload] 썸네일 폴더 검색 타임아웃 (30초)'))
         });
     });
 
@@ -295,8 +308,10 @@ async function getOrCreateThumbnailFolder(token, parentId) {
                 mimeType: 'application/vnd.google-apps.folder',
                 parents: [parentId]
             }),
+            timeout: 30000,
             onload: (res) => resolve(JSON.parse(res.responseText)),
-            onerror: reject
+            onerror: reject,
+            ontimeout: () => reject(new Error('[DirectUpload] 썸네일 폴더 생성 타임아웃 (30초)'))
         });
     });
     return createResult.id;
@@ -345,8 +360,10 @@ export async function uploadDirect(blob, folderName, fileName, metadata = {}) {
                             method: 'GET',
                             url: searchUrl,
                             headers: { 'Authorization': `Bearer ${token}` },
+                            timeout: 30000,
                             onload: (res) => resolve(JSON.parse(res.responseText)),
-                            onerror: reject
+                            onerror: reject,
+                            ontimeout: () => reject(new Error('[DirectUpload] 기존 파일 검색 타임아웃 (30초)'))
                         });
                     });
                     
@@ -359,11 +376,13 @@ export async function uploadDirect(blob, folderName, fileName, metadata = {}) {
                                     method: 'DELETE',
                                     url: `https://www.googleapis.com/drive/v3/files/${file.id}`,
                                     headers: { 'Authorization': `Bearer ${token}` },
+                                    timeout: 15000,
                                     onload: () => {
                                         console.log(`[DirectUpload] Deleted old file: ${file.id}`);
                                         resolve();
                                     },
-                                    onerror: reject
+                                    onerror: reject,
+                                    ontimeout: () => reject(new Error('[DirectUpload] 파일 삭제 타임아웃 (15초)'))
                                 });
                             });
                         }
@@ -408,6 +427,7 @@ export async function uploadDirect(blob, folderName, fileName, metadata = {}) {
                 },
                 data: multipartBody,
                 binary: true,
+                timeout: 300000,
                 onload: (response) => {
                     if (response.status >= 200 && response.status < 300) {
                         console.log(`[DirectUpload] ✅ Upload successful: ${finalFileName}`);
@@ -416,7 +436,8 @@ export async function uploadDirect(blob, folderName, fileName, metadata = {}) {
                         reject(new Error(`Upload failed: ${response.status}`));
                     }
                 },
-                onerror: reject
+                onerror: reject,
+                ontimeout: () => reject(new Error(`[DirectUpload] 파일 업로드 타임아웃 (5분): ${finalFileName}`))
             });
         });
         

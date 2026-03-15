@@ -3,6 +3,24 @@
 // =======================================================
 
 /**
+ * [v1.6.0] 캐시 파일 ID를 이용해 폴더 스캔 없이 에피소드 목록을 직접 가져옵니다.
+ *
+ * @param {string} cacheFileId - _toki_cache.json 파일의 고유 ID
+ * @returns {Array<Object>} 캐시된 책 목록 또는 에러
+ */
+function View_getBooksByCacheId(cacheFileId) {
+  try {
+    if (!cacheFileId) throw new Error("cacheFileId is required");
+    const file = DriveApp.getFileById(cacheFileId);
+    const content = file.getBlob().getDataAsString();
+    return JSON.parse(content);
+  } catch (e) {
+    console.error(`[View_getBooksByCacheId] Error: ${e.toString()}`);
+    throw e; // Let the client handle the fallback
+  }
+}
+
+/**
  * 특정 시리즈(폴더) 내의 책(파일/폴더) 목록을 반환합니다.
  * - info.json / _toki_cache.json 캐시 처리 추가
  *

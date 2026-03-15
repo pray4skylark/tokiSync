@@ -1,15 +1,15 @@
-# ⚡️ TokiSync (토끼싱크) v1.5.6
+# ⚡️ TokiSync (토끼싱크) v1.6.0
 
 **북토끼, 뉴토끼, 마나토끼**의 콘텐츠를 **구글 드라이브로 직접 업로드**하고, **전용 웹 뷰어**를 통해 편리하게 관리/열람할 수 있는 올인원 솔루션입니다.
 
-> **🚀 v1.5.6 업데이트:**
-> **배포 파이프라인 및 안정성 확보**: GitHub Actions 배포 충돌 해결 및 GAS 구글 드라이브 중복 생성 버그 픽스.
+> **🚀 v1.6.0 업데이트:**
+> **Kavita 호환성 및 배치 다운로드**: CBZ 구조 표준화(ComicInfo.xml), 5개 단위 배치 다운로드 기능 도입. 상세 내용은 **[KAVITA_GUIDE.md](./KAVITA_GUIDE.md)**를 참고하세요.
 
 ---
 
 ## ✨ 주요 기능
 
-### 📥 수집기 (UserScript) - v1.5.6
+### 📥 수집기 (UserScript) - v1.6.0
 
 - **📱 통합 메뉴 모달 (New)**: `Ctrl+Shift+T` 또는 우측 하단 버튼으로 모든 기능을 한 곳에서 제어.
 - **🚀 Direct Drive Access**: GAS 서버의 병목 없이 **구글 드라이브 API로 직접 데이터를 전송**합니다.
@@ -20,7 +20,7 @@
 - **🔄 스마트 동기화**: 중복 없이 신규 회차만 다운로드.
 - **☁️ 구글 드라이브 직통 업로드**: PC 저장공간 최소화.
 
-### 📡 서버 (GAS API) - v1.5.6
+### 📡 서버 (GAS API) - v1.6.0
 
 - **📚 읽기 이력 동기화 (New)**: `read_history.json`을 통한 기기 간 열람 이력 공유.
 
@@ -29,7 +29,7 @@
 - **🔒 API Key 보안**: 전체 API 인증 강제.
 - **📦 대용량 Resumable Upload**: 5GB+ 파일 지원.
 
-### 📊 뷰어 2.0 (Cinematic Update) - v1.5.6
+### 📊 뷰어 2.0 (Cinematic Update) - v1.6.0
 
 - **🎥 Cinematic Experience**: 글래스모피즘 UI와 몰입형 에피소드 상세 페이지 제공.
 - **🚀 Tech Stack**: **Vue 3 + Tailwind CSS** 기반의 SPA 구조.

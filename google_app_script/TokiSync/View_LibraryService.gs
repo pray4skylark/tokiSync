@@ -25,7 +25,12 @@ function View_getSeriesList(
       const content = file.getBlob().getDataAsString();
       if (content && content.trim() !== "") {
         try {
-          return JSON.parse(content);
+          let cachedList = JSON.parse(content);
+          
+          // [v1.6.1] Merge Index Fragment Processing (Now standalone)
+          const updatedList = SweepMergeIndex(folderId, cachedList);
+          
+          return updatedList;
         } catch (e) {}
       }
     }
@@ -33,6 +38,122 @@ function View_getSeriesList(
 
   // 2. Rebuild (Paged)
   return View_rebuildLibraryIndex(folderId, continuationToken);
+}
+
+/**
+ * [v1.6.1] Sweep the _MergeIndex queue and update the master index cached list.
+ * Can be called during viewer load or via a time-driven trigger.
+ * @param {string} folderId The root folder ID
+ * @param {Array} cachedList The currently loaded master index list (or null to load it)
+ * @returns {Array} The updated cached list
+ */
+function SweepMergeIndex(folderId, cachedList) {
+    let root;
+    try {
+        root = DriveApp.getFolderById(folderId);
+    } catch (e) {
+        Debug.log(`[SweepMergeIndex] Service Error: Cannot access root folder ${folderId}: ${e.message}`);
+        return null; // Silent abort, try again next cron tick
+    }
+
+    let masterList = cachedList;
+    
+    // If no cachedList provided (e.g., from cron job), try to load it first
+    if (!masterList) {
+        try {
+            const files = root.getFilesByName(INDEX_FILE_NAME);
+            if (files.hasNext()) {
+                const content = files.next().getBlob().getDataAsString();
+                if (content && content.trim() !== "") {
+                    try { masterList = JSON.parse(content); } catch (e) { return null; }
+                }
+            }
+        } catch (e) {
+            Debug.log(`[SweepMergeIndex] Service Error reading index.json: ${e.message}`);
+            return null;
+        }
+    }
+    
+    if (!masterList || !Array.isArray(masterList)) return null;
+
+    let hasMerged = false;
+    let mergeFolders;
+    try {
+        mergeFolders = root.getFoldersByName("_MergeIndex");
+    } catch (e) {
+        Debug.log(`[SweepMergeIndex] Service Error accessing _MergeIndex: ${e.message}`);
+        return null;
+    }
+
+    if (mergeFolders.hasNext()) {
+        const mFolder = mergeFolders.next();
+        let mFiles;
+        try {
+            mFiles = mFolder.getFiles();
+        } catch (e) {
+            Debug.log(`[SweepMergeIndex] Service Error reading files in _MergeIndex: ${e.message}`);
+            return null;
+        }
+        
+        while (mFiles.hasNext()) {
+            let mFile;
+            try {
+                mFile = mFiles.next();
+            } catch (e) {
+                Debug.log(`[SweepMergeIndex] Skip corrupted or inaccessible fragment: ${e.message}`);
+                continue;
+            }
+            
+            try {
+                if (mFile.getName().startsWith("_toki_merge_")) {
+                    const fragData = JSON.parse(mFile.getBlob().getDataAsString());
+                    
+                    const targetIndex = masterList.findIndex(s => s.sourceId === fragData.sourceId || s.id === fragData.id);
+                    if (targetIndex !== -1) {
+                        // [UPDATE] Existing series — patch fields
+                        masterList[targetIndex].cacheFileId = fragData.cacheFileId;
+                        if (fragData.itemsCount !== undefined) {
+                            masterList[targetIndex].itemsCount = fragData.itemsCount;
+                        }
+                        if (fragData.lastUpdated) {
+                            masterList[targetIndex].lastModified = new Date(fragData.lastUpdated);
+                        }
+                        hasMerged = true;
+                        Debug.log(`[MergeIndex] Merged fragment into main list: ${fragData.sourceId}`);
+                    } else if (fragData.name && fragData.id) {
+                        // [v1.6.2] INSERT — Brand-new series not yet in master index
+                        // Guard against race condition duplicates before pushing
+                        const isDuplicate = masterList.some(s => s.sourceId === fragData.sourceId || s.id === fragData.id);
+                        if (!isDuplicate) {
+                            masterList.push({
+                                id: fragData.id,
+                                sourceId: fragData.sourceId || fragData.id,
+                                name: fragData.name,
+                                folderName: fragData.folderName || fragData.name,
+                                url: fragData.url || "",
+                                cacheFileId: fragData.cacheFileId,
+                                itemsCount: fragData.itemsCount || 0,
+                                created: fragData.created || new Date().toISOString(),
+                                lastModified: new Date(fragData.lastUpdated || Date.now())
+                            });
+                            hasMerged = true;
+                            Debug.log(`[MergeIndex] Inserted NEW series into master list: ${fragData.name} (${fragData.sourceId})`);
+                        }
+                    }
+                    mFile.setTrashed(true);
+                }
+            } catch (e) {
+                Debug.log(`[MergeIndex] Failed to process fragment ${mFile.getName()}: ${e}`);
+            }
+        }
+    }
+    
+    if (hasMerged) {
+        View_saveIndex(folderId, masterList);
+        Debug.log("[MergeIndex] Saved updated master index after merging fragments.");
+    }
+    
+    return masterList;
 }
 
 /**
@@ -247,6 +368,13 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
     if (!thumbnailOld.startsWith("data:image")) {
       finalThumbnail = thumbnailOld;
     }
+  } // <-- 누락된 괄호 복구
+
+  // [v1.6.0] Task A-1: Find cacheFileId
+  let cacheFileId = "";
+  const cacheFiles = folder.getFilesByName("_toki_cache.json");
+  if (cacheFiles.hasNext()) {
+      cacheFileId = cacheFiles.next().getId();
   }
 
   return {
@@ -258,7 +386,9 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
     thumbnail: finalThumbnail,
     thumbnailId: thumbnailId,
     hasCover: !!thumbnailId,
+    cacheFileId: cacheFileId, // [v1.6.0] Store cache file ID for fast access
     lastModified: folder.getLastUpdated(),
     category: metadata.category,
   };
 }
+

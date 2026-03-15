@@ -6,7 +6,7 @@ const fs = require('fs');
 const METADATA_MAIN = `// ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.5.6
+// @version      1.6.0
 // @description  Toki series sites -> Google Drive syncing tool (Bundled)
 // @author       pray4skylark
 // @updateURL    https://pray4skylark.github.io/tokiSync/tokiSync.user.js
@@ -26,6 +26,7 @@ const METADATA_MAIN = `// ==UserScript==
 // @grant        GM_deleteValue
 // @grant        GM_addValueChangeListener
 // @grant        GM_registerMenuCommand
+// @grant        GM_download
 // @connect      api.github.com
 // @connect      raw.githubusercontent.com
 // @connect      script.google.com

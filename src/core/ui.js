@@ -129,15 +129,16 @@ export class LogBox {
                 .toki-btn-secondary { background: rgba(255,255,255,0.1); color: #ddd; }
                 .toki-btn-secondary:hover { background: rgba(255,255,255,0.15); color: #fff; }
                 
-                /* Range Slider */
-                .toki-range-container { position: relative; height: 30px; display: flex; align-items: center; }
-                .toki-range-track { width: 100%; height: 4px; background: rgba(255,255,255,0.2); border-radius: 2px; position: relative; }
-                .toki-range-active { position: absolute; height: 100%; background: #6a5acd; }
-                .toki-range-thumb {
-                    width: 14px; height: 14px; background: #fff; border-radius: 50%;
-                    position: absolute; top: 50%; transform: translate(-50%, -50%);
-                    cursor: col-resize; box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+                /* Range Input */
+                .toki-range-input {
+                    width: 100%; padding: 8px 10px;
+                    background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.15);
+                    border-radius: 6px; color: #fff; font-size: 13px; font-family: monospace;
+                    transition: border-color 0.2s;
+                    box-sizing: border-box;
                 }
+                .toki-range-input:focus { outline: none; border-color: #6a5acd; }
+                .toki-range-hint { font-size: 11px; color: #666; margin-top: 5px; }
 
                 /* FAB */
                 .toki-fab {
@@ -353,32 +354,22 @@ export class MenuModal {
         // 1. Download Section
         const downSection = this.createAccordion('📥 다운로드 (Download)', true); // Default Open
         downSection.innerHTML += `
-            <div class="toki-accordion-content">
-                <!-- Range Slider Container -->
-                <!-- Range Slider Container -->
-                <div class="toki-control-group">
-                    <label class="toki-label">범위 지정 (직접 입력 가능)</label>
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                        <input type="number" id="toki-range-start" class="toki-select" style="width:45%; text-align:center;" placeholder="Start">
-                        <span style="color:#aaa;">~</span>
-                        <input type="number" id="toki-range-end" class="toki-select" style="width:45%; text-align:center;" placeholder="End">
-                    </div>
-                    <div class="toki-range-container" id="toki-range-slider">
-                        <div class="toki-range-track">
-                            <div class="toki-range-active" style="left: 0%; width: 100%;"></div>
-                            <div class="toki-range-thumb" data-thumb="0" style="left: 0%"></div>
-                            <div class="toki-range-thumb" data-thumb="1" style="left: 100%"></div>
-                        </div>
+                <div class="toki-accordion-content">
+                    <!-- Custom Range Input -->
+                    <div class="toki-control-group">
+                        <label class="toki-label">에피소드 범위 지정</label>
+                        <input type="text" id="toki-range-input" class="toki-range-input"
+                            placeholder="예: 1,2,4-10,15 (비우면 전체)">
+                        <div class="toki-range-hint">쉼표(,)로 개별 번호, 하이픈(-)으로 연속 범위 지정</div>
                     </div>
                     <button class="toki-btn-action" id="toki-btn-down-range" style="margin-top: 10px;">
                         <span>선택 다운로드 시작</span>
                     </button>
+                    <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 12px 0;">
+                    <button class="toki-btn-action toki-btn-secondary" id="toki-btn-down-all">
+                        <span>전체 다운로드 (All)</span>
+                    </button>
                 </div>
-                <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 12px 0;">
-                <button class="toki-btn-action toki-btn-secondary" id="toki-btn-down-all">
-                    <span>전체 다운로드 (All)</span>
-                </button>
-            </div>
         `;
         body.appendChild(downSection);
 
@@ -389,11 +380,19 @@ export class MenuModal {
                 <div class="toki-control-group">
                     <label class="toki-label">다운로드 정책</label>
                     <select id="toki-sel-policy" class="toki-select">
-                        <option value="folderInCbz">통합 파일 (Folder in CBZ/EPUB)</option>
-                        <option value="zipOfCbzs">압축 파일 모음 (ZIP of CBZs)</option>
-                        <option value="individual">개별 파일 (Individual Files)</option>
-                        <option value="gasUpload">Google Drive 업로드 (개별 파일)</option>
+                        <option value="individual">1. 개별 파일 (Individual)</option>
+                        <option value="zipOfCbzs">2. 챕터 묶음 (ZIP of CBZs)</option>
+                        <option value="native">3. 자동 분류 (Native)</option>
+                        <option value="drive">4. 드라이브 업로드 (GoogleDrive)</option>
                     </select>
+                </div>
+                <div id="toki-native-helper" style="display:none; margin-top: 10px; padding: 10px; background: rgba(255,165,0,0.1); border: 1px solid rgba(255,165,0,0.3); border-radius: 6px;">
+                    <div style="font-size: 11px; color: #ffa500; margin-bottom: 8px;">
+                        ⚠️ Native 모드는 Tampermonkey 설정에서 <b>'Download Mode: Browser API'</b> 활성화가 필요합니다.
+                    </div>
+                    <button class="toki-btn-action toki-btn-secondary" id="toki-btn-test-native" style="font-size: 12px; height: 30px;">
+                        📂 자동 분류 기능 테스트
+                    </button>
                 </div>
                 <div class="toki-control-group">
                     <label class="toki-label">다운로드 속도</label>
@@ -439,7 +438,6 @@ export class MenuModal {
         // --- Bind Events & Init Logic ---
         this.initExclusiveAccordion();
         this.bindEvents(overlay);
-        this.initRangeSlider();
     }
 
     createAccordion(title, open = false) {
@@ -479,17 +477,11 @@ export class MenuModal {
             this.close(overlay);
         };
         document.getElementById('toki-btn-down-range').onclick = () => {
-             // Get Range from Inputs
-             const startInput = document.getElementById('toki-range-start');
-             const endInput = document.getElementById('toki-range-end');
-             
-             const start = parseInt(startInput.value);
-             const end = parseInt(endInput.value);
-
-             if (!isNaN(start) && !isNaN(end) && this.handlers.downloadRange) {
-                 this.handlers.downloadRange(start, end);
-             }
-             this.close(overlay);
+            const spec = document.getElementById('toki-range-input').value.trim();
+            if (this.handlers.downloadRange) {
+                this.handlers.downloadRange(spec || undefined);
+            }
+            this.close(overlay);
         };
 
         // Settings
@@ -503,7 +495,36 @@ export class MenuModal {
             if (cfg.sleepMode) selSpeed.value = cfg.sleepMode;
         }
 
-        selPolicy.onchange = () => { if(this.handlers.setConfig) this.handlers.setConfig('TOKI_DOWNLOAD_POLICY', selPolicy.value); };
+        selPolicy.onchange = () => { 
+            if(this.handlers.setConfig) this.handlers.setConfig('TOKI_DOWNLOAD_POLICY', selPolicy.value);
+            this.updateNativeHelper(selPolicy.value);
+        };
+        this.updateNativeHelper(selPolicy.value);
+        
+        // Native Test Button
+        const testBtn = document.getElementById('toki-btn-test-native');
+        if (testBtn) {
+            testBtn.onclick = async () => {
+                if (this.handlers.testNativeDownload) {
+                    testBtn.disabled = true;
+                    testBtn.textContent = '⏳ 테스트 중...';
+                    const success = await this.handlers.testNativeDownload();
+                    if (success) {
+                        testBtn.textContent = '✅ 테스트 성공 (폴더 확인)';
+                        testBtn.style.color = '#55ff55';
+                    } else {
+                        testBtn.textContent = '❌ 테스트 실패 (설정 확인)';
+                        testBtn.style.color = '#ff5555';
+                    }
+                    setTimeout(() => {
+                        testBtn.disabled = false;
+                        testBtn.textContent = '📂 자동 분류 기능 테스트';
+                        testBtn.style.color = '';
+                    }, 3000);
+                }
+            };
+        }
+
         selSpeed.onchange = () => { if(this.handlers.setConfig) this.handlers.setConfig('TOKI_SLEEP_MODE', selSpeed.value); };
 
         document.getElementById('toki-btn-advanced').onclick = () => {
@@ -529,125 +550,7 @@ export class MenuModal {
         };
     }
 
-    initRangeSlider() {
-        // We need 'min' and 'max' episode numbers.
-        // handlers.getEpisodeRange() should return { min: 1, max: 100 }
-        
-        let minEp = 1;
-        let maxEp = 100;
-
-        if (this.handlers.getEpisodeRange) {
-            const range = this.handlers.getEpisodeRange();
-            if (range) {
-                minEp = range.min;
-                maxEp = range.max;
-            }
-        }
-        
-        // Initial State
-        this.currentRange = { start: minEp, end: maxEp };
-        this.absMin = minEp;
-        this.absMax = maxEp;
-        
-        this.updateRangeUI();
-        
-        // Input Event Listeners for Manual Entry
-        const startInput = document.getElementById('toki-range-start');
-        const endInput = document.getElementById('toki-range-end');
-        
-        const onInputChange = () => {
-            let s = parseInt(startInput.value);
-            let e = parseInt(endInput.value);
-            
-            if(isNaN(s)) s = this.absMin;
-            if(isNaN(e)) e = this.absMax;
-            
-            // Validate against Abs Range
-            s = Math.max(this.absMin, Math.min(s, this.absMax));
-            e = Math.max(this.absMin, Math.min(e, this.absMax));
-            
-            // Ensure Start <= End
-            if (s > e) [s, e] = [e, s];
-            
-            this.currentRange.start = s;
-            this.currentRange.end = e;
-            this.updateRangeUI();
-        };
-
-        startInput.onchange = onInputChange;
-        endInput.onchange = onInputChange;
-        
-        // Drag Logic
-        const track = document.getElementById('toki-range-slider');
-        const thumbs = track.querySelectorAll('.toki-range-thumb');
-        
-        thumbs.forEach(thumb => {
-            thumb.onmousedown = (e) => {
-                e.preventDefault();
-                const isStart = thumb.dataset.thumb === '0';
-                
-                const onMove = (moveEvent) => {
-                    const rect = track.getBoundingClientRect();
-                    let x = moveEvent.clientX - rect.left;
-                    let percent = (x / rect.width) * 100;
-                    percent = Math.max(0, Math.min(100, percent));
-                    
-                    // Convert percent to value within absolute range [absMin, absMax]
-                    // Val = min + (percent * (max - min))
-                    let value = Math.round(this.absMin + (percent / 100) * (this.absMax - this.absMin));
-                    
-                    if (isStart) {
-                        this.currentRange.start = Math.min(value, this.currentRange.end);
-                        // Clamp to min
-                        if(this.currentRange.start < this.absMin) this.currentRange.start = this.absMin;
-                    } else {
-                        this.currentRange.end = Math.max(value, this.currentRange.start);
-                         // Clamp to max
-                        if(this.currentRange.end > this.absMax) this.currentRange.end = this.absMax;
-                    }
-                    this.updateRangeUI();
-                };
-                
-                const onUp = () => {
-                    document.removeEventListener('mousemove', onMove);
-                    document.removeEventListener('mouseup', onUp);
-                };
-                
-                document.addEventListener('mousemove', onMove);
-                document.addEventListener('mouseup', onUp);
-            };
-        });
-    }
-
-    updateRangeUI() {
-        const { start, end } = this.currentRange;
-        
-        // Update Inputs
-        const startInput = document.getElementById('toki-range-start');
-        const endInput = document.getElementById('toki-range-end');
-        if(startInput && endInput) {
-            startInput.value = start;
-            endInput.value = end;
-        }
-
-        // Calculate percentages based on absMin and absMax
-        const totalRange = this.absMax - this.absMin;
-        // Avoid division by zero
-        const safeRange = totalRange === 0 ? 1 : totalRange;
-
-        const startPct = ((start - this.absMin) / safeRange) * 100;
-        const endPct = ((end - this.absMin) / safeRange) * 100;
-
-        const thumbs = document.querySelectorAll('.toki-range-thumb');
-        const active = document.querySelector('.toki-range-active');
-        
-        if (thumbs.length === 2 && active) {
-             thumbs[0].style.left = `${startPct}%`;
-             thumbs[1].style.left = `${endPct}%`;
-             active.style.left = `${startPct}%`;
-             active.style.width = `${endPct - startPct}%`;
-        }
-    }
+    // getEpisodeRange 핸들러는 슬라이더 제거로 더 이상 UI에서 사용 안 함 (main.js 호환용으로 유지)
 
     show() {
         this.render();
@@ -665,6 +568,13 @@ export class MenuModal {
         const existing = document.querySelector('.toki-modal-overlay');
         if (existing) this.close(existing);
         else this.show();
+    }
+
+    updateNativeHelper(policy) {
+        const helper = document.getElementById('toki-native-helper');
+        if (helper) {
+            helper.style.display = (policy === 'native') ? 'block' : 'none';
+        }
     }
 }
 

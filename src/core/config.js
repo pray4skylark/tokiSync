@@ -1,4 +1,5 @@
-export const CFG_URL_KEY = "TOKI_GAS_URL";
+export const CFG_URL_KEY = "TOKI_GAS_URL"; // legacy
+export const CFG_ID_KEY = "TOKI_GAS_ID";
 export const CFG_FOLDER_ID = "TOKI_FOLDER_ID";
 export const CFG_POLICY_KEY = "TOKI_DOWNLOAD_POLICY";
 export const CFG_API_KEY = "TOKI_API_KEY";
@@ -6,11 +7,31 @@ export const CFG_SLEEP_MODE = "TOKI_SLEEP_MODE";
 
 /**
  * Get current configuration
- * @returns {{gasUrl: string, folderId: string, policy: string, apiKey: string, sleepMode: string}}
+ * @returns {{gasId: string, gasUrl: string, folderId: string, policy: string, apiKey: string, sleepMode: string}}
  */
 export function getConfig() {
+    let gasId = GM_getValue(CFG_ID_KEY, "");
+    let gasUrl = GM_getValue(CFG_URL_KEY, "");
+
+    // Auto-migration: gasUrl -> gasId
+    if (!gasId && gasUrl) {
+        const match = gasUrl.match(/\/s\/([^\/]+)\/exec/);
+        if (match) {
+            gasId = match[1];
+            GM_setValue(CFG_ID_KEY, gasId);
+            console.log("✅ [Config] Auto-migrated GAS URL to ID:", gasId);
+        }
+    }
+
+    const finalGasId = gasId;
+    // URL fallback for legacy or reconstructed from ID
+    const finalGasUrl = finalGasId 
+        ? `https://script.google.com/macros/s/${finalGasId}/exec` 
+        : gasUrl;
+
     return {
-        gasUrl: GM_getValue(CFG_URL_KEY, ""),
+        gasId: finalGasId,
+        gasUrl: finalGasUrl,
         folderId: GM_getValue(CFG_FOLDER_ID, ""),
         policy: GM_getValue(CFG_POLICY_KEY, "folderInCbz"),
         apiKey: GM_getValue(CFG_API_KEY, ""),
@@ -25,8 +46,6 @@ export function getConfig() {
  */
 export function setConfig(key, value) {
     GM_setValue(key, value);
-    // Optional: Dispatch event for other components to react?
-    // For now, simple set is enough.
 }
 
 /**
@@ -109,8 +128,8 @@ export function showConfigModal() {
             <div class="toki-modal-header">TokiSync 설정</div>
             
             <div class="toki-input-group">
-                <label class="toki-label">Google Apps Script URL</label>
-                <input type="text" id="toki-cfg-gas" class="toki-input" placeholder="https://script.google.com/..." value="${config.gasUrl}">
+                <label class="toki-label">GAS Script ID</label>
+                <input type="text" id="toki-cfg-gas-id" class="toki-input" placeholder="AKfycb..." value="${config.gasId}">
             </div>
 
             <div class="toki-input-group">
@@ -126,10 +145,11 @@ export function showConfigModal() {
             <div class="toki-input-group">
                 <label class="toki-label">다운로드 정책</label>
                 <select id="toki-cfg-policy" class="toki-select">
-                    <option value="folderInCbz">통합 파일 (Folder in CBZ/EPUB)</option>
-                    <option value="zipOfCbzs">압축 파일 모음 (ZIP of CBZs)</option>
-                    <option value="individual">개별 파일 (Individual Files)</option>
-                    <option value="gasUpload">Google Drive 업로드 (개별 파일)</option>
+                    <option value="individual">1. 개별 파일 (Individual)</option>
+                    <option value="zipOfCbzs">2. 챕터 묶음 (ZIP of CBZs)</option>
+                    <option value="native">3. 자동 분류 (Native)</option>
+                    <option value="drive">4. 드라이브 업로드 (GoogleDrive)</option>
+                    <option value="folderInCbz" style="display:none;">[구버전] 통합 파일 (Folder in CBZ/EPUB)</option>
                 </select>
             </div>
 
@@ -161,13 +181,18 @@ export function showConfigModal() {
     document.getElementById('toki-btn-cancel').onclick = () => overlay.remove();
     
     document.getElementById('toki-btn-save').onclick = () => {
-        const newGas = document.getElementById('toki-cfg-gas').value.trim();
+        const newGasId = document.getElementById('toki-cfg-gas-id').value.trim();
         const newFolder = document.getElementById('toki-cfg-folder').value.trim();
         const newApiKey = document.getElementById('toki-cfg-apikey').value.trim();
         const newPolicy = document.getElementById('toki-cfg-policy').value;
         const newSleepMode = document.getElementById('toki-cfg-sleepmode').value;
 
-        setConfig(CFG_URL_KEY, newGas);
+        // URL 입력 시 ID 추출 로직 병합 (사용자 편의성)
+        let finalGasId = newGasId;
+        const urlMatch = newGasId.match(/\/s\/([^\/]+)\/exec/);
+        if (urlMatch) finalGasId = urlMatch[1];
+
+        setConfig(CFG_ID_KEY, finalGasId);
         setConfig(CFG_FOLDER_ID, newFolder);
         setConfig(CFG_API_KEY, newApiKey);
         setConfig(CFG_POLICY_KEY, newPolicy);
@@ -189,5 +214,5 @@ export function showConfigModal() {
  */
 export function isConfigValid() {
     const config = getConfig();
-    return config.gasUrl && config.folderId;
+    return (config.gasId || config.gasUrl) && config.folderId;
 }

@@ -22,11 +22,14 @@ import { getConfig } from './config.js';
             // Check localStorage to verify injection success
             const checkInjection = () => {
                 const storedUrl = localStorage.getItem('TOKI_API_URL');
+                const storedGasId = localStorage.getItem('TOKI_GAS_ID');
                 const storedId = localStorage.getItem('TOKI_ROOT_ID');
                 const storedKey = localStorage.getItem('TOKI_API_KEY');
                 
-                // All three values must match
-                if (storedUrl === config.gasUrl && 
+                // Matches if either URL matches or ID matches
+                const urlMatches = (storedUrl === config.gasUrl || storedGasId === config.gasId);
+                
+                if (urlMatches && 
                     storedId === config.folderId && 
                     storedKey === (config.apiKey || '')) {
                     

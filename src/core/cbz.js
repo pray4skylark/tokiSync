@@ -12,19 +12,57 @@ export class CbzBuilder {
     async build(metadata = {}) {
         const zip = new JSZip();
         
+        // Kavita Compatibility: Images at root, no subfolders
+        // Note: As per new strategy, we only build one chapter per CBZ.
         this.chapters.forEach((chapter) => {
-            // Folder name: "{ChapterTitle}" (Cleaned Title)
-            const folderName = chapter.title; 
-
             chapter.images.forEach((img, idx) => {
                 if (img && img.blob) {
-                    // File name: "image{0000}{ext}" (No redundant title)
-                    const filename = `image${String(idx).padStart(4, '0')}${img.ext}`;
-                    zip.folder(folderName).file(filename, img.blob);
+                    // File name: "image_{0000}{ext}" 
+                    const filename = img.isMissing 
+                        ? `[PAGE_MISSING]_image_${String(idx).padStart(4, '0')}${img.ext}`
+                        : `image_${String(idx).padStart(4, '0')}${img.ext}`;
+                    
+                    // Put directly in root
+                    zip.file(filename, img.blob);
                 }
             });
         });
 
+        // Add ComicInfo.xml for metadata recognition
+        const comicInfo = this.generateComicInfo(metadata);
+        zip.file("ComicInfo.xml", comicInfo);
+
         return zip;
+    }
+
+    generateComicInfo(metadata) {
+        const series = metadata.series || "Unknown Series";
+        const title = metadata.title || "";
+        const number = metadata.number || "";
+        const writer = metadata.writer || "";
+        const pageCount = this.chapters.reduce((acc, chap) => acc + chap.images.length, 0);
+
+        return `<?xml version="1.0" encoding="utf-8"?>
+<ComicInfo xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <Series>${this.escapeXml(series)}</Series>
+  <Number>${number}</Number>
+  <Title>${this.escapeXml(title)}</Title>
+  <Writer>${this.escapeXml(writer)}</Writer>
+  <LanguageISO>ko</LanguageISO>
+  <PageCount>${pageCount}</PageCount>
+  <Manga>YesAndRightToLeft</Manga>
+</ComicInfo>`;
+    }
+
+    escapeXml(unsafe) {
+        return unsafe.replace(/[<>&"']/g, (c) => {
+            switch (c) {
+                case '<': return '&lt;';
+                case '>': return '&gt;';
+                case '&': return '&amp;';
+                case '"': return '&quot;';
+                case "'": return '&apos;';
+            }
+        });
     }
 }

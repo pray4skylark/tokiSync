@@ -38,27 +38,50 @@ export function getImageList(iframeDocument, protocolDomain) {
     // Select images in viewer
     let imgLists = Array.from(iframeDocument.querySelectorAll('.view-padding div img'));
 
-    // Filter visible images
-    imgLists = imgLists.filter(img => img.checkVisibility());
-
     // Extract valid Sources
+    // [Fix] checkVisibility() 제거: 숨겨진 iframe(-9999px)에서 일부 환경이 전체를 "not visible"로
+    // 판단해 이미지 전체 누락시키는 버그가 있었음 → 필터 없이 전체 수집
     // data-l44925d0f9f="src" style lazy loading
     // Regex fallback to find data-path
     
     return imgLists.map(img => {
-        let src = img.outerHTML; // Fallback strategy from original code
+        // [Fix] 시나리오 2: outerHTML 정규식(/data) 의존 제거
+        // 우선순위: src 직접 → 주요 data-* 속성 → outerHTML 정규식 폴백
         try {
-            // Find data attribute containing path
-            const match = src.match(/\/data[^"]+/);
-            if (match) {
-                // Prepend domain for CORS / absolute path
-                return `${protocolDomain}${match[0]}`;
+            // 1순위: src가 실제 이미지 URL인 경우 (이미 로드 완료)
+            const directSrc = img.src;
+            if (directSrc && !directSrc.includes('data:') && directSrc.startsWith('http')) {
+                return directSrc;
             }
+            
+            // 2순위: 흔히 쓰이는 lazy-load data 속성
+            const lazyAttrs = ['data-src', 'data-original', 'data-lazy', 'data-url', 'data-img'];
+            for (const attr of lazyAttrs) {
+                const val = img.getAttribute(attr);
+                if (val && val.startsWith('/')) return `${protocolDomain}${val}`;
+                if (val && val.startsWith('http')) return val;
+            }
+            
+            // 3순위: 전체 data-* 속성을 순회해 경로로 보이는 값 추출
+            for (const attr of img.attributes) {
+                if (attr.name.startsWith('data-')) {
+                    const val = attr.value;
+                    if (val && val.match(/\.(jpe?g|png|gif|webp)/i)) {
+                        if (val.startsWith('/')) return `${protocolDomain}${val}`;
+                        if (val.startsWith('http')) return val;
+                    }
+                }
+            }
+            
+            // 4순위(폴백): outerHTML 정규식 — 기존 방식 유지
+            const match = img.outerHTML.match(/\/data[^"]+/);
+            if (match) return `${protocolDomain}${match[0]}`;
+            
         } catch (e) {
-            console.warn("Image src parse failed:", e);
+            console.warn('Image src parse failed:', e);
         }
         return null;
-    }).filter(src => src !== null); // Remove nulls
+    }).filter(src => src !== null && !src.startsWith('data:image')); // Remove nulls and placeholder data URLs
 }
 
 /**

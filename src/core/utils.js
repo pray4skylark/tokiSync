@@ -42,8 +42,11 @@ export async function waitIframeLoad(iframe, url) {
         const handler = async () => {
             iframe.removeEventListener('load', handler);
             
-            // Wait a bit for DOM to settle
-            await sleep(500);
+            // [Fix] 시나리오 1/4: 고정 sleep(500) 대신 실제 콘텐츠 DOM 폴링
+            // load 이벤트 후에도 JS lazy-render 페이지는 DOM이 비어있을 수 있음
+            // 이미지(.view-padding div img) 또는 소설 텍스트(#novel_content) 중 하나가
+            // 나타날 때까지 최대 8초 폴링 (200ms 간격 × 40회)
+            await waitForContent(iframe, 8000);
             
             // Captcha Detection
             let isCaptcha = false;
@@ -114,6 +117,80 @@ export async function waitIframeLoad(iframe, url) {
         iframe.addEventListener('load', handler);
         iframe.src = url;
     });
+}
+
+/**
+ * iframe 내부에 실제 콘텐츠가 로드될 때까지 폴링 대기
+ * 웹툰: .view-padding div img / 소설: #novel_content
+ * @param {HTMLIFrameElement} iframe
+ * @param {number} maxWaitMs 최대 대기 시간 (ms), 기본 8000
+ */
+async function waitForContent(iframe, maxWaitMs = 8000) {
+    const POLL_INTERVAL = 200;
+    const maxAttempts = Math.ceil(maxWaitMs / POLL_INTERVAL);
+    
+    for (let i = 0; i < maxAttempts; i++) {
+        try {
+            const iframeDoc = iframe.contentWindow.document;
+            const hasImages = iframeDoc.querySelector('.view-padding div img') !== null;
+            const hasNovel  = iframeDoc.querySelector('#novel_content') !== null;
+            
+            if (hasImages || hasNovel) {
+                console.log(`[DOM Poll] 콘텐츠 감지 (${(i + 1) * POLL_INTERVAL}ms)`);
+                return; // 콘텐츠 발견 → 즉시 반환
+            }
+        } catch (e) {
+            // CORS 등 접근 불가 시 → 대기 지속
+        }
+        await sleep(POLL_INTERVAL);
+    }
+    // 타임아웃 — 콘텐츠 없이 진행 (후속 로직에서 빈 결과 처리)
+    console.warn(`[DOM Poll] ${maxWaitMs}ms 내 콘텐츠 미감지 — 갈무리 시도`);
+}
+
+/**
+ * iframe 내부를 끝까지 스크롤하여 레이지 로딩 이미지가 실제 URL을 불러오도록 강제하는 함수
+ * @param {HTMLDocument} iframeDoc 
+ * @param {number} maxWaitMs 최대 대기 시간 (ms), 기본 8000
+ */
+export async function scrollToLoad(iframeDoc, maxWaitMs = 8000) {
+    const scrollStep = 800;
+    const interval = 200;
+    const maxAttempts = Math.ceil(maxWaitMs / interval);
+    let attempts = 0;
+
+    const win = iframeDoc.defaultView || iframeDoc.parentWindow;
+    if (!win) return;
+
+    let currentScroll = 0;
+    let maxScroll = iframeDoc.documentElement.scrollHeight - iframeDoc.documentElement.clientHeight;
+    
+    // 강제 스크롤 다운
+    while (currentScroll < maxScroll && attempts < maxAttempts) {
+        currentScroll += scrollStep;
+        win.scrollTo({ top: currentScroll, behavior: 'smooth' });
+        await sleep(interval);
+        
+        // DOM 높이가 늘어나는 경우를 대비하여 갱신
+        maxScroll = iframeDoc.documentElement.scrollHeight - iframeDoc.documentElement.clientHeight;
+        attempts++;
+    }
+    
+    // 스크롤이 끝난 뒤에도 아직 로딩되지 않은 이미지(data:, src="") 대기
+    while (attempts < maxAttempts) {
+        const remainingLazy = Array.from(iframeDoc.querySelectorAll('.view-padding div img')).some(img => {
+            const src = img.src || "";
+            return src.startsWith('data:image') || src.trim() === "";
+        });
+        
+        if (!remainingLazy) {
+            console.log(`[ScrollToLoad] 모든 이미지 URL 로드 완료 (${attempts * interval}ms)`);
+            break;
+        }
+        
+        await sleep(interval);
+        attempts++;
+    }
 }
 
 // Pause execution until user resolves captcha
@@ -240,6 +317,39 @@ export async function saveFile(data, filename, type = 'local', extension = 'zip'
         URL.revokeObjectURL(link.href);
         link.remove();
         console.log(`[Local] 완료`);
+    } else if (type === 'native') {
+        // [v1.6.0] GM_download with subfolder support
+        const folderName = metadata.folderName || "TokiSync";
+        // Final Path: "TokiSync/SeriesTitle/Filename.zip"
+        const finalPath = `TokiSync/${folderName}/${fullFileName}`.replace(/[<>:"|?*]/g, '_'); // Sanitization for safety
+
+        console.log(`[Native] 자동 분류 다운로드 시도... (${finalPath})`);
+        const logger = LogBox.getInstance();
+
+        return new Promise((resolve, reject) => {
+            if (typeof GM_download !== 'function') {
+                const err = "GM_download 권한이 없거나 지원되지 않는 환경입니다.";
+                logger.error(`[Native] 실패: ${err}`);
+                reject(new Error(err));
+                return;
+            }
+
+            GM_download({
+                url: URL.createObjectURL(content),
+                name: finalPath,
+                saveAs: false, // Use browser setting or automatic
+                onload: () => {
+                   logger.success(`[Native] 자동 저장 완료: ${fullFileName}`);
+                   resolve(true);
+                },
+                onerror: (err) => {
+                    const errMsg = err ? (err.error || err.reason || "알 수 없는 오류") : "알 수 없는 오류";
+                    logger.error(`[Native] 다운로드 실패: ${errMsg}`);
+                    console.error("[Native Error]", err);
+                    reject(new Error(errMsg));
+                }
+            });
+        });
     } else if (type === 'drive') {
         const logger = LogBox.getInstance();
         logger.log(`[Drive] 구글 드라이브 업로드 준비 중... (${fullFileName})`);

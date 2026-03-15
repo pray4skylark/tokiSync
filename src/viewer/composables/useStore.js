@@ -323,7 +323,7 @@ const initApp = async () => {
   isInitialLoading.value = true;
 
   // 0. Sync gasConfig (loaded from localStorage) → config reactive so SettingsPanel shows saved values
-  config.deploymentId = gasConfig.baseUrl;
+  config.deploymentId = gasConfig.gasId;
   config.folderId = gasConfig.folderId;
   config.apiKey = gasConfig.apiKey;
 

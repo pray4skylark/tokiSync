@@ -55,14 +55,21 @@ export async function refreshCacheAfterUpload(folderName, category = 'Unknown') 
                 protocolVersion: 3,
             }),
             headers: { 'Content-Type': 'text/plain' },
+            timeout: 30000,
             onload: (res) => {
                 try {
                     const json = JSON.parse(res.responseText);
-                    console.log('[Cache] 갱신 결과:', json.body);
-                } catch (_) {}
+                    console.log('[Cache] 갱신 요청 완료. 병합 파편 생성됨:', json.body);
+                } catch (e) {
+                    console.log('[Cache] 갱신 완료 응답 수신 (상세없음)');
+                }
                 resolve();
             },
             onerror: () => resolve(),
+            ontimeout: () => {
+                console.warn('[Cache] 캐시 갱신 타임아웃 (30초) - 무시');
+                resolve();
+            },
         });
     });
 }
@@ -105,11 +112,11 @@ async function uploadViaGASRelay(blob, folderName, fileName, options = {}) {
                 apiKey: config.apiKey
             }),
             headers: { "Content-Type": "text/plain" },
+            timeout: 30000,
             onload: (res) => {
                 try {
                     const json = JSON.parse(res.responseText);
                     if (json.status === 'success') { 
-                        // uploadUrl can be string or object depending on server version, handling both
                         uploadUrl = (typeof json.body === 'object') ? json.body.uploadUrl : json.body;
                         resolve(); 
                     } else {
@@ -117,7 +124,8 @@ async function uploadViaGASRelay(blob, folderName, fileName, options = {}) {
                     }
                 } catch (e) { reject(new Error("GAS 응답 오류(Init): " + res.responseText)); }
             },
-            onerror: (e) => reject(new Error("네트워크 오류(Init)"))
+            onerror: (e) => reject(new Error("네트워크 오류(Init)")),
+            ontimeout: () => reject(new Error("[GAS] 업로드 초기화 타임아웃 (30초)"))
         });
     });
 
@@ -149,6 +157,7 @@ async function uploadViaGASRelay(blob, folderName, fileName, options = {}) {
                     apiKey: config.apiKey
                 }),
                 headers: { "Content-Type": "text/plain" },
+                timeout: 300000,
                 onload: (res) => {
                     try { 
                         const json = JSON.parse(res.responseText); 
@@ -156,7 +165,8 @@ async function uploadViaGASRelay(blob, folderName, fileName, options = {}) {
                         else reject(new Error(json.body || "Upload failed")); 
                     } catch (e) { reject(new Error("GAS 응답 오류(Upload): " + res.responseText)); }
                 },
-                onerror: (e) => reject(new Error("네트워크 오류(Upload)"))
+                onerror: (e) => reject(new Error("네트워크 오류(Upload)")),
+                ontimeout: () => reject(new Error(`[GAS] 청크 업로드 타임아웃 (5분): ${start}~${end}`))
             });
         });
         
@@ -185,16 +195,16 @@ export async function fetchHistory(seriesTitle, category = 'Webtoon') {
             data: JSON.stringify({
                 type: "check_history",
                 folderId: config.folderId,
-                folderName: seriesTitle, // Using seriesTitle as folderName for check
+                folderName: seriesTitle,
                 category: category,
                 apiKey: config.apiKey
             }),
             headers: { "Content-Type": "text/plain" },
+            timeout: 30000,
             onload: (res) => {
                 try {
                     const json = JSON.parse(res.responseText);
                     if (json.status === 'success') {
-                        // json.body should be an array of episode IDs (e.g. ["0001", "0002"])
                         resolve(Array.isArray(json.body) ? json.body : []);
                     } else {
                         console.warn("[GAS] 기록 조회 실패:", json.body);
@@ -208,7 +218,149 @@ export async function fetchHistory(seriesTitle, category = 'Webtoon') {
             onerror: () => {
                 console.error("[GAS] 기록 조회 네트워크 오류");
                 resolve([]);
+            },
+            ontimeout: () => {
+                console.warn("[GAS] 기록 조회 타임아웃 (30초) - 빈 배열 반환");
+                resolve([]);
             }
         });
     });
 }
+
+/**
+ * [v1.6.0] Fetch cached episode list directly using cacheFileId
+ * @param {string} cacheFileId 
+ * @returns {Promise<Array>} List of cached episodes
+ */
+export async function getBooksByCacheId(cacheFileId) {
+    const config = getConfig();
+    if (!config.gasUrl) return [];
+
+    console.log(`[GAS] 캐시 파일 직행 조회 중... (${cacheFileId})`);
+
+    return new Promise((resolve) => {
+        GM_xmlhttpRequest({
+            method: "POST",
+            url: config.gasUrl,
+            data: JSON.stringify({
+                type: "view_get_books_by_cache",
+                cacheFileId: cacheFileId,
+                apiKey: config.apiKey
+            }),
+            headers: { "Content-Type": "text/plain" },
+            timeout: 10000, // Fast response expected
+            onload: (res) => {
+                try {
+                    const json = JSON.parse(res.responseText);
+                    if (json.status === 'success') {
+                        resolve(Array.isArray(json.body) ? json.body : []);
+                    } else {
+                        console.warn("[GAS] 캐시 직접 조회 실패:", json.body);
+                        resolve([]);
+                    }
+                } catch (e) {
+                    console.error("[GAS] 캐시 응답 파싱 실패:", e);
+                    resolve([]);
+                }
+            },
+            onerror: () => {
+                console.error("[GAS] 캐시 조회 네트워크 오류");
+                resolve([]);
+            },
+            ontimeout: () => {
+                console.warn("[GAS] 캐시 조회 타임아웃 - 빈 배열 반환");
+                resolve([]);
+            }
+        });
+    });
+}
+
+/**
+ * [v1.6.0] Initialize an update upload session via GAS using fileId (Fast Path)
+ * @param {string} fileId 
+ * @param {string} fileName 
+ */
+export async function initUpdateUploadViaGASRelay(fileId, fileName) {
+    const config = getConfig();
+    if (!isConfigValid()) throw new Error("GAS 설정이 누락되었습니다.");
+
+    console.log(`[GAS] 빠른 덮어쓰기(PUT) 세션 초기화 중... (${fileName} -> ${fileId})`);
+
+    return new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+            method: "POST", 
+            url: config.gasUrl,
+            data: JSON.stringify({ 
+                type: "init_update", 
+                fileId: fileId,
+                fileName: fileName,
+                apiKey: config.apiKey
+            }),
+            headers: { "Content-Type": "text/plain" },
+            timeout: 30000,
+            onload: (res) => {
+                try {
+                    const json = JSON.parse(res.responseText);
+                    if (json.status === 'success') { 
+                        resolve((typeof json.body === 'object') ? json.body.uploadUrl : json.body);
+                    } else {
+                        reject(new Error(json.body || "Init Update failed"));
+                    }
+                } catch (e) { reject(new Error("GAS 응답 오류(Init Update): " + res.responseText)); }
+            },
+            onerror: (e) => reject(new Error("네트워크 오류(Init Update)")),
+            ontimeout: () => reject(new Error("[GAS] 덮어쓰기 세션 초기화 타임아웃 (30초)"))
+        });
+    });
+}
+
+/**
+ * [v1.6.1] Fetch Series-specific Merge Index Fragment
+ * Retrieves the temporary cacheFileId generated after recent uploads without needing a full master_index rebuild.
+ * @param {string} sourceId The `12345` ID of the series
+ * @returns {Promise<Object>} { found: boolean, data: { cacheFileId: string, ... } }
+ */
+export async function getMergeIndexFragment(sourceId) {
+    const config = getConfig();
+    if (!config.gasUrl || !config.folderId) return { found: false, data: null };
+
+    console.log(`[GAS] 병합 인덱스 파편 조회 중... (Source ID: ${sourceId})`);
+
+    return new Promise((resolve) => {
+        GM_xmlhttpRequest({
+            method: "POST",
+            url: config.gasUrl,
+            data: JSON.stringify({
+                type: "view_get_merge_index",
+                folderId: config.folderId,
+                sourceId: sourceId,
+                apiKey: config.apiKey
+            }),
+            headers: { "Content-Type": "text/plain" },
+            timeout: 10000,
+            onload: (res) => {
+                try {
+                    const json = JSON.parse(res.responseText);
+                    if (json.status === 'success') {
+                        resolve(json.body);
+                    } else {
+                        console.warn("[GAS] 병합 파편 조회 실패:", json.body);
+                        resolve({ found: false, data: null });
+                    }
+                } catch (e) {
+                    console.error("[GAS] 파편 응답 파싱 실패:", e);
+                    resolve({ found: false, data: null });
+                }
+            },
+            onerror: () => {
+                console.error("[GAS] 파편 조회 네트워크 오류");
+                resolve({ found: false, data: null });
+            },
+            ontimeout: () => {
+                console.warn("[GAS] 파편 조회 타임아웃");
+                resolve({ found: false, data: null });
+            }
+        });
+    });
+}
+

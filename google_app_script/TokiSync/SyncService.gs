@@ -118,7 +118,7 @@ function saveSeriesInfo(data, rootFolderId) {
 // 기능: 라이브러리 인덱스 조회 (TokiView 캐시 공유)
 function getLibraryIndex(rootFolderId) {
   const root = DriveApp.getFolderById(rootFolderId);
-  const files = root.getFilesByName("library_index.json");
+  const files = root.getFilesByName("index.json");
 
   if (files.hasNext()) {
     const content = files.next().getBlob().getDataAsString();
@@ -134,7 +134,7 @@ function getLibraryIndex(rootFolderId) {
 // 기능: 라이브러리 상태 업데이트 (클라이언트 결과 저장)
 function updateLibraryStatus(data, rootFolderId) {
   const root = DriveApp.getFolderById(rootFolderId);
-  const files = root.getFilesByName("library_index.json");
+  const files = root.getFilesByName("index.json");
 
   if (!files.hasNext()) return createRes("error", "Index not found");
 
@@ -206,8 +206,8 @@ function migrateLegacyStructure(rootFolderId) {
     const name = folder.getName();
     if (
       !EXT.includes(name) &&
-      name !== "info.json" &&
-      name !== "library_index.json"
+      name !== "index.json" &&
+      name !== "info.json"
     ) {
       toMigrate.push(folder);
     }
