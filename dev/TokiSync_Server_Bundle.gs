@@ -1,4 +1,4 @@
-/* ⚙️ TokiSync Server Code Bundle v1.0.0 (Generated: 2026-03-05T03:43:14.783Z) */
+/* ⚙️ TokiSync Server Code Bundle v1.0.0 (Generated: 2026-03-18T14:48:16.130Z) */
 
 /* ========================================================================== */
 /* FILE: Main.gs */
@@ -39,7 +39,7 @@ function doGet(e) {
  * @returns {TextOutput} JSON 응답
  */
 // [CONSTANTS]
-const SERVER_VERSION = "v1.5.6"; // API Key Enforcement for All Requests (including viewer)
+const SERVER_VERSION = "v1.6.0"; // Kavita Compatibility & Batching (v1.6.0)
 // API Key stored in Script Properties (Project Settings > Script Properties)
 // Set property: API_KEY = your_secret_key
 const API_KEY = PropertiesService.getScriptProperties().getProperty("API_KEY");
@@ -66,6 +66,12 @@ function doPost(e) {
       return createRes("error", "Missing folderId in request payload");
     }
 
+    // [v1.6.1] Auto-save folderId for background triggers
+    const props = PropertiesService.getScriptProperties();
+    if (props.getProperty("FOLDER_ID") !== data.folderId) {
+        props.setProperty("FOLDER_ID", data.folderId);
+    }
+
     // 🔒 [New] 클라이언트 프로토콜 버전 검증 (Major Version 기준)
     // const MIN_PROTOCOL_VERSION = 3;
     // const MIN_CLIENT_VERSION = "3.0.0-beta.251215.0002";
@@ -88,6 +94,8 @@ function doPost(e) {
     try {
       if (data.type === "init")
         result = initResumableUpload(data, rootFolderId);
+      else if (data.type === "init_update")
+        result = initUpdateResumableUpload(data); // [v1.6.0] Task A-4
       else if (data.type === "upload") result = uploadChunk(data);
       else if (data.type === "check_history")
         result = checkDownloadHistory(data, rootFolderId);
@@ -124,6 +132,27 @@ function doPost(e) {
   } catch (error) {
     return createRes("error", error.toString());
   }
+}
+
+/**
+ * [v1.6.1] Time-driven trigger function to sweep Merge Index.
+ * Automatically runs in the background to merge _toki_merge fragments into master_index.
+ * (Set this up on a Time-Driven trigger in the GAS panel, e.g., every 5 minutes)
+ */
+function TimeDriven_SweepMergeIndex() {
+    const props = PropertiesService.getScriptProperties();
+    const folderId = props.getProperty("FOLDER_ID");
+    if (!folderId) {
+        console.warn("[SweepMergeIndex] FOLDER_ID not found in Script Properties. Run normal API once to auto-save.");
+        return;
+    }
+    
+    // Call the Sweep function defined in View_LibraryService.gs
+    if (typeof SweepMergeIndex === 'function') {
+        SweepMergeIndex(folderId, null);
+    } else {
+        console.error("[SweepMergeIndex] SweepMergeIndex function not found. Verify deployment.");
+    }
 }
 
 
@@ -409,7 +438,7 @@ function saveSeriesInfo(data, rootFolderId) {
 // 기능: 라이브러리 인덱스 조회 (TokiView 캐시 공유)
 function getLibraryIndex(rootFolderId) {
   const root = DriveApp.getFolderById(rootFolderId);
-  const files = root.getFilesByName("library_index.json");
+  const files = root.getFilesByName("index.json");
 
   if (files.hasNext()) {
     const content = files.next().getBlob().getDataAsString();
@@ -425,7 +454,7 @@ function getLibraryIndex(rootFolderId) {
 // 기능: 라이브러리 상태 업데이트 (클라이언트 결과 저장)
 function updateLibraryStatus(data, rootFolderId) {
   const root = DriveApp.getFolderById(rootFolderId);
-  const files = root.getFilesByName("library_index.json");
+  const files = root.getFilesByName("index.json");
 
   if (!files.hasNext()) return createRes("error", "Index not found");
 
@@ -497,8 +526,8 @@ function migrateLegacyStructure(rootFolderId) {
     const name = folder.getName();
     if (
       !EXT.includes(name) &&
-      name !== "info.json" &&
-      name !== "library_index.json"
+      name !== "index.json" &&
+      name !== "info.json"
     ) {
       toMigrate.push(folder);
     }
@@ -723,10 +752,55 @@ function uploadChunk(data) {
   const response = UrlFetchApp.fetch(uploadUrl, params);
   const code = response.getResponseCode();
 
-  if (code === 308 || code === 200 || code === 201) {
+  if (code === 308) {
     return createRes("success", "Chunk uploaded");
+  } else if (code === 200 || code === 201) {
+    // [v1.6.0] Task A-1: Return the new fileId upon completion
+    let newFileId = null;
+    try {
+      const responseData = JSON.parse(response.getContentText());
+      if (responseData && responseData.id) {
+        newFileId = responseData.id;
+      }
+    } catch (e) {
+      console.warn("Failed to parse upload completion response", e);
+    }
+    return createRes("success", { message: "Upload complete", fileId: newFileId });
   } else {
     return createRes("error", `Drive API Error: ${code}`);
+  }
+}
+
+/**
+ * [v1.6.0] Task A-3: initUpdateResumableUpload
+ * 해당 파일 ID를 알고 있을 때 파일 이름 검색 없이 바로 덮어쓰기 세션을 엽니다.
+ */
+function initUpdateResumableUpload(data) {
+  const { fileId, fileName } = data;
+  
+  if (!fileId) {
+      return createRes("error", "Missing fileId for update operation");
+  }
+
+  const url = `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=resumable`;
+  
+  const params = {
+    method: "patch", // Use PATCH to update existing file content
+    contentType: "application/json",
+    payload: JSON.stringify({ name: fileName }), // Ensure name stays correct
+    headers: { Authorization: "Bearer " + ScriptApp.getOAuthToken() },
+    muteHttpExceptions: true,
+  };
+
+  const response = UrlFetchApp.fetch(url, params);
+  const code = response.getResponseCode();
+
+  if (code === 200) {
+    return createRes("success", { 
+        uploadUrl: response.getHeaders()["Location"] 
+    });
+  } else {
+    return createRes("error", `initUpdate failed: ${code} - ${response.getContentText()}`);
   }
 }
 
@@ -768,6 +842,10 @@ function View_Dispatcher(data) {
       const bypassCache =
         data.bypassCache === true || action === "view_refresh_cache";
       resultBody = View_getBooks(data.seriesId, bypassCache);
+    } else if (action === "view_get_books_by_cache") {
+      // [v1.6.0] Task A-4: Fast path cache retrieval
+      if (!data.cacheFileId) throw new Error("cacheFileId is required for direct cache access");
+      resultBody = View_getBooksByCacheId(data.cacheFileId);
     } else if (action === "view_get_chunk") {
       if (!data.fileId) throw new Error("fileId is required");
       // Chunk logic
@@ -790,6 +868,20 @@ function View_Dispatcher(data) {
       if (!data.seriesId)
         throw new Error("seriesId is required for filename migration");
       resultBody = Migrate_RenameFiles(data.seriesId, data.folderId);
+    } else if (action === "view_get_merge_index") {
+      // [v1.6.1] Fast Path Fallback: Get Merge Index Fragment directly
+      if (!data.folderId || !data.sourceId) throw new Error("folderId and sourceId are required for merge index");
+      const rootFolder = DriveApp.getFolderById(data.folderId);
+      const mFolders = rootFolder.getFoldersByName("_MergeIndex");
+      resultBody = { found: false, data: null };
+      if (mFolders.hasNext()) {
+          const mFolder = mFolders.next();
+          const fragFiles = mFolder.getFilesByName(`_toki_merge_${data.sourceId}.json`);
+          if (fragFiles.hasNext()) {
+              const fragContent = fragFiles.next().getBlob().getDataAsString();
+              resultBody = { found: true, data: JSON.parse(fragContent) };
+          }
+      }
     } else if (action === "view_history_get") {
       if (!folderId) throw new Error("folderId is required for history");
       resultBody = View_getReadHistory(folderId);
@@ -811,8 +903,78 @@ function View_Dispatcher(data) {
       if (!seriesFolder) {
         resultBody = { updated: false, reason: "folder not found" };
       } else {
-        View_getBooks(seriesFolder.getId(), true); // bypassCache=true → 재스캔 + 캐시 기록
-        resultBody = { updated: true, seriesId: seriesFolder.getId() };
+        const seriesId = seriesFolder.getId();
+        const booksArray = View_getBooks(seriesId, true); // bypassCache=true → 재스캔 + 캐시 기록
+        const itemsCount = booksArray ? booksArray.length : 0;
+        
+        // [v1.6.1] Merge Index Fragment Creation
+        try {
+            const rootFolder = DriveApp.getFolderById(folderId);
+            
+            // 1. Find or create _MergeIndex folder
+            let mergeFolder;
+            const mFolders = rootFolder.getFoldersByName("_MergeIndex");
+            if (mFolders.hasNext()) {
+                mergeFolder = mFolders.next();
+            } else {
+                mergeFolder = rootFolder.createFolder("_MergeIndex");
+            }
+            
+            // 2. Extract sourceId & find cacheFileId
+            const folderName = seriesFolder.getName();
+            const idMatch = folderName.match(/^\[(\d+)\]/);
+            const sourceId = idMatch ? idMatch[1] : seriesId; // Fallback to drive ID if no stamp
+            
+            let cacheFileId = "";
+            let retries = 3;
+            while (retries > 0) {
+                const cacheFiles = seriesFolder.getFilesByName("_toki_cache.json");
+                if (cacheFiles.hasNext()) {
+                    cacheFileId = cacheFiles.next().getId();
+                    break;
+                }
+                Utilities.sleep(1500); // Wait 1.5s for Drive eventual consistency
+                retries--;
+            }
+            
+            if (cacheFileId) {
+                // 3. Create or Update Fragment File
+                const fragName = `_toki_merge_${sourceId}.json`;
+                
+                // [v1.6.2] Enrich fragment with full series metadata for dynamic Insert support
+                // Allows SweepMergeIndex to add brand-new series without a full rebuild.
+                const seriesFolderName = seriesFolder.getName();
+                // Extract clean title from "[12345] 작품명" → "작품명"
+                const titleClean = seriesFolderName.replace(/^\[\d+\]\s*/, '').trim();
+                
+                const fragData = JSON.stringify({
+                    id: seriesId,
+                    sourceId: sourceId,
+                    name: titleClean,
+                    folderName: seriesFolderName,
+                    url: seriesFolder.getUrl(),
+                    created: seriesFolder.getDateCreated().toISOString(),
+                    cacheFileId: cacheFileId,
+                    itemsCount: itemsCount,
+                    lastUpdated: new Date().toISOString()
+                });
+                
+                const existingFrags = mergeFolder.getFilesByName(fragName);
+                if (existingFrags.hasNext()) {
+                    const frag = existingFrags.next();
+                    frag.setContent(fragData); // Update existing
+                } else {
+                    mergeFolder.createFile(fragName, fragData, MimeType.PLAIN_TEXT);
+                }
+                Debug.log(`[MergeIndex] Created fragment for ${sourceId} / ${cacheFileId}`);
+            }
+            
+            resultBody = { updated: true, seriesId: seriesId, mergeStatus: "success" };
+        } catch (mergeErr) {
+            Debug.log(`[MergeIndex] Error creating fragment: ${mergeErr.toString()}`);
+            // Non-fatal, let the response succeed but return the error for debugging
+            resultBody = { updated: true, seriesId: seriesId, mergeStatus: "failed", error: mergeErr.toString() };
+        }
       }
     } else {
       throw new Error("Unknown Viewer Action: " + action);
@@ -832,6 +994,24 @@ function View_Dispatcher(data) {
 // =======================================================
 // 📚 Viewer Book Service (Isolated)
 // =======================================================
+
+/**
+ * [v1.6.0] 캐시 파일 ID를 이용해 폴더 스캔 없이 에피소드 목록을 직접 가져옵니다.
+ *
+ * @param {string} cacheFileId - _toki_cache.json 파일의 고유 ID
+ * @returns {Array<Object>} 캐시된 책 목록 또는 에러
+ */
+function View_getBooksByCacheId(cacheFileId) {
+  try {
+    if (!cacheFileId) throw new Error("cacheFileId is required");
+    const file = DriveApp.getFileById(cacheFileId);
+    const content = file.getBlob().getDataAsString();
+    return JSON.parse(content);
+  } catch (e) {
+    console.error(`[View_getBooksByCacheId] Error: ${e.toString()}`);
+    throw e; // Let the client handle the fallback
+  }
+}
 
 /**
  * 특정 시리즈(폴더) 내의 책(파일/폴더) 목록을 반환합니다.
@@ -1082,7 +1262,12 @@ function View_getSeriesList(
       const content = file.getBlob().getDataAsString();
       if (content && content.trim() !== "") {
         try {
-          return JSON.parse(content);
+          let cachedList = JSON.parse(content);
+          
+          // [v1.6.1] Merge Index Fragment Processing (Now standalone)
+          const updatedList = SweepMergeIndex(folderId, cachedList);
+          
+          return updatedList;
         } catch (e) {}
       }
     }
@@ -1090,6 +1275,122 @@ function View_getSeriesList(
 
   // 2. Rebuild (Paged)
   return View_rebuildLibraryIndex(folderId, continuationToken);
+}
+
+/**
+ * [v1.6.1] Sweep the _MergeIndex queue and update the master index cached list.
+ * Can be called during viewer load or via a time-driven trigger.
+ * @param {string} folderId The root folder ID
+ * @param {Array} cachedList The currently loaded master index list (or null to load it)
+ * @returns {Array} The updated cached list
+ */
+function SweepMergeIndex(folderId, cachedList) {
+    let root;
+    try {
+        root = DriveApp.getFolderById(folderId);
+    } catch (e) {
+        Debug.log(`[SweepMergeIndex] Service Error: Cannot access root folder ${folderId}: ${e.message}`);
+        return null; // Silent abort, try again next cron tick
+    }
+
+    let masterList = cachedList;
+    
+    // If no cachedList provided (e.g., from cron job), try to load it first
+    if (!masterList) {
+        try {
+            const files = root.getFilesByName(INDEX_FILE_NAME);
+            if (files.hasNext()) {
+                const content = files.next().getBlob().getDataAsString();
+                if (content && content.trim() !== "") {
+                    try { masterList = JSON.parse(content); } catch (e) { return null; }
+                }
+            }
+        } catch (e) {
+            Debug.log(`[SweepMergeIndex] Service Error reading index.json: ${e.message}`);
+            return null;
+        }
+    }
+    
+    if (!masterList || !Array.isArray(masterList)) return null;
+
+    let hasMerged = false;
+    let mergeFolders;
+    try {
+        mergeFolders = root.getFoldersByName("_MergeIndex");
+    } catch (e) {
+        Debug.log(`[SweepMergeIndex] Service Error accessing _MergeIndex: ${e.message}`);
+        return null;
+    }
+
+    if (mergeFolders.hasNext()) {
+        const mFolder = mergeFolders.next();
+        let mFiles;
+        try {
+            mFiles = mFolder.getFiles();
+        } catch (e) {
+            Debug.log(`[SweepMergeIndex] Service Error reading files in _MergeIndex: ${e.message}`);
+            return null;
+        }
+        
+        while (mFiles.hasNext()) {
+            let mFile;
+            try {
+                mFile = mFiles.next();
+            } catch (e) {
+                Debug.log(`[SweepMergeIndex] Skip corrupted or inaccessible fragment: ${e.message}`);
+                continue;
+            }
+            
+            try {
+                if (mFile.getName().startsWith("_toki_merge_")) {
+                    const fragData = JSON.parse(mFile.getBlob().getDataAsString());
+                    
+                    const targetIndex = masterList.findIndex(s => s.sourceId === fragData.sourceId || s.id === fragData.id);
+                    if (targetIndex !== -1) {
+                        // [UPDATE] Existing series — patch fields
+                        masterList[targetIndex].cacheFileId = fragData.cacheFileId;
+                        if (fragData.itemsCount !== undefined) {
+                            masterList[targetIndex].itemsCount = fragData.itemsCount;
+                        }
+                        if (fragData.lastUpdated) {
+                            masterList[targetIndex].lastModified = new Date(fragData.lastUpdated);
+                        }
+                        hasMerged = true;
+                        Debug.log(`[MergeIndex] Merged fragment into main list: ${fragData.sourceId}`);
+                    } else if (fragData.name && fragData.id) {
+                        // [v1.6.2] INSERT — Brand-new series not yet in master index
+                        // Guard against race condition duplicates before pushing
+                        const isDuplicate = masterList.some(s => s.sourceId === fragData.sourceId || s.id === fragData.id);
+                        if (!isDuplicate) {
+                            masterList.push({
+                                id: fragData.id,
+                                sourceId: fragData.sourceId || fragData.id,
+                                name: fragData.name,
+                                folderName: fragData.folderName || fragData.name,
+                                url: fragData.url || "",
+                                cacheFileId: fragData.cacheFileId,
+                                itemsCount: fragData.itemsCount || 0,
+                                created: fragData.created || new Date().toISOString(),
+                                lastModified: new Date(fragData.lastUpdated || Date.now())
+                            });
+                            hasMerged = true;
+                            Debug.log(`[MergeIndex] Inserted NEW series into master list: ${fragData.name} (${fragData.sourceId})`);
+                        }
+                    }
+                    mFile.setTrashed(true);
+                }
+            } catch (e) {
+                Debug.log(`[MergeIndex] Failed to process fragment ${mFile.getName()}: ${e}`);
+            }
+        }
+    }
+    
+    if (hasMerged) {
+        View_saveIndex(folderId, masterList);
+        Debug.log("[MergeIndex] Saved updated master index after merging fragments.");
+    }
+    
+    return masterList;
 }
 
 /**
@@ -1304,6 +1605,13 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
     if (!thumbnailOld.startsWith("data:image")) {
       finalThumbnail = thumbnailOld;
     }
+  } // <-- 누락된 괄호 복구
+
+  // [v1.6.0] Task A-1: Find cacheFileId
+  let cacheFileId = "";
+  const cacheFiles = folder.getFilesByName("_toki_cache.json");
+  if (cacheFiles.hasNext()) {
+      cacheFileId = cacheFiles.next().getId();
   }
 
   return {
@@ -1315,10 +1623,12 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
     thumbnail: finalThumbnail,
     thumbnailId: thumbnailId,
     hasCover: !!thumbnailId,
+    cacheFileId: cacheFileId, // [v1.6.0] Store cache file ID for fast access
     lastModified: folder.getLastUpdated(),
     category: metadata.category,
   };
 }
+
 
 
 /* ========================================================================== */
