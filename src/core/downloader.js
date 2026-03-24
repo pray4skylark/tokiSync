@@ -50,7 +50,7 @@ export async function processItem(item, builder, siteInfo, iframe, seriesTitle =
         }
 
         if (imageUrls.length === 0) {
-            LogBox.getInstance().error(`⚠️ 이미지 감지 실패: ${item.title} — 해당 챕터 건너뜀`);
+            LogBox.getInstance().error(`⚠️ 이미지 감지 실패: ${item.title} — 해당 챕터 건너뜀`, 'Parser');
             return; // 빈 챕터 생성 방지
         }
 
@@ -174,9 +174,17 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs') {
             logger.log(`범위 필터 적용: ${rangeSpec} → ${list.length}개 항목`);
         }
         
-        logger.log(`총 ${list.length}개 항목 처리 예정.`);
+        // Log episode range
+        if (list.length > 0) {
+            const firstTitle = list[list.length - 1].title; // usually reversed order
+            const lastTitle = list[0].title;
+            logger.log(`총 ${list.length}개 항목 처리 예정. (${firstTitle} ~ ${lastTitle})`, 'Downloader');
+        } else {
+            logger.log(`총 0개 항목 처리 예정.`, 'Downloader');
+        }
 
         if (list.length === 0) {
+            logger.warn('에피소드 목록이 0개입니다. 사이트 구조가 달라졌거나 올바른 목록 페이지인지 확인하세요.', 'Downloader');
             alert("다운로드할 항목이 없습니다.");
             return;
         }
@@ -261,7 +269,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs') {
                     logger.log('⚠️  썸네일을 찾을 수 없습니다 (건너뜀)', 'warn');
                 }
             } catch (thumbError) {
-                logger.error(`썸네일 업로드 실패 (계속 진행): ${thumbError.message}`);
+                logger.warn(`썸네일 업로드 실패 (계속 진행): ${thumbError.message}`, 'Downloader');
             }
         }
 
@@ -389,7 +397,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs') {
                 await processItem(item, currentBuilder, siteInfo, iframe, seriesTitle);
             } catch (err) {
                 console.error(err);
-                logger.error(`항목 실패 (${item.title}): ${err.message}`);
+                logger.error(`항목 처리 실패 (${item.title}): ${err.message}`, 'Downloader');
                 continue; // Skip faulty item but continue loop
             }
 
@@ -506,10 +514,10 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs') {
                                 start = end;
                             }
                             
-                            logger.success(`⚡ [Fast Path] ${fullFilename} 업데이트(PUT) 완료!`);
+                            logger.success(`⚡ [Fast Path] ${fullFilename} 업데이트(PUT) 완료!`, 'FastPath');
                             success = true;
                         } catch (fastPathErr) {
-                            logger.log(`⚠️ Fast Path 업로드 중 에러 발생 (${fastPathErr.message}), Fallback 시작...`, 'warn');
+                            logger.log(`⚠️ Fast Path 업로드 중 에러 발생 (${fastPathErr.message}), Fallback 시작...`, 'warn', 'FastPath');
                             success = false; // Fallback
                         }
                     }
@@ -565,7 +573,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs') {
         // [v1.5.5] 배치 완료 후 Drive 캐시 단일 갱신 (에피소드마다 호출하지 않음)
         if (destination === 'drive') {
             refreshCacheAfterUpload(rootFolder, category).catch(e =>
-                console.warn('[Cache] 배치 완료 직후 캐시 갱신 실패 (무시):', e.message)
+                logger.warn(`캐시 갱신 호출 중 실패 (무시): ${e.message}`, 'GAS:Cache')
             );
         }
 
@@ -574,7 +582,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs') {
 
     } catch (error) {
         console.error(error);
-        logger.error(`오류 발생: ${error.message}`);
+        logger.error(`전체 다운로드 루틴 오류 발생: ${error.message}`, 'System');
         alert(`다운로드 중 오류 발생:\n${error.message}`);
     } finally {
         // Auto-stop Anti-Sleep mode
@@ -622,7 +630,7 @@ async function fetchImages(imageUrls) {
                 retries--;
                 if (retries === 0) {
                     console.error(`이미지 다운로드 최종 실패 (${src}):`, e);
-                    logger.error(`⚠️ 이미지 누락: ${src.split('/').pop()} (3회 재시도 실패)`);
+                    logger.error(`⚠️ 이미지 누락: ${src.split('/').pop()} (3회 재시도 실패)`, 'Network:Image');
                     
                     // [Fix] 다운로드 실패 시 null을 반환하여 페이지 자체를 누락시키는 대신,
                     // 안내 문구가 담긴 텍스트 플레이스홀더를 반환하여 CBZ 내에 기록을 남김 (이미지 순서 유지)

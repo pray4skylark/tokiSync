@@ -17,32 +17,33 @@ export class EpubBuilder {
     }
 
     async build(metadata = {}) {
-        const zip = new JSZip();
-        const title = metadata.title || "Unknown Title";
-        const author = metadata.author || "Unknown Author";
-        const uid = "urn:uuid:" + (crypto.randomUUID ? crypto.randomUUID() : Date.now());
+        try {
+            const zip = new JSZip();
+            const title = metadata.title || "Unknown Title";
+            const author = metadata.author || "Unknown Author";
+            const uid = "urn:uuid:" + (crypto.randomUUID ? crypto.randomUUID() : Date.now());
 
-        // 1. mimetype (must be first, uncompressed)
-        zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
+            // 1. mimetype (must be first, uncompressed)
+            zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
 
-        // 2. container.xml
-        zip.folder("META-INF").file("container.xml", `<?xml version="1.0"?>
+            // 2. container.xml
+            zip.folder("META-INF").file("container.xml", `<?xml version="1.0"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
     <rootfiles>
         <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
     </rootfiles>
 </container>`);
 
-        // 3. OEBPS Folder
-        const oebps = zip.folder("OEBPS");
+            // 3. OEBPS Folder
+            const oebps = zip.folder("OEBPS");
 
-        // styles.css
-        oebps.file("styles.css", `body { font-family: sans-serif; } p { text-indent: 1em; margin-bottom: 0.5em; }`);
+            // styles.css
+            oebps.file("styles.css", `body { font-family: sans-serif; } p { text-indent: 1em; margin-bottom: 0.5em; }`);
 
-        // Chapters
-        this.chapters.forEach((chapter, index) => {
-            const filename = `chapter_${index + 1}.xhtml`;
-            const xhtml = `<?xml version="1.0" encoding="utf-8"?>
+            // Chapters
+            this.chapters.forEach((chapter, index) => {
+                const filename = `chapter_${index + 1}.xhtml`;
+                const xhtml = `<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
@@ -54,25 +55,25 @@ export class EpubBuilder {
 ${chapter.content}
 </body>
 </html>`;
-            oebps.file(filename, xhtml);
-        });
+                oebps.file(filename, xhtml);
+            });
 
-        // content.opf
-        let manifest = `<item id="style" href="styles.css" media-type="text/css"/>\n`;
-        let spine = ``;
-        let tocNav = `<navMap>\n`;
+            // content.opf
+            let manifest = `<item id="style" href="styles.css" media-type="text/css"/>\n`;
+            let spine = ``;
+            let tocNav = `<navMap>\n`;
 
-        this.chapters.forEach((c, i) => {
-            const id = `chap${i + 1}`;
-            const href = `chapter_${i + 1}.xhtml`;
-            manifest += `<item id="${id}" href="${href}" media-type="application/xhtml+xml"/>\n`;
-            spine += `<itemref idref="${id}"/>\n`;
-            tocNav += `<navPoint id="${id}" playOrder="${i+1}"><navLabel><text>${c.title}</text></navLabel><content src="${href}"/></navPoint>\n`;
-        });
-        // Add NCX to manifest
-        manifest += `<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>`;
+            this.chapters.forEach((c, i) => {
+                const id = `chap${i + 1}`;
+                const href = `chapter_${i + 1}.xhtml`;
+                manifest += `<item id="${id}" href="${href}" media-type="application/xhtml+xml"/>\n`;
+                spine += `<itemref idref="${id}"/>\n`;
+                tocNav += `<navPoint id="${id}" playOrder="${i+1}"><navLabel><text>${c.title}</text></navLabel><content src="${href}"/></navPoint>\n`;
+            });
+            // Add NCX to manifest
+            manifest += `<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>`;
 
-        const opf = `<?xml version="1.0" encoding="utf-8"?>
+            const opf = `<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" unique-identifier="BookId" version="2.0">
     <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
         <dc:title>${title}</dc:title>
@@ -88,10 +89,10 @@ ${chapter.content}
     </spine>
 </package>`;
 
-        oebps.file("content.opf", opf);
+            oebps.file("content.opf", opf);
 
-        // toc.ncx
-        const ncx = `<?xml version="1.0" encoding="UTF-8"?>
+            // toc.ncx
+            const ncx = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN" "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd">
 <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
 <head>
@@ -105,9 +106,14 @@ ${tocNav}
 </navMap>
 </ncx>`;
 
-        oebps.file("toc.ncx", ncx);
+            oebps.file("toc.ncx", ncx);
 
-        // Return the ZIP object (which IS the EPUB)
-        return zip; 
+            // Return the ZIP object (which IS the EPUB)
+            return zip; 
+        } catch (e) {
+            const { LogBox } = await import('./ui.js');
+            LogBox.getInstance().critical(`EPUB 빌드 실패: ${e.message} (${metadata.title || 'unknown'})`, 'Builder:EPUB');
+            throw e;
+        }
     }
 }

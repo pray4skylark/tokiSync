@@ -146,6 +146,7 @@ async function waitForContent(iframe, maxWaitMs = 8000) {
     }
     // 타임아웃 — 콘텐츠 없이 진행 (후속 로직에서 빈 결과 처리)
     console.warn(`[DOM Poll] ${maxWaitMs}ms 내 콘텐츠 미감지 — 갈무리 시도`);
+    LogBox.getInstance().warn(`DOM 폴링 타임아웃 ${maxWaitMs}ms — 콘텐츠 미감지, 멈춰서 물 평가`, 'DOM:Poll');
 }
 
 /**

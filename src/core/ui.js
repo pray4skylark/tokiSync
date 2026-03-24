@@ -4,12 +4,15 @@
  */
 
 import { startSilentAudio, stopSilentAudio, isAudioRunning } from './anti_sleep.js';
+import { getConfig } from './config.js';
 
 export class LogBox {
     static instance = null;
 
     constructor() {
         if (LogBox.instance) return LogBox.instance;
+        this.logs = [];
+        this.MAX_LOGS = 500;
         this.init();
         LogBox.instance = this;
     }
@@ -48,7 +51,9 @@ export class LogBox {
                     list-style: none;
                 }
                 #toki-logbox-content li { margin-bottom: 2px; word-break: break-all; }
+                #toki-logbox-content li.critical { color: #ff3333; font-weight: bold; background: rgba(255,50,50,0.1); padding: 1px 3px; border-radius: 2px; }
                 #toki-logbox-content li.error { color: #ff5555; }
+                #toki-logbox-content li.warn { color: #ffaa00; }
                 #toki-logbox-content li.success { color: #55ff55; }
                 
                 /* Scrollbar */
@@ -166,6 +171,7 @@ export class LogBox {
             <div id="toki-logbox-header">
                 <span id="toki-logbox-title">TokiSync Log</span>
                 <div id="toki-logbox-controls">
+                    <span id="toki-btn-report" title="버그 리포트 복사" style="cursor:pointer; color:#facc15;">📋</span>
                     <span id="toki-btn-audio" title="백그라운드 모드" style="cursor:pointer;">🔊</span>
                     <span id="toki-btn-clear" title="Clear">🚫</span>
                     <span id="toki-btn-close" title="Hide">❌</span>
@@ -178,6 +184,7 @@ export class LogBox {
         // -- Events --
         this.list = this.container.querySelector('#toki-logbox-content');
         
+        document.getElementById('toki-btn-report').onclick = () => this.exportReport();
         document.getElementById('toki-btn-clear').onclick = () => this.clear();
         document.getElementById('toki-btn-close').onclick = () => this.hide();
         
@@ -211,12 +218,19 @@ export class LogBox {
         return LogBox.instance;
     }
 
-    log(msg, type = 'normal') {
+    log(msg, type = 'normal', context = '') {
         if (!this.list) return;
 
-        const li = document.createElement('li');
         const time = new Date().toLocaleTimeString('ko-KR', { hour12: false });
-        li.textContent = `[${time}] ${msg}`;
+        const prefix = context ? `[${context}] ` : '';
+        const fullMsg = `[${time}] ${prefix}${msg}`;
+        
+        // Save to memory
+        this.logs.push({ time, type, context, msg: typeof msg === 'string' ? msg : JSON.stringify(msg) });
+        if (this.logs.length > this.MAX_LOGS) this.logs.shift();
+
+        const li = document.createElement('li');
+        li.textContent = fullMsg;
         
         if (type === 'error') li.classList.add('error');
         if (type === 'success') li.classList.add('success');
@@ -225,17 +239,27 @@ export class LogBox {
         this.list.scrollTop = this.list.scrollHeight;
     }
 
-    error(msg) {
-        this.show(); // Auto-show on error
-        this.log(msg, 'error');
+    critical(msg, context = '') {
+        this.show(); // Always surface critical errors
+        this.log(msg, 'critical', context);
     }
 
-    success(msg) {
-        this.log(msg, 'success');
+    error(msg, context = '') {
+        this.show(); // Auto-show on error
+        this.log(msg, 'error', context);
+    }
+
+    warn(msg, context = '') {
+        this.log(msg, 'warn', context);
+    }
+
+    success(msg, context = '') {
+        this.log(msg, 'success', context);
     }
 
     clear() {
         if (this.list) this.list.innerHTML = '';
+        this.logs = [];
     }
 
     show() {
@@ -244,6 +268,88 @@ export class LogBox {
 
     hide() {
         if (this.container) this.container.style.display = 'none';
+    }
+
+    async exportReport() {
+        const version = typeof GM_info !== 'undefined' ? GM_info.script.version : 'Unknown';
+        const ua = navigator.userAgent;
+        // Include query parameters for accurate book ID tracking
+        let currentUrl = window.location.href;
+        // Sanitize sensitive tokens if any (like '?token=')
+        currentUrl = currentUrl.replace(/([&?])(token|key|pwd)=[^&]+/g, '$1$2=***');
+        
+        // Retrieve run settings
+        const config = getConfig();
+        const dest = config.destination || 'native';
+        const isCbz = config.saveAs === 'cbz';
+        const smartSkip = config.useSmartSkip ? 'ON' : 'OFF';
+
+        // Severity grouping
+        const critical = this.logs.filter(l => l.type === 'critical');
+        const warn     = this.logs.filter(l => l.type === 'warn' || l.type === 'error');
+        const info     = this.logs.filter(l => l.type !== 'critical' && l.type !== 'warn' && l.type !== 'error');
+
+        const fmt = (logs) => logs.length
+            ? logs.map(l => { const ctx = l.context ? `[${l.context}] ` : ''; return `[${l.time}] ${ctx}${l.msg}`; }).join('\n')
+            : '(없음)';
+
+        const report = `### 🐞 TokiSync Bug Report
+
+**System Information:**
+- **Version:** ${version}
+- **URL:** \`${currentUrl}\`
+- **User Agent:** ${ua}
+
+**Execution Settings:**
+- **Destination:** \`${dest}\`
+- **Format:** \`${isCbz ? 'CBZ Archive' : 'Raw Images'}\`
+- **Smart Skip:** \`${smartSkip}\`
+
+### 🔴 CRITICAL (작업 중단 오류)
+\`\`\`
+${fmt(critical)}
+\`\`\`
+
+### 🟡 WARN (비치명 / 폴백 발생)
+\`\`\`
+${fmt(warn)}
+\`\`\`
+
+### ⚪ INFO (정상 흐름)
+\`\`\`
+${fmt(info)}
+\`\`\`
+`.trim();
+
+        try {
+            // Priority: GM_setClipboard > navigator.clipboard > execCommand
+            if (typeof GM_setClipboard === 'function') {
+                GM_setClipboard(report);
+            } else if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(report);
+            } else {
+                const textArea = document.createElement("textarea");
+                textArea.value = report;
+                document.body.appendChild(textArea);
+                textArea.select();
+                try {
+                    document.execCommand('copy');
+                } catch (err) {
+                    console.error('Copy Failed', err);
+                }
+                document.body.removeChild(textArea);
+            }
+            
+            this.success('버그 리포트가 클립보드에 복사되었습니다.', 'System');
+            Notifier.notify('TokiSync 버그 리포트', '클립보드 복사 완료! GitHub 이슈 탭이 열립니다.');
+            
+            setTimeout(() => {
+                window.open('https://github.com/pray4skylark/tokiSync/issues/new', '_blank');
+            }, 800);
+            
+        } catch (e) {
+            this.error('리포트 복사실패: ' + e.message, 'System');
+        }
     }
 
     toggle() {

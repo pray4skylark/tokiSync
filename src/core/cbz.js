@@ -10,29 +10,31 @@ export class CbzBuilder {
     }
 
     async build(metadata = {}) {
-        const zip = new JSZip();
-        
-        // Kavita Compatibility: Images at root, no subfolders
-        // Note: As per new strategy, we only build one chapter per CBZ.
-        this.chapters.forEach((chapter) => {
-            chapter.images.forEach((img, idx) => {
-                if (img && img.blob) {
-                    // File name: "image_{0000}{ext}" 
-                    const filename = img.isMissing 
-                        ? `[PAGE_MISSING]_image_${String(idx).padStart(4, '0')}${img.ext}`
-                        : `image_${String(idx).padStart(4, '0')}${img.ext}`;
-                    
-                    // Put directly in root
-                    zip.file(filename, img.blob);
-                }
+        try {
+            const zip = new JSZip();
+            
+            // Kavita Compatibility: Images at root, no subfolders
+            // Note: As per new strategy, we only build one chapter per CBZ.
+            this.chapters.forEach((chapter) => {
+                chapter.images.forEach((img, idx) => {
+                    if (img && img.blob) {
+                        const filename = img.isMissing 
+                            ? `[PAGE_MISSING]_image_${String(idx).padStart(4, '0')}${img.ext}`
+                            : `image_${String(idx).padStart(4, '0')}${img.ext}`;
+                        zip.file(filename, img.blob);
+                    }
+                });
             });
-        });
 
-        // Add ComicInfo.xml for metadata recognition
-        const comicInfo = this.generateComicInfo(metadata);
-        zip.file("ComicInfo.xml", comicInfo);
+            const comicInfo = this.generateComicInfo(metadata);
+            zip.file("ComicInfo.xml", comicInfo);
 
-        return zip;
+            return zip;
+        } catch (e) {
+            const { LogBox } = await import('./ui.js');
+            LogBox.getInstance().critical(`CBZ 빌드 실패: ${e.message} (${metadata.title || 'unknown'})`, 'Builder:CBZ');
+            throw e;
+        }
     }
 
     generateComicInfo(metadata) {

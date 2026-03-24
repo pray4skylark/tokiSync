@@ -1,5 +1,6 @@
 import { getConfig, isConfigValid } from './config.js';
 import { uploadDirect } from './network.js';
+import { LogBox } from './ui.js';
 
 function arrayBufferToBase64(buffer) {
     let binary = '';
@@ -27,6 +28,7 @@ export async function uploadToGAS(blob, folderName, fileName, options = {}) {
         return; // Success!
     } catch (directError) {
         console.warn('[Upload] ⚠️  Direct upload failed, falling back to GAS relay:', directError.message);
+        LogBox.getInstance().warn('Direct 업로드 실패 → GAS 릴레이 폴백: ' + directError.message + ' (' + fileName + ')', 'GAS:Upload');
     }
     
     // Fallback to GAS Relay
@@ -41,6 +43,7 @@ export async function uploadToGAS(blob, folderName, fileName, options = {}) {
 export async function refreshCacheAfterUpload(folderName, category = 'Unknown') {
     const config = getConfig();
     if (!config.gasUrl || !config.folderId) return;
+    const logger = LogBox.getInstance();
     console.log(`[Cache] 업로드 완료 → Drive 캐시 갱신 요청 (${folderName})`);
     return new Promise((resolve) => {
         GM_xmlhttpRequest({
@@ -65,9 +68,12 @@ export async function refreshCacheAfterUpload(folderName, category = 'Unknown') 
                 }
                 resolve();
             },
-            onerror: () => resolve(),
+            onerror: () => {
+                logger.warn(`캐시 갱신 네트워크 오류 (${folderName}) — 다음 실행 시 자동 복구됨`, 'GAS:Cache');
+                resolve();
+            },
             ontimeout: () => {
-                console.warn('[Cache] 캐시 갱신 타임아웃 (30초) - 무시');
+                logger.warn(`캐시 갱신 타임아웃 30초 (${folderName}) — 스킬폭 포함 가능`, 'GAS:Cache');
                 resolve();
             },
         });
@@ -83,6 +89,7 @@ export async function refreshCacheAfterUpload(folderName, category = 'Unknown') 
 async function uploadViaGASRelay(blob, folderName, fileName, options = {}) {
     const config = getConfig();
     if (!isConfigValid()) throw new Error("GAS 설정이 누락되었습니다. 메뉴에서 설정을 완료해주세요.");
+    const logger = LogBox.getInstance();
     
     // Constants
     const CHUNK_SIZE = 20 * 1024 * 1024; // 20MB
@@ -120,12 +127,22 @@ async function uploadViaGASRelay(blob, folderName, fileName, options = {}) {
                         uploadUrl = (typeof json.body === 'object') ? json.body.uploadUrl : json.body;
                         resolve(); 
                     } else {
+                        logger.critical(`GAS 릴레이 세션 초기화 실패: ${json.body || 'Init failed'} (${fileName})`, 'GAS:Relay');
                         reject(new Error(json.body || "Init failed"));
                     }
-                } catch (e) { reject(new Error("GAS 응답 오류(Init): " + res.responseText)); }
+                } catch (e) { 
+                    logger.critical(`GAS 서버 응답 파싱 실패 (Init): ${res.responseText?.substring(0, 80)}`, 'GAS:Relay');
+                    reject(new Error("GAS 응답 오류(Init): " + res.responseText)); 
+                }
             },
-            onerror: (e) => reject(new Error("네트워크 오류(Init)")),
-            ontimeout: () => reject(new Error("[GAS] 업로드 초기화 타임아웃 (30초)"))
+            onerror: (e) => {
+                logger.critical(`GAS 릴레이 네트워크 오류 (Init) — ${fileName}`, 'GAS:Relay');
+                reject(new Error("네트워크 오류(Init)"));
+            },
+            ontimeout: () => {
+                logger.critical(`GAS 릴레이 세션 초기화 타임아웃 (30초) — ${fileName}`, 'GAS:Relay');
+                reject(new Error("[GAS] 업로드 초기화 타임아웃 (30초)"));
+            }
         });
     });
 
@@ -162,11 +179,23 @@ async function uploadViaGASRelay(blob, folderName, fileName, options = {}) {
                     try { 
                         const json = JSON.parse(res.responseText); 
                         if (json.status === 'success') resolve(); 
-                        else reject(new Error(json.body || "Upload failed")); 
-                    } catch (e) { reject(new Error("GAS 응답 오류(Upload): " + res.responseText)); }
+                        else {
+                            logger.critical(`GAS 청크 업로드 실패: ${json.body || 'Upload failed'} (${start}~${end})`, 'GAS:Relay');
+                            reject(new Error(json.body || "Upload failed")); 
+                        }
+                    } catch (e) { 
+                        logger.critical(`GAS 청크 응답 파싱 실패 (${start}~${end})`, 'GAS:Relay');
+                        reject(new Error("GAS 응답 오류(Upload): " + res.responseText)); 
+                    }
                 },
-                onerror: (e) => reject(new Error("네트워크 오류(Upload)")),
-                ontimeout: () => reject(new Error(`[GAS] 청크 업로드 타임아웃 (5분): ${start}~${end}`))
+                onerror: (e) => {
+                    logger.critical(`GAS 청크 네트워크 오류 (${start}~${end} / ${totalSize})`, 'GAS:Relay');
+                    reject(new Error("네트워크 오류(Upload)"));
+                },
+                ontimeout: () => {
+                    logger.critical(`GAS 청크 타임아웃 5분 (${start}~${end} / ${totalSize})`, 'GAS:Relay');
+                    reject(new Error(`[GAS] 청크 업로드 타임아웃 (5분): ${start}~${end}`));
+                }
             });
         });
         
@@ -185,6 +214,7 @@ async function uploadViaGASRelay(blob, folderName, fileName, options = {}) {
 export async function fetchHistory(seriesTitle, category = 'Webtoon') {
     const config = getConfig();
     if (!config.gasUrl) return [];
+    const logger = LogBox.getInstance();
 
     console.log(`[GAS] 다운로드 기록 조회 중... (${seriesTitle})`);
 
@@ -207,20 +237,20 @@ export async function fetchHistory(seriesTitle, category = 'Webtoon') {
                     if (json.status === 'success') {
                         resolve(Array.isArray(json.body) ? json.body : []);
                     } else {
-                        console.warn("[GAS] 기록 조회 실패:", json.body);
+                        logger.warn(`다운로드 기록 조회 실패: ${json.body}`, 'GAS:History');
                         resolve([]);
                     }
                 } catch (e) {
-                    console.error("[GAS] 응답 파싱 실패:", e);
+                    logger.warn(`다운로드 기록 응답 파싱 실패`, 'GAS:History');
                     resolve([]);
                 }
             },
             onerror: () => {
-                console.error("[GAS] 기록 조회 네트워크 오류");
+                logger.warn(`다운로드 기록 조회 네트워크 오류`, 'GAS:History');
                 resolve([]);
             },
             ontimeout: () => {
-                console.warn("[GAS] 기록 조회 타임아웃 (30초) - 빈 배열 반환");
+                logger.warn(`다운로드 기록 조회 타임아웃 (30초)`, 'GAS:History');
                 resolve([]);
             }
         });
@@ -235,6 +265,7 @@ export async function fetchHistory(seriesTitle, category = 'Webtoon') {
 export async function getBooksByCacheId(cacheFileId) {
     const config = getConfig();
     if (!config.gasUrl) return [];
+    const logger = LogBox.getInstance();
 
     console.log(`[GAS] 캐시 파일 직행 조회 중... (${cacheFileId})`);
 
@@ -248,27 +279,27 @@ export async function getBooksByCacheId(cacheFileId) {
                 apiKey: config.apiKey
             }),
             headers: { "Content-Type": "text/plain" },
-            timeout: 10000, // Fast response expected
+            timeout: 10000,
             onload: (res) => {
                 try {
                     const json = JSON.parse(res.responseText);
                     if (json.status === 'success') {
                         resolve(Array.isArray(json.body) ? json.body : []);
                     } else {
-                        console.warn("[GAS] 캐시 직접 조회 실패:", json.body);
+                        logger.warn(`Fast Path 캐시 직행 조회 실패: ${json.body}`, 'GAS:FastPath');
                         resolve([]);
                     }
                 } catch (e) {
-                    console.error("[GAS] 캐시 응답 파싱 실패:", e);
+                    logger.warn(`Fast Path 캐시 응답 파싱 실패`, 'GAS:FastPath');
                     resolve([]);
                 }
             },
             onerror: () => {
-                console.error("[GAS] 캐시 조회 네트워크 오류");
+                logger.warn(`Fast Path 캐시 네트워크 오류`, 'GAS:FastPath');
                 resolve([]);
             },
             ontimeout: () => {
-                console.warn("[GAS] 캐시 조회 타임아웃 - 빈 배열 반환");
+                logger.warn(`Fast Path 캐시 조회 타임아웃 (10초)`, 'GAS:FastPath');
                 resolve([]);
             }
         });
@@ -304,12 +335,22 @@ export async function initUpdateUploadViaGASRelay(fileId, fileName) {
                     if (json.status === 'success') { 
                         resolve((typeof json.body === 'object') ? json.body.uploadUrl : json.body);
                     } else {
+                        LogBox.getInstance().critical(`Fast Path PUT 세션 초기화 실패: ${json.body || 'Init Update failed'} (${fileName})`, 'GAS:FastPath');
                         reject(new Error(json.body || "Init Update failed"));
                     }
-                } catch (e) { reject(new Error("GAS 응답 오류(Init Update): " + res.responseText)); }
+                } catch (e) { 
+                    LogBox.getInstance().critical(`Fast Path PUT 레스폰스 파싱 실패 (${fileName})`, 'GAS:FastPath');
+                    reject(new Error("GAS 응답 오류(Init Update): " + res.responseText)); 
+                }
             },
-            onerror: (e) => reject(new Error("네트워크 오류(Init Update)")),
-            ontimeout: () => reject(new Error("[GAS] 덮어쓰기 세션 초기화 타임아웃 (30초)"))
+            onerror: (e) => {
+                LogBox.getInstance().critical(`Fast Path PUT 네트워크 오류 (${fileName})`, 'GAS:FastPath');
+                reject(new Error("네트워크 오류(Init Update)"));
+            },
+            ontimeout: () => {
+                LogBox.getInstance().critical(`Fast Path PUT 타임아웃 30초 (${fileName})`, 'GAS:FastPath');
+                reject(new Error("[GAS] 덧쓰기 세션 초기화 타임아웃 (30초)"));
+            }
         });
     });
 }
@@ -323,6 +364,7 @@ export async function initUpdateUploadViaGASRelay(fileId, fileName) {
 export async function getMergeIndexFragment(sourceId) {
     const config = getConfig();
     if (!config.gasUrl || !config.folderId) return { found: false, data: null };
+    const logger = LogBox.getInstance();
 
     console.log(`[GAS] 병합 인덱스 파편 조회 중... (Source ID: ${sourceId})`);
 
@@ -344,20 +386,20 @@ export async function getMergeIndexFragment(sourceId) {
                     if (json.status === 'success') {
                         resolve(json.body);
                     } else {
-                        console.warn("[GAS] 병합 파편 조회 실패:", json.body);
+                        logger.warn(`MergeIndex 파편 조회 실패: ${json.body} (ID: ${sourceId})`, 'GAS:FastPath');
                         resolve({ found: false, data: null });
                     }
                 } catch (e) {
-                    console.error("[GAS] 파편 응답 파싱 실패:", e);
+                    logger.warn(`MergeIndex 파편 응답 파싱 실패`, 'GAS:FastPath');
                     resolve({ found: false, data: null });
                 }
             },
             onerror: () => {
-                console.error("[GAS] 파편 조회 네트워크 오류");
+                logger.warn(`MergeIndex 파편 조회 네트워크 오류`, 'GAS:FastPath');
                 resolve({ found: false, data: null });
             },
             ontimeout: () => {
-                console.warn("[GAS] 파편 조회 타임아웃");
+                logger.warn(`MergeIndex 파편 조회 타임아웃 (10초)`, 'GAS:FastPath');
                 resolve({ found: false, data: null });
             }
         });

@@ -4,6 +4,7 @@
  */
 
 import { getConfig } from './config.js';
+import { LogBox } from './ui.js';
 
 let cachedToken = null;
 let tokenExpiry = 0;
@@ -43,6 +44,7 @@ async function fetchToken() {
                     } else {
                         console.error('[DirectUpload] Token fetch failed:', result.error);
                         console.error('[DirectUpload] Debug logs:', result.logs);
+                        LogBox.getInstance().error(`Token fetch failed: ${result.error}`, 'Network:Auth');
                         reject(new Error(result.error || 'Token fetch failed'));
                     }
                 } catch (e) {
@@ -53,10 +55,12 @@ async function fetchToken() {
             },
             onerror: (error) => {
                 console.error('[DirectUpload] Request error:', error);
+                LogBox.getInstance().error('Token request network error', 'Network:Auth');
                 reject(new Error('Token request failed'));
             },
             ontimeout: () => {
                 console.error('[DirectUpload] Token request timed out (30s)');
+                LogBox.getInstance().error('Token request timed out (30s)', 'Network:Auth');
                 reject(new Error('[DirectUpload] 토큰 요청 타임아웃 (30초)'));
             }
         });
@@ -433,16 +437,24 @@ export async function uploadDirect(blob, folderName, fileName, metadata = {}) {
                         console.log(`[DirectUpload] ✅ Upload successful: ${finalFileName}`);
                         resolve();
                     } else {
+                        LogBox.getInstance().error(`Upload failed: ${response.status} - ${finalFileName}`, 'Network:Upload');
                         reject(new Error(`Upload failed: ${response.status}`));
                     }
                 },
-                onerror: reject,
-                ontimeout: () => reject(new Error(`[DirectUpload] 파일 업로드 타임아웃 (5분): ${finalFileName}`))
+                onerror: (e) => {
+                    LogBox.getInstance().error(`Upload block network error: ${finalFileName}`, 'Network:Upload');
+                    reject(e);
+                },
+                ontimeout: () => {
+                    LogBox.getInstance().error(`Upload request timed out (5m): ${finalFileName}`, 'Network:Upload');
+                    reject(new Error(`[DirectUpload] 파일 업로드 타임아웃 (5분): ${finalFileName}`));
+                }
             });
         });
         
     } catch (error) {
         console.error(`[DirectUpload] Error:`, error);
+        LogBox.getInstance().error(`[DirectUpload] Error: ${error.message}`, 'Network:UploadException');
         throw error;
     }
 }
