@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.6.0
+// @version      1.7.0
 // @description  Toki series sites -> Google Drive syncing tool (Bundled)
 // @author       pray4skylark
 // @updateURL    https://pray4skylark.github.io/tokiSync/tokiSync.user.js
@@ -38,8 +38,113 @@
 
 /******/ (() => { // webpackBootstrap
 /******/ 	"use strict";
+/******/ 	var __webpack_modules__ = ({
 
-;// ./src/core/config.js
+/***/ 209
+(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
+
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   Cv: () => (/* binding */ stopSilentAudio),
+/* harmony export */   S2: () => (/* binding */ isAudioRunning),
+/* harmony export */   yS: () => (/* binding */ startSilentAudio)
+/* harmony export */ });
+/**
+ * Anti-Sleep Module
+ * Prevents browser tab throttling by playing silent audio
+ */
+
+let audioContext = null;
+let audioEl = null;
+let oscillator = null;
+
+function startSilentAudio() {
+    if (audioContext && audioContext.state === 'running') {
+        console.log('[Anti-Sleep] Already running');
+        return;
+    }
+    
+    try {
+        if (!audioContext) {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        
+        if (audioContext.state === 'suspended') {
+            audioContext.resume();
+        }
+        
+        const dest = audioContext.createMediaStreamDestination();
+        const gain = audioContext.createGain();
+        
+        oscillator = audioContext.createOscillator();
+        oscillator.frequency.value = 1; // 1Hz (Inaudible)
+        oscillator.type = 'sine';
+        gain.gain.value = 0.001; // Near silence
+        
+        oscillator.connect(gain);
+        gain.connect(dest);
+        oscillator.start();
+        
+        if (!audioEl) {
+            audioEl = document.createElement('audio');
+            audioEl.style.display = "none";
+            document.body.appendChild(audioEl);
+        }
+        
+        audioEl.srcObject = dest.stream;
+        audioEl.play()
+            .then(() => console.log('🔊 [Anti-Sleep] Audio started successfully'))
+            .catch(e => {
+                console.warn('🚫 [Anti-Sleep] Autoplay blocked:', e);
+                throw e; // Re-throw to let caller handle
+            });
+            
+    } catch (e) {
+        console.error('[Anti-Sleep] Failed to start:', e);
+        throw e;
+    }
+}
+
+function stopSilentAudio() {
+    try {
+        if (oscillator) {
+            oscillator.stop();
+            oscillator.disconnect();
+            oscillator = null;
+        }
+        
+        if (audioEl) {
+            audioEl.pause();
+            audioEl.srcObject = null;
+        }
+        
+        if (audioContext) {
+            audioContext.close().then(() => {
+                audioContext = null;
+                console.log('🔇 [Anti-Sleep] Audio stopped');
+            });
+        }
+    } catch (e) {
+        console.error('[Anti-Sleep] Failed to stop:', e);
+    }
+}
+
+function isAudioRunning() {
+    return audioContext && audioContext.state === 'running';
+}
+
+
+/***/ },
+
+/***/ 899
+(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
+
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   Jb: () => (/* binding */ isConfigValid),
+/* harmony export */   Nk: () => (/* binding */ setConfig),
+/* harmony export */   Vh: () => (/* binding */ showConfigModal),
+/* harmony export */   zj: () => (/* binding */ getConfig)
+/* harmony export */ });
+/* unused harmony exports CFG_URL_KEY, CFG_ID_KEY, CFG_FOLDER_ID, CFG_POLICY_KEY, CFG_API_KEY, CFG_SLEEP_MODE */
 const CFG_URL_KEY = "TOKI_GAS_URL"; // legacy
 const CFG_ID_KEY = "TOKI_GAS_ID";
 const CFG_FOLDER_ID = "TOKI_FOLDER_ID";
@@ -258,917 +363,25 @@ function isConfigValid() {
     const config = getConfig();
     return (config.gasId || config.gasUrl) && config.folderId;
 }
-;// ./src/core/network.js
-/**
- * Direct Drive Access Module
- * Bypasses GAS relay for high-speed uploads using GM_xmlhttpRequest
- */
 
+/***/ },
 
+/***/ 963
+(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
 
-let cachedToken = null;
-let tokenExpiry = 0;
-
-/**
- * Fetches OAuth token from GAS server
- * @returns {Promise<string>} Access token
- */
-async function fetchToken() {
-    const config = getConfig();
-    
-    console.log('[DirectUpload] Fetching token from GAS...');
-    console.log('[DirectUpload] GAS URL:', config.gasUrl);
-    
-    return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-            method: 'POST',
-            url: config.gasUrl,
-            data: JSON.stringify({
-                folderId: config.folderId,
-                type: 'view_get_token',
-                apiKey: config.apiKey
-            }),
-            headers: { 'Content-Type': 'text/plain' },
-            timeout: 30000,
-            onload: (response) => {
-                console.log('[DirectUpload] Token response status:', response.status);
-                console.log('[DirectUpload] Token response text:', response.responseText);
-                
-                try {
-                    const result = JSON.parse(response.responseText);
-                    console.log('[DirectUpload] Parsed result:', result);
-                    
-                    if (result.status === 'success') {
-                        console.log('[DirectUpload] Token received successfully');
-                        resolve(result.body.token);
-                    } else {
-                        console.error('[DirectUpload] Token fetch failed:', result.error);
-                        console.error('[DirectUpload] Debug logs:', result.logs);
-                        reject(new Error(result.error || 'Token fetch failed'));
-                    }
-                } catch (e) {
-                    console.error('[DirectUpload] JSON parse error:', e);
-                    console.error('[DirectUpload] Raw response:', response.responseText);
-                    reject(new Error(`Token parse error: ${e.message}`));
-                }
-            },
-            onerror: (error) => {
-                console.error('[DirectUpload] Request error:', error);
-                reject(new Error('Token request failed'));
-            },
-            ontimeout: () => {
-                console.error('[DirectUpload] Token request timed out (30s)');
-                reject(new Error('[DirectUpload] 토큰 요청 타임아웃 (30초)'));
-            }
-        });
-    });
-}
-
-/**
- * Gets OAuth token with caching (1 hour TTL)
- * @returns {Promise<string>} Access token
- */
-async function getToken() {
-    const now = Date.now();
-    
-    // Return cached token if still valid (with 5min safety margin)
-    if (cachedToken && tokenExpiry > now + 300000) {
-        console.log('[DirectUpload] Using cached token');
-        return cachedToken;
-    }
-    
-    console.log('[DirectUpload] Fetching new token...');
-    cachedToken = await fetchToken();
-    tokenExpiry = now + 3600000; // 1 hour
-    
-    return cachedToken;
-}
-
-/**
- * Finds or creates a folder in Google Drive with category support
- * Mirrors GAS server's getOrCreateSeriesFolder logic:
- * 1. Check root for legacy folders
- * 2. Get/Create category folder (Webtoon/Novel/Manga)
- * 3. Get/Create series folder in category
- * 
- * @param {string} folderName - Series folder name (e.g. "[123] Title")
- * @param {string} parentId - Parent folder ID (root)
- * @param {string} token - OAuth token
- * @param {string} category - Category name ("Webtoon", "Novel", or "Manga")
- * @returns {Promise<string>} Series folder ID
- */
-async function getOrCreateFolder(folderName, parentId, token, category = 'Webtoon') {
-    // 1. Check for legacy folder in root (migration compatibility)
-    const legacySearchUrl = `https://www.googleapis.com/drive/v3/files?` +
-        `q=name='${encodeURIComponent(folderName)}' and '${parentId}' in parents and trashed=false and mimeType='application/vnd.google-apps.folder'` +
-        `&fields=files(id,name)`;
-    
-    const legacyResult = await new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-            method: 'GET',
-            url: legacySearchUrl,
-            headers: { 'Authorization': `Bearer ${token}` },
-            timeout: 30000,
-            onload: (res) => {
-                try {
-                    resolve(JSON.parse(res.responseText));
-                } catch (e) {
-                    reject(e);
-                }
-            },
-            onerror: reject,
-            ontimeout: () => reject(new Error('[DirectUpload] 레거시 폴더 검색 타임아웃 (30초)'))
-        });
-    });
-    
-    if (legacyResult.files && legacyResult.files.length > 0) {
-        console.log(`[DirectUpload] ♻️ Found legacy folder in root: ${folderName}`);
-        return legacyResult.files[0].id;
-    }
-    
-    // 2. Get or create category folder
-    const categoryName = category || 'Webtoon';
-    const categorySearchUrl = `https://www.googleapis.com/drive/v3/files?` +
-        `q=name='${categoryName}' and '${parentId}' in parents and trashed=false and mimeType='application/vnd.google-apps.folder'` +
-        `&fields=files(id,name)`;
-    
-    const categoryResult = await new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-            method: 'GET',
-            url: categorySearchUrl,
-            headers: { 'Authorization': `Bearer ${token}` },
-            timeout: 30000,
-            onload: (res) => {
-                try {
-                    resolve(JSON.parse(res.responseText));
-                } catch (e) {
-                    reject(e);
-                }
-            },
-            onerror: reject,
-            ontimeout: () => reject(new Error('[DirectUpload] 카테고리 폴더 검색 타임아웃 (30초)'))
-        });
-    });
-    
-    let categoryFolderId;
-    if (categoryResult.files && categoryResult.files.length > 0) {
-        categoryFolderId = categoryResult.files[0].id;
-        console.log(`[DirectUpload] 📂 Category folder found: ${categoryName}`);
-    } else {
-        // Create category folder
-        console.log(`[DirectUpload] 📂 Creating category folder: ${categoryName}`);
-        const createCategoryResult = await new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-                method: 'POST',
-                url: 'https://www.googleapis.com/drive/v3/files',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
-                data: JSON.stringify({
-                    name: categoryName,
-                    mimeType: 'application/vnd.google-apps.folder',
-                    parents: [parentId]
-                }),
-                timeout: 30000,
-                onload: (res) => {
-                    try {
-                        resolve(JSON.parse(res.responseText));
-                    } catch (e) {
-                        reject(e);
-                    }
-                },
-                onerror: reject,
-                ontimeout: () => reject(new Error('[DirectUpload] 카테고리 폴더 생성 타임아웃 (30초)'))
-            });
-        });
-        categoryFolderId = createCategoryResult.id;
-    }
-    
-    // 3. Get or create series folder in category
-    // [v1.4.0 Fix] Search by ID prefix "[12345]" instead of full name to handle title changes
-    // folderName format: "[12345] Title"
-    const idMatch = folderName.match(/^\[\d+\]/);
-    const idPrefix = idMatch ? idMatch[0] : null;
-    
-    let queryPart = "";
-    if (idPrefix) {
-        // Search for folders containing "[12345]"
-        queryPart = `name contains '${idPrefix}'`;
-    } else {
-        // Fallback: Exact match
-        queryPart = `name = '${folderName.replace(/'/g, "\\'")}'`; 
-    }
-
-    const seriesSearchUrl = `https://www.googleapis.com/drive/v3/files?` +
-        `q=${queryPart} and '${categoryFolderId}' in parents and trashed=false and mimeType='application/vnd.google-apps.folder'` +
-        `&fields=files(id,name)`;
-    
-    const seriesResult = await new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-            method: 'GET',
-            url: seriesSearchUrl,
-            headers: { 'Authorization': `Bearer ${token}` },
-            timeout: 30000,
-            onload: (res) => {
-                try {
-                    resolve(JSON.parse(res.responseText));
-                } catch (e) {
-                    reject(e);
-                }
-            },
-            onerror: reject,
-            ontimeout: () => reject(new Error('[DirectUpload] 시리즈 폴더 검색 타임아웃 (30초)'))
-        });
-    });
-    
-    // Filter results to ensure it starts with the ID (double check)
-    let foundFolder = null;
-    if (seriesResult.files && seriesResult.files.length > 0) {
-        if (idPrefix) {
-            // Find the first folder that STARTS with the ID
-            foundFolder = seriesResult.files.find(f => f.name.startsWith(idPrefix));
-        } else {
-            foundFolder = seriesResult.files[0];
-        }
-    }
-
-    if (foundFolder) {
-        console.log(`[DirectUpload] Folder found: ${foundFolder.name} (ID: ${foundFolder.id})`);
-        return foundFolder.id;
-    }
-    
-    // Create series folder
-    console.log(`[DirectUpload] Creating series folder: ${folderName} in ${categoryName}`);
-    const createResult = await new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-            method: 'POST',
-            url: 'https://www.googleapis.com/drive/v3/files',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
-            data: JSON.stringify({
-                name: folderName,
-                mimeType: 'application/vnd.google-apps.folder',
-                parents: [categoryFolderId]
-            }),
-            timeout: 30000,
-            onload: (res) => {
-                try {
-                    resolve(JSON.parse(res.responseText));
-                } catch (e) {
-                    reject(e);
-                }
-            },
-            onerror: reject,
-            ontimeout: () => reject(new Error('[DirectUpload] 시리즈 폴더 생성 타임아웃 (30초)'))
-        });
-    });
-    
-    return createResult.id;
-}
-
-/**
- * Finds or creates the centralized '_Thumbnails' folder
- */
-async function getOrCreateThumbnailFolder(token, parentId) {
-    const thumbName = '_Thumbnails';
-    const searchUrl = `https://www.googleapis.com/drive/v3/files?` +
-        `q=name='${thumbName}' and '${parentId}' in parents and trashed=false and mimeType='application/vnd.google-apps.folder'` +
-        `&fields=files(id,name)`;
-    
-    const result = await new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-            method: 'GET',
-            url: searchUrl,
-            headers: { 'Authorization': `Bearer ${token}` },
-            timeout: 30000,
-            onload: (res) => resolve(JSON.parse(res.responseText)),
-            onerror: reject,
-            ontimeout: () => reject(new Error('[DirectUpload] 썸네일 폴더 검색 타임아웃 (30초)'))
-        });
-    });
-
-    if (result.files && result.files.length > 0) {
-        return result.files[0].id; // Found
-    }
-
-    // Create
-    console.log(`[DirectUpload] Creating folder: ${thumbName}`);
-    const createResult = await new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-            method: 'POST',
-            url: 'https://www.googleapis.com/drive/v3/files',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
-            data: JSON.stringify({
-                name: thumbName,
-                mimeType: 'application/vnd.google-apps.folder',
-                parents: [parentId]
-            }),
-            timeout: 30000,
-            onload: (res) => resolve(JSON.parse(res.responseText)),
-            onerror: reject,
-            ontimeout: () => reject(new Error('[DirectUpload] 썸네일 폴더 생성 타임아웃 (30초)'))
-        });
-    });
-    return createResult.id;
-}
-
-/**
- * Uploads file directly to Google Drive
- * v1.4.0: Centralized Thumbnail Support
- */
-async function uploadDirect(blob, folderName, fileName, metadata = {}) {
-    try {
-        console.log(`[DirectUpload] Starting upload: ${fileName} (${blob.size} bytes)`);
-        
-        const config = getConfig();
-        const token = await getToken();
-        
-        // Determine category
-        const category = metadata.category || (fileName.endsWith('.epub') ? 'Novel' : 'Webtoon');
-        
-        // 1. Get Series Folder ID (Always needed for info.json and content)
-        const seriesFolderId = await getOrCreateFolder(folderName, config.folderId, token, category);
-        
-        let targetFolderId = seriesFolderId;
-        let finalFileName = fileName;
-
-        // 2. [v1.4.0] Centralized Thumbnail Logic
-        if (fileName === 'cover.jpg' || fileName === 'Cover.jpg') {
-            console.log('[DirectUpload] 🖼️ Detected Cover Image -> Redirecting to _Thumbnails');
-            
-            // Extract Series ID: "[12345] Title" -> "12345"
-            const idMatch = folderName.match(/^\[(\d+)\]/);
-            if (idMatch) {
-                const seriesId = idMatch[1];
-                finalFileName = `${seriesId}.jpg`;
-                targetFolderId = await getOrCreateThumbnailFolder(token, config.folderId);
-                console.log(`[DirectUpload] Target: _Thumbnails/${finalFileName}`);
-                
-                // Check for existing file and delete to prevent duplicates
-                try {
-                    const searchUrl = `https://www.googleapis.com/drive/v3/files?` +
-                        `q=name='${finalFileName}' and '${targetFolderId}' in parents and trashed=false` +
-                        `&fields=files(id,name)`;
-                    
-                    const searchResult = await new Promise((resolve, reject) => {
-                        GM_xmlhttpRequest({
-                            method: 'GET',
-                            url: searchUrl,
-                            headers: { 'Authorization': `Bearer ${token}` },
-                            timeout: 30000,
-                            onload: (res) => resolve(JSON.parse(res.responseText)),
-                            onerror: reject,
-                            ontimeout: () => reject(new Error('[DirectUpload] 기존 파일 검색 타임아웃 (30초)'))
-                        });
-                    });
-                    
-                    // Delete existing files (there might be duplicates)
-                    if (searchResult.files && searchResult.files.length > 0) {
-                        console.log(`[DirectUpload] Found ${searchResult.files.length} existing file(s), deleting...`);
-                        for (const file of searchResult.files) {
-                            await new Promise((resolve, reject) => {
-                                GM_xmlhttpRequest({
-                                    method: 'DELETE',
-                                    url: `https://www.googleapis.com/drive/v3/files/${file.id}`,
-                                    headers: { 'Authorization': `Bearer ${token}` },
-                                    timeout: 15000,
-                                    onload: () => {
-                                        console.log(`[DirectUpload] Deleted old file: ${file.id}`);
-                                        resolve();
-                                    },
-                                    onerror: reject,
-                                    ontimeout: () => reject(new Error('[DirectUpload] 파일 삭제 타임아웃 (15초)'))
-                                });
-                            });
-                        }
-                    }
-                } catch (deleteError) {
-                    console.warn('[DirectUpload] Failed to check/delete existing file:', deleteError);
-                    // Continue anyway - upload will create duplicate but system still works
-                }
-            } else {
-                console.warn('[DirectUpload] Could not extract Series ID, uploading to series folder as fallback.');
-            }
-        }
-
-        // 3. Upload File
-        const boundary = '-------314159265358979323846';
-        const delimiter = `\r\n--${boundary}\r\n`;
-        const closeDelim = `\r\n--${boundary}--`;
-        
-        const fileMetadata = {
-            name: finalFileName,
-            parents: [targetFolderId]
-        };
-        
-        const metadataPart = new Blob([
-            delimiter,
-            'Content-Type: application/json\r\n\r\n',
-            JSON.stringify(fileMetadata),
-            delimiter,
-            'Content-Type: application/octet-stream\r\n\r\n'
-        ], { type: 'text/plain' });
-        
-        const closePart = new Blob([closeDelim], { type: 'text/plain' });
-        const multipartBody = new Blob([metadataPart, blob, closePart]);
-        
-        return new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-                method: 'POST',
-                url: 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': `multipart/related; boundary=${boundary}`
-                },
-                data: multipartBody,
-                binary: true,
-                timeout: 300000,
-                onload: (response) => {
-                    if (response.status >= 200 && response.status < 300) {
-                        console.log(`[DirectUpload] ✅ Upload successful: ${finalFileName}`);
-                        resolve();
-                    } else {
-                        reject(new Error(`Upload failed: ${response.status}`));
-                    }
-                },
-                onerror: reject,
-                ontimeout: () => reject(new Error(`[DirectUpload] 파일 업로드 타임아웃 (5분): ${finalFileName}`))
-            });
-        });
-        
-    } catch (error) {
-        console.error(`[DirectUpload] Error:`, error);
-        throw error;
-    }
-}
-
-// Export helper for main.js migration
-const getOAuthToken = getToken;
-
-;// ./src/core/gas.js
-
-
-
-function arrayBufferToBase64(buffer) {
-    let binary = '';
-    const bytes = new Uint8Array(buffer);
-    const len = bytes.byteLength;
-    for (let i = 0; i < len; i++) binary += String.fromCharCode(bytes[i]);
-    return window.btoa(binary);
-}
-
-/**
- * Uploads a Blob to Google Drive via Direct Access (primary) or GAS Relay (fallback)
- * @param {Blob} blob File content
- * @param {string} folderName Target folder name (e.g. "[123] Title")
- * @param {string} fileName Target file name (e.g. "[123] Title.zip")
- */
-async function uploadToGAS(blob, folderName, fileName, options = {}) {
-    const config = getConfig();
-    if (!isConfigValid()) throw new Error("GAS 설정이 누락되었습니다. 메뉴에서 설정을 완료해주세요.");
-    
-    // Try Direct Upload first
-    try {
-        console.log('[Upload] Attempting Direct Drive API upload...');
-        await uploadDirect(blob, folderName, fileName, options);
-        console.log('[Upload] ✅ Direct upload succeeded');
-        return; // Success!
-    } catch (directError) {
-        console.warn('[Upload] ⚠️  Direct upload failed, falling back to GAS relay:', directError.message);
-    }
-    
-    // Fallback to GAS Relay
-    console.log('[Upload] Using GAS relay fallback...');
-    await uploadViaGASRelay(blob, folderName, fileName, options);
-}
-
-/**
- * 업로드 완료 후 GAS의 _toki_cache.json을 갱신합니다 (비동기, fire-and-forget)
- * 에피소드 c30치 다운로드 완료 후 한 번만 호출하세요.
- */
-async function refreshCacheAfterUpload(folderName, category = 'Unknown') {
-    const config = getConfig();
-    if (!config.gasUrl || !config.folderId) return;
-    console.log(`[Cache] 업로드 완료 → Drive 캐시 갱신 요청 (${folderName})`);
-    return new Promise((resolve) => {
-        GM_xmlhttpRequest({
-            method: 'POST',
-            url: config.gasUrl,
-            data: JSON.stringify({
-                type: 'view_update_cache',
-                folderId: config.folderId,
-                folderName,
-                category,
-                apiKey: config.apiKey,
-                protocolVersion: 3,
-            }),
-            headers: { 'Content-Type': 'text/plain' },
-            timeout: 30000,
-            onload: (res) => {
-                try {
-                    const json = JSON.parse(res.responseText);
-                    console.log('[Cache] 갱신 요청 완료. 병합 파편 생성됨:', json.body);
-                } catch (e) {
-                    console.log('[Cache] 갱신 완료 응답 수신 (상세없음)');
-                }
-                resolve();
-            },
-            onerror: () => resolve(),
-            ontimeout: () => {
-                console.warn('[Cache] 캐시 갱신 타임아웃 (30초) - 무시');
-                resolve();
-            },
-        });
-    });
-}
-
-/**
- * Legacy GAS Relay Upload (Fallback)
- * @param {Blob} blob File content
- * @param {string} folderName Target folder name
- * @param {string} fileName Target file name
- */
-async function uploadViaGASRelay(blob, folderName, fileName, options = {}) {
-    const config = getConfig();
-    if (!isConfigValid()) throw new Error("GAS 설정이 누락되었습니다. 메뉴에서 설정을 완료해주세요.");
-    
-    // Constants
-    const CHUNK_SIZE = 20 * 1024 * 1024; // 20MB
-    const CLIENT_VERSION = "1.2.2";
-    const totalSize = blob.size;
-    let uploadUrl = "";
-
-    console.log(`[GAS] 업로드 초기화 중... (${fileName})`);
-    
-    // Determine Category
-    // Default to Webtoon if not provided
-    const category = options.category || (fileName.endsWith('.epub') ? 'Novel' : 'Webtoon');
-
-    // 1. Init Session
-    await new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-            method: "POST", 
-            url: config.gasUrl,
-            data: JSON.stringify({ 
-                folderId: config.folderId, 
-                type: "init", 
-                protocolVersion: 3, 
-                clientVersion: CLIENT_VERSION, 
-                folderName: folderName, 
-                fileName: fileName,
-                category: category,
-                apiKey: config.apiKey
-            }),
-            headers: { "Content-Type": "text/plain" },
-            timeout: 30000,
-            onload: (res) => {
-                try {
-                    const json = JSON.parse(res.responseText);
-                    if (json.status === 'success') { 
-                        uploadUrl = (typeof json.body === 'object') ? json.body.uploadUrl : json.body;
-                        resolve(); 
-                    } else {
-                        reject(new Error(json.body || "Init failed"));
-                    }
-                } catch (e) { reject(new Error("GAS 응답 오류(Init): " + res.responseText)); }
-            },
-            onerror: (e) => reject(new Error("네트워크 오류(Init)")),
-            ontimeout: () => reject(new Error("[GAS] 업로드 초기화 타임아웃 (30초)"))
-        });
-    });
-
-    console.log(`[GAS] 세션 생성 완료. 업로드 시작...`);
-
-    // 2. Chunk Upload Loop
-    let start = 0;
-    const buffer = await blob.arrayBuffer();
-    
-    while (start < totalSize) {
-        const end = Math.min(start + CHUNK_SIZE, totalSize);
-        const chunkBuffer = buffer.slice(start, end);
-        const chunkBase64 = arrayBufferToBase64(chunkBuffer);
-        const percentage = Math.floor((end / totalSize) * 100);
-        
-        console.log(`[GAS] 전송 중... ${percentage}% (${start} ~ ${end} / ${totalSize})`);
-
-        await new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-                method: "POST", 
-                url: config.gasUrl,
-                data: JSON.stringify({ 
-                    folderId: config.folderId, 
-                    type: "upload", 
-                    clientVersion: CLIENT_VERSION, 
-                    uploadUrl: uploadUrl, 
-                    chunkData: chunkBase64, 
-                    start: start, end: end, total: totalSize,
-                    apiKey: config.apiKey
-                }),
-                headers: { "Content-Type": "text/plain" },
-                timeout: 300000,
-                onload: (res) => {
-                    try { 
-                        const json = JSON.parse(res.responseText); 
-                        if (json.status === 'success') resolve(); 
-                        else reject(new Error(json.body || "Upload failed")); 
-                    } catch (e) { reject(new Error("GAS 응답 오류(Upload): " + res.responseText)); }
-                },
-                onerror: (e) => reject(new Error("네트워크 오류(Upload)")),
-                ontimeout: () => reject(new Error(`[GAS] 청크 업로드 타임아웃 (5분): ${start}~${end}`))
-            });
-        });
-        
-        start = end;
-    }
-
-    console.log(`[GAS] 업로드 완료!`);
-}
-
-/**
- * Fetch download history from GAS
- * @param {string} seriesTitle
- * @param {string} category 
- * @returns {Promise<string[]>} List of completed episode IDs
- */
-async function fetchHistory(seriesTitle, category = 'Webtoon') {
-    const config = getConfig();
-    if (!config.gasUrl) return [];
-
-    console.log(`[GAS] 다운로드 기록 조회 중... (${seriesTitle})`);
-
-    return new Promise((resolve) => {
-        GM_xmlhttpRequest({
-            method: "POST",
-            url: config.gasUrl,
-            data: JSON.stringify({
-                type: "check_history",
-                folderId: config.folderId,
-                folderName: seriesTitle,
-                category: category,
-                apiKey: config.apiKey
-            }),
-            headers: { "Content-Type": "text/plain" },
-            timeout: 30000,
-            onload: (res) => {
-                try {
-                    const json = JSON.parse(res.responseText);
-                    if (json.status === 'success') {
-                        resolve(Array.isArray(json.body) ? json.body : []);
-                    } else {
-                        console.warn("[GAS] 기록 조회 실패:", json.body);
-                        resolve([]);
-                    }
-                } catch (e) {
-                    console.error("[GAS] 응답 파싱 실패:", e);
-                    resolve([]);
-                }
-            },
-            onerror: () => {
-                console.error("[GAS] 기록 조회 네트워크 오류");
-                resolve([]);
-            },
-            ontimeout: () => {
-                console.warn("[GAS] 기록 조회 타임아웃 (30초) - 빈 배열 반환");
-                resolve([]);
-            }
-        });
-    });
-}
-
-/**
- * [v1.6.0] Fetch cached episode list directly using cacheFileId
- * @param {string} cacheFileId 
- * @returns {Promise<Array>} List of cached episodes
- */
-async function getBooksByCacheId(cacheFileId) {
-    const config = getConfig();
-    if (!config.gasUrl) return [];
-
-    console.log(`[GAS] 캐시 파일 직행 조회 중... (${cacheFileId})`);
-
-    return new Promise((resolve) => {
-        GM_xmlhttpRequest({
-            method: "POST",
-            url: config.gasUrl,
-            data: JSON.stringify({
-                type: "view_get_books_by_cache",
-                cacheFileId: cacheFileId,
-                apiKey: config.apiKey
-            }),
-            headers: { "Content-Type": "text/plain" },
-            timeout: 10000, // Fast response expected
-            onload: (res) => {
-                try {
-                    const json = JSON.parse(res.responseText);
-                    if (json.status === 'success') {
-                        resolve(Array.isArray(json.body) ? json.body : []);
-                    } else {
-                        console.warn("[GAS] 캐시 직접 조회 실패:", json.body);
-                        resolve([]);
-                    }
-                } catch (e) {
-                    console.error("[GAS] 캐시 응답 파싱 실패:", e);
-                    resolve([]);
-                }
-            },
-            onerror: () => {
-                console.error("[GAS] 캐시 조회 네트워크 오류");
-                resolve([]);
-            },
-            ontimeout: () => {
-                console.warn("[GAS] 캐시 조회 타임아웃 - 빈 배열 반환");
-                resolve([]);
-            }
-        });
-    });
-}
-
-/**
- * [v1.6.0] Initialize an update upload session via GAS using fileId (Fast Path)
- * @param {string} fileId 
- * @param {string} fileName 
- */
-async function initUpdateUploadViaGASRelay(fileId, fileName) {
-    const config = getConfig();
-    if (!isConfigValid()) throw new Error("GAS 설정이 누락되었습니다.");
-
-    console.log(`[GAS] 빠른 덮어쓰기(PUT) 세션 초기화 중... (${fileName} -> ${fileId})`);
-
-    return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-            method: "POST", 
-            url: config.gasUrl,
-            data: JSON.stringify({ 
-                type: "init_update", 
-                fileId: fileId,
-                fileName: fileName,
-                apiKey: config.apiKey
-            }),
-            headers: { "Content-Type": "text/plain" },
-            timeout: 30000,
-            onload: (res) => {
-                try {
-                    const json = JSON.parse(res.responseText);
-                    if (json.status === 'success') { 
-                        resolve((typeof json.body === 'object') ? json.body.uploadUrl : json.body);
-                    } else {
-                        reject(new Error(json.body || "Init Update failed"));
-                    }
-                } catch (e) { reject(new Error("GAS 응답 오류(Init Update): " + res.responseText)); }
-            },
-            onerror: (e) => reject(new Error("네트워크 오류(Init Update)")),
-            ontimeout: () => reject(new Error("[GAS] 덮어쓰기 세션 초기화 타임아웃 (30초)"))
-        });
-    });
-}
-
-/**
- * [v1.6.1] Fetch Series-specific Merge Index Fragment
- * Retrieves the temporary cacheFileId generated after recent uploads without needing a full master_index rebuild.
- * @param {string} sourceId The `12345` ID of the series
- * @returns {Promise<Object>} { found: boolean, data: { cacheFileId: string, ... } }
- */
-async function getMergeIndexFragment(sourceId) {
-    const config = getConfig();
-    if (!config.gasUrl || !config.folderId) return { found: false, data: null };
-
-    console.log(`[GAS] 병합 인덱스 파편 조회 중... (Source ID: ${sourceId})`);
-
-    return new Promise((resolve) => {
-        GM_xmlhttpRequest({
-            method: "POST",
-            url: config.gasUrl,
-            data: JSON.stringify({
-                type: "view_get_merge_index",
-                folderId: config.folderId,
-                sourceId: sourceId,
-                apiKey: config.apiKey
-            }),
-            headers: { "Content-Type": "text/plain" },
-            timeout: 10000,
-            onload: (res) => {
-                try {
-                    const json = JSON.parse(res.responseText);
-                    if (json.status === 'success') {
-                        resolve(json.body);
-                    } else {
-                        console.warn("[GAS] 병합 파편 조회 실패:", json.body);
-                        resolve({ found: false, data: null });
-                    }
-                } catch (e) {
-                    console.error("[GAS] 파편 응답 파싱 실패:", e);
-                    resolve({ found: false, data: null });
-                }
-            },
-            onerror: () => {
-                console.error("[GAS] 파편 조회 네트워크 오류");
-                resolve({ found: false, data: null });
-            },
-            ontimeout: () => {
-                console.warn("[GAS] 파편 조회 타임아웃");
-                resolve({ found: false, data: null });
-            }
-        });
-    });
-}
-
-
-;// ./src/core/anti_sleep.js
-/**
- * Anti-Sleep Module
- * Prevents browser tab throttling by playing silent audio
- */
-
-let audioContext = null;
-let audioEl = null;
-let oscillator = null;
-
-function startSilentAudio() {
-    if (audioContext && audioContext.state === 'running') {
-        console.log('[Anti-Sleep] Already running');
-        return;
-    }
-    
-    try {
-        if (!audioContext) {
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        }
-        
-        if (audioContext.state === 'suspended') {
-            audioContext.resume();
-        }
-        
-        const dest = audioContext.createMediaStreamDestination();
-        const gain = audioContext.createGain();
-        
-        oscillator = audioContext.createOscillator();
-        oscillator.frequency.value = 1; // 1Hz (Inaudible)
-        oscillator.type = 'sine';
-        gain.gain.value = 0.001; // Near silence
-        
-        oscillator.connect(gain);
-        gain.connect(dest);
-        oscillator.start();
-        
-        if (!audioEl) {
-            audioEl = document.createElement('audio');
-            audioEl.style.display = "none";
-            document.body.appendChild(audioEl);
-        }
-        
-        audioEl.srcObject = dest.stream;
-        audioEl.play()
-            .then(() => console.log('🔊 [Anti-Sleep] Audio started successfully'))
-            .catch(e => {
-                console.warn('🚫 [Anti-Sleep] Autoplay blocked:', e);
-                throw e; // Re-throw to let caller handle
-            });
-            
-    } catch (e) {
-        console.error('[Anti-Sleep] Failed to start:', e);
-        throw e;
-    }
-}
-
-function stopSilentAudio() {
-    try {
-        if (oscillator) {
-            oscillator.stop();
-            oscillator.disconnect();
-            oscillator = null;
-        }
-        
-        if (audioEl) {
-            audioEl.pause();
-            audioEl.srcObject = null;
-        }
-        
-        if (audioContext) {
-            audioContext.close().then(() => {
-                audioContext = null;
-                console.log('🔇 [Anti-Sleep] Audio stopped');
-            });
-        }
-    } catch (e) {
-        console.error('[Anti-Sleep] Failed to stop:', e);
-    }
-}
-
-function isAudioRunning() {
-    return audioContext && audioContext.state === 'running';
-}
-
-;// ./src/core/ui.js
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   LogBox: () => (/* binding */ LogBox),
+/* harmony export */   fo: () => (/* binding */ MenuModal),
+/* harmony export */   hV: () => (/* binding */ markDownloadedItems),
+/* harmony export */   ze: () => (/* binding */ Notifier)
+/* harmony export */ });
+/* harmony import */ var _anti_sleep_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(209);
+/* harmony import */ var _config_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(899);
 /**
  * UI Module for TokiSync
  * Handles Logging Overlay and OS Notifications
  */
+
 
 
 
@@ -1177,6 +390,8 @@ class LogBox {
 
     constructor() {
         if (LogBox.instance) return LogBox.instance;
+        this.logs = [];
+        this.MAX_LOGS = 500;
         this.init();
         LogBox.instance = this;
     }
@@ -1215,7 +430,9 @@ class LogBox {
                     list-style: none;
                 }
                 #toki-logbox-content li { margin-bottom: 2px; word-break: break-all; }
+                #toki-logbox-content li.critical { color: #ff3333; font-weight: bold; background: rgba(255,50,50,0.1); padding: 1px 3px; border-radius: 2px; }
                 #toki-logbox-content li.error { color: #ff5555; }
+                #toki-logbox-content li.warn { color: #ffaa00; }
                 #toki-logbox-content li.success { color: #55ff55; }
                 
                 /* Scrollbar */
@@ -1333,6 +550,7 @@ class LogBox {
             <div id="toki-logbox-header">
                 <span id="toki-logbox-title">TokiSync Log</span>
                 <div id="toki-logbox-controls">
+                    <span id="toki-btn-report" title="버그 리포트 복사" style="cursor:pointer; color:#facc15;">📋</span>
                     <span id="toki-btn-audio" title="백그라운드 모드" style="cursor:pointer;">🔊</span>
                     <span id="toki-btn-clear" title="Clear">🚫</span>
                     <span id="toki-btn-close" title="Hide">❌</span>
@@ -1345,6 +563,7 @@ class LogBox {
         // -- Events --
         this.list = this.container.querySelector('#toki-logbox-content');
         
+        document.getElementById('toki-btn-report').onclick = () => this.exportReport();
         document.getElementById('toki-btn-clear').onclick = () => this.clear();
         document.getElementById('toki-btn-close').onclick = () => this.hide();
         
@@ -1353,13 +572,13 @@ class LogBox {
         if (audioBtn) {
             audioBtn.onclick = () => {
                 try {
-                    if (isAudioRunning()) {
-                        stopSilentAudio();
+                    if ((0,_anti_sleep_js__WEBPACK_IMPORTED_MODULE_0__/* .isAudioRunning */ .S2)()) {
+                        (0,_anti_sleep_js__WEBPACK_IMPORTED_MODULE_0__/* .stopSilentAudio */ .Cv)();
                         audioBtn.textContent = '🔊';
                         audioBtn.title = '백그라운드 모드 (꺼짐)';
                         this.log('[Anti-Sleep] 백그라운드 모드 비활성화');
                     } else {
-                        startSilentAudio();
+                        (0,_anti_sleep_js__WEBPACK_IMPORTED_MODULE_0__/* .startSilentAudio */ .yS)();
                         audioBtn.textContent = '🔇';
                         audioBtn.title = '백그라운드 모드 (켜짐)';
                         this.log('[Anti-Sleep] 백그라운드 모드 활성화', 'success');
@@ -1378,12 +597,19 @@ class LogBox {
         return LogBox.instance;
     }
 
-    log(msg, type = 'normal') {
+    log(msg, type = 'normal', context = '') {
         if (!this.list) return;
 
-        const li = document.createElement('li');
         const time = new Date().toLocaleTimeString('ko-KR', { hour12: false });
-        li.textContent = `[${time}] ${msg}`;
+        const prefix = context ? `[${context}] ` : '';
+        const fullMsg = `[${time}] ${prefix}${msg}`;
+        
+        // Save to memory
+        this.logs.push({ time, type, context, msg: typeof msg === 'string' ? msg : JSON.stringify(msg) });
+        if (this.logs.length > this.MAX_LOGS) this.logs.shift();
+
+        const li = document.createElement('li');
+        li.textContent = fullMsg;
         
         if (type === 'error') li.classList.add('error');
         if (type === 'success') li.classList.add('success');
@@ -1392,17 +618,27 @@ class LogBox {
         this.list.scrollTop = this.list.scrollHeight;
     }
 
-    error(msg) {
-        this.show(); // Auto-show on error
-        this.log(msg, 'error');
+    critical(msg, context = '') {
+        this.show(); // Always surface critical errors
+        this.log(msg, 'critical', context);
     }
 
-    success(msg) {
-        this.log(msg, 'success');
+    error(msg, context = '') {
+        this.show(); // Auto-show on error
+        this.log(msg, 'error', context);
+    }
+
+    warn(msg, context = '') {
+        this.log(msg, 'warn', context);
+    }
+
+    success(msg, context = '') {
+        this.log(msg, 'success', context);
     }
 
     clear() {
         if (this.list) this.list.innerHTML = '';
+        this.logs = [];
     }
 
     show() {
@@ -1411,6 +647,88 @@ class LogBox {
 
     hide() {
         if (this.container) this.container.style.display = 'none';
+    }
+
+    async exportReport() {
+        const version = typeof GM_info !== 'undefined' ? GM_info.script.version : 'Unknown';
+        const ua = navigator.userAgent;
+        // Include query parameters for accurate book ID tracking
+        let currentUrl = window.location.href;
+        // Sanitize sensitive tokens if any (like '?token=')
+        currentUrl = currentUrl.replace(/([&?])(token|key|pwd)=[^&]+/g, '$1$2=***');
+        
+        // Retrieve run settings
+        const config = (0,_config_js__WEBPACK_IMPORTED_MODULE_1__/* .getConfig */ .zj)();
+        const dest = config.destination || 'native';
+        const isCbz = config.saveAs === 'cbz';
+        const smartSkip = config.useSmartSkip ? 'ON' : 'OFF';
+
+        // Severity grouping
+        const critical = this.logs.filter(l => l.type === 'critical');
+        const warn     = this.logs.filter(l => l.type === 'warn' || l.type === 'error');
+        const info     = this.logs.filter(l => l.type !== 'critical' && l.type !== 'warn' && l.type !== 'error');
+
+        const fmt = (logs) => logs.length
+            ? logs.map(l => { const ctx = l.context ? `[${l.context}] ` : ''; return `[${l.time}] ${ctx}${l.msg}`; }).join('\n')
+            : '(없음)';
+
+        const report = `### 🐞 TokiSync Bug Report
+
+**System Information:**
+- **Version:** ${version}
+- **URL:** \`${currentUrl}\`
+- **User Agent:** ${ua}
+
+**Execution Settings:**
+- **Destination:** \`${dest}\`
+- **Format:** \`${isCbz ? 'CBZ Archive' : 'Raw Images'}\`
+- **Smart Skip:** \`${smartSkip}\`
+
+### 🔴 CRITICAL (작업 중단 오류)
+\`\`\`
+${fmt(critical)}
+\`\`\`
+
+### 🟡 WARN (비치명 / 폴백 발생)
+\`\`\`
+${fmt(warn)}
+\`\`\`
+
+### ⚪ INFO (정상 흐름)
+\`\`\`
+${fmt(info)}
+\`\`\`
+`.trim();
+
+        try {
+            // Priority: GM_setClipboard > navigator.clipboard > execCommand
+            if (typeof GM_setClipboard === 'function') {
+                GM_setClipboard(report);
+            } else if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(report);
+            } else {
+                const textArea = document.createElement("textarea");
+                textArea.value = report;
+                document.body.appendChild(textArea);
+                textArea.select();
+                try {
+                    document.execCommand('copy');
+                } catch (err) {
+                    console.error('Copy Failed', err);
+                }
+                document.body.removeChild(textArea);
+            }
+            
+            this.success('버그 리포트가 클립보드에 복사되었습니다.', 'System');
+            Notifier.notify('TokiSync 버그 리포트', '클립보드 복사 완료! GitHub 이슈 탭이 열립니다.');
+            
+            setTimeout(() => {
+                window.open('https://github.com/pray4skylark/tokiSync/issues/new', '_blank');
+            }, 800);
+            
+        } catch (e) {
+            this.error('리포트 복사실패: ' + e.message, 'System');
+        }
     }
 
     toggle() {
@@ -1830,6 +1148,935 @@ function markDownloadedItems(historyList) {
     console.log(`[UI] ${markedCount}개 항목에 다운로드 완료 표시 적용.`);
 }
 
+
+/***/ }
+
+/******/ 	});
+/************************************************************************/
+/******/ 	// The module cache
+/******/ 	var __webpack_module_cache__ = {};
+/******/ 	
+/******/ 	// The require function
+/******/ 	function __webpack_require__(moduleId) {
+/******/ 		// Check if module is in cache
+/******/ 		var cachedModule = __webpack_module_cache__[moduleId];
+/******/ 		if (cachedModule !== undefined) {
+/******/ 			return cachedModule.exports;
+/******/ 		}
+/******/ 		// Create a new module (and put it into the cache)
+/******/ 		var module = __webpack_module_cache__[moduleId] = {
+/******/ 			// no module.id needed
+/******/ 			// no module.loaded needed
+/******/ 			exports: {}
+/******/ 		};
+/******/ 	
+/******/ 		// Execute the module function
+/******/ 		__webpack_modules__[moduleId](module, module.exports, __webpack_require__);
+/******/ 	
+/******/ 		// Return the exports of the module
+/******/ 		return module.exports;
+/******/ 	}
+/******/ 	
+/************************************************************************/
+/******/ 	/* webpack/runtime/define property getters */
+/******/ 	(() => {
+/******/ 		// define getter functions for harmony exports
+/******/ 		__webpack_require__.d = (exports, definition) => {
+/******/ 			for(var key in definition) {
+/******/ 				if(__webpack_require__.o(definition, key) && !__webpack_require__.o(exports, key)) {
+/******/ 					Object.defineProperty(exports, key, { enumerable: true, get: definition[key] });
+/******/ 				}
+/******/ 			}
+/******/ 		};
+/******/ 	})();
+/******/ 	
+/******/ 	/* webpack/runtime/hasOwnProperty shorthand */
+/******/ 	(() => {
+/******/ 		__webpack_require__.o = (obj, prop) => (Object.prototype.hasOwnProperty.call(obj, prop))
+/******/ 	})();
+/******/ 	
+/************************************************************************/
+var __webpack_exports__ = {};
+
+// EXTERNAL MODULE: ./src/core/config.js
+var core_config = __webpack_require__(899);
+// EXTERNAL MODULE: ./src/core/ui.js
+var ui = __webpack_require__(963);
+;// ./src/core/network.js
+/**
+ * Direct Drive Access Module
+ * Bypasses GAS relay for high-speed uploads using GM_xmlhttpRequest
+ */
+
+
+
+
+let cachedToken = null;
+let tokenExpiry = 0;
+
+/**
+ * Fetches OAuth token from GAS server
+ * @returns {Promise<string>} Access token
+ */
+async function fetchToken() {
+    const config = (0,core_config/* getConfig */.zj)();
+    
+    console.log('[DirectUpload] Fetching token from GAS...');
+    console.log('[DirectUpload] GAS URL:', config.gasUrl);
+    
+    return new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+            method: 'POST',
+            url: config.gasUrl,
+            data: JSON.stringify({
+                folderId: config.folderId,
+                type: 'view_get_token',
+                apiKey: config.apiKey
+            }),
+            headers: { 'Content-Type': 'text/plain' },
+            timeout: 30000,
+            onload: (response) => {
+                console.log('[DirectUpload] Token response status:', response.status);
+                console.log('[DirectUpload] Token response text:', response.responseText);
+                
+                try {
+                    const result = JSON.parse(response.responseText);
+                    console.log('[DirectUpload] Parsed result:', result);
+                    
+                    if (result.status === 'success') {
+                        console.log('[DirectUpload] Token received successfully');
+                        resolve(result.body.token);
+                    } else {
+                        console.error('[DirectUpload] Token fetch failed:', result.error);
+                        console.error('[DirectUpload] Debug logs:', result.logs);
+                        ui.LogBox.getInstance().error(`Token fetch failed: ${result.error}`, 'Network:Auth');
+                        reject(new Error(result.error || 'Token fetch failed'));
+                    }
+                } catch (e) {
+                    console.error('[DirectUpload] JSON parse error:', e);
+                    console.error('[DirectUpload] Raw response:', response.responseText);
+                    reject(new Error(`Token parse error: ${e.message}`));
+                }
+            },
+            onerror: (error) => {
+                console.error('[DirectUpload] Request error:', error);
+                ui.LogBox.getInstance().error('Token request network error', 'Network:Auth');
+                reject(new Error('Token request failed'));
+            },
+            ontimeout: () => {
+                console.error('[DirectUpload] Token request timed out (30s)');
+                ui.LogBox.getInstance().error('Token request timed out (30s)', 'Network:Auth');
+                reject(new Error('[DirectUpload] 토큰 요청 타임아웃 (30초)'));
+            }
+        });
+    });
+}
+
+/**
+ * Gets OAuth token with caching (1 hour TTL)
+ * @returns {Promise<string>} Access token
+ */
+async function getToken() {
+    const now = Date.now();
+    
+    // Return cached token if still valid (with 5min safety margin)
+    if (cachedToken && tokenExpiry > now + 300000) {
+        console.log('[DirectUpload] Using cached token');
+        return cachedToken;
+    }
+    
+    console.log('[DirectUpload] Fetching new token...');
+    cachedToken = await fetchToken();
+    tokenExpiry = now + 3600000; // 1 hour
+    
+    return cachedToken;
+}
+
+/**
+ * Finds or creates a folder in Google Drive with category support
+ * Mirrors GAS server's getOrCreateSeriesFolder logic:
+ * 1. Check root for legacy folders
+ * 2. Get/Create category folder (Webtoon/Novel/Manga)
+ * 3. Get/Create series folder in category
+ * 
+ * @param {string} folderName - Series folder name (e.g. "[123] Title")
+ * @param {string} parentId - Parent folder ID (root)
+ * @param {string} token - OAuth token
+ * @param {string} category - Category name ("Webtoon", "Novel", or "Manga")
+ * @returns {Promise<string>} Series folder ID
+ */
+async function getOrCreateFolder(folderName, parentId, token, category = 'Webtoon') {
+    // 1. Check for legacy folder in root (migration compatibility)
+    const legacySearchUrl = `https://www.googleapis.com/drive/v3/files?` +
+        `q=name='${encodeURIComponent(folderName)}' and '${parentId}' in parents and trashed=false and mimeType='application/vnd.google-apps.folder'` +
+        `&fields=files(id,name)`;
+    
+    const legacyResult = await new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: legacySearchUrl,
+            headers: { 'Authorization': `Bearer ${token}` },
+            timeout: 30000,
+            onload: (res) => {
+                try {
+                    resolve(JSON.parse(res.responseText));
+                } catch (e) {
+                    reject(e);
+                }
+            },
+            onerror: reject,
+            ontimeout: () => reject(new Error('[DirectUpload] 레거시 폴더 검색 타임아웃 (30초)'))
+        });
+    });
+    
+    if (legacyResult.files && legacyResult.files.length > 0) {
+        console.log(`[DirectUpload] ♻️ Found legacy folder in root: ${folderName}`);
+        return legacyResult.files[0].id;
+    }
+    
+    // 2. Get or create category folder
+    const categoryName = category || 'Webtoon';
+    const categorySearchUrl = `https://www.googleapis.com/drive/v3/files?` +
+        `q=name='${categoryName}' and '${parentId}' in parents and trashed=false and mimeType='application/vnd.google-apps.folder'` +
+        `&fields=files(id,name)`;
+    
+    const categoryResult = await new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: categorySearchUrl,
+            headers: { 'Authorization': `Bearer ${token}` },
+            timeout: 30000,
+            onload: (res) => {
+                try {
+                    resolve(JSON.parse(res.responseText));
+                } catch (e) {
+                    reject(e);
+                }
+            },
+            onerror: reject,
+            ontimeout: () => reject(new Error('[DirectUpload] 카테고리 폴더 검색 타임아웃 (30초)'))
+        });
+    });
+    
+    let categoryFolderId;
+    if (categoryResult.files && categoryResult.files.length > 0) {
+        categoryFolderId = categoryResult.files[0].id;
+        console.log(`[DirectUpload] 📂 Category folder found: ${categoryName}`);
+    } else {
+        // Create category folder
+        console.log(`[DirectUpload] 📂 Creating category folder: ${categoryName}`);
+        const createCategoryResult = await new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method: 'POST',
+                url: 'https://www.googleapis.com/drive/v3/files',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                },
+                data: JSON.stringify({
+                    name: categoryName,
+                    mimeType: 'application/vnd.google-apps.folder',
+                    parents: [parentId]
+                }),
+                timeout: 30000,
+                onload: (res) => {
+                    try {
+                        resolve(JSON.parse(res.responseText));
+                    } catch (e) {
+                        reject(e);
+                    }
+                },
+                onerror: reject,
+                ontimeout: () => reject(new Error('[DirectUpload] 카테고리 폴더 생성 타임아웃 (30초)'))
+            });
+        });
+        categoryFolderId = createCategoryResult.id;
+    }
+    
+    // 3. Get or create series folder in category
+    // [v1.4.0 Fix] Search by ID prefix "[12345]" instead of full name to handle title changes
+    // folderName format: "[12345] Title"
+    const idMatch = folderName.match(/^\[\d+\]/);
+    const idPrefix = idMatch ? idMatch[0] : null;
+    
+    let queryPart = "";
+    if (idPrefix) {
+        // Search for folders containing "[12345]"
+        queryPart = `name contains '${idPrefix}'`;
+    } else {
+        // Fallback: Exact match
+        queryPart = `name = '${folderName.replace(/'/g, "\\'")}'`; 
+    }
+
+    const seriesSearchUrl = `https://www.googleapis.com/drive/v3/files?` +
+        `q=${queryPart} and '${categoryFolderId}' in parents and trashed=false and mimeType='application/vnd.google-apps.folder'` +
+        `&fields=files(id,name)`;
+    
+    const seriesResult = await new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: seriesSearchUrl,
+            headers: { 'Authorization': `Bearer ${token}` },
+            timeout: 30000,
+            onload: (res) => {
+                try {
+                    resolve(JSON.parse(res.responseText));
+                } catch (e) {
+                    reject(e);
+                }
+            },
+            onerror: reject,
+            ontimeout: () => reject(new Error('[DirectUpload] 시리즈 폴더 검색 타임아웃 (30초)'))
+        });
+    });
+    
+    // Filter results to ensure it starts with the ID (double check)
+    let foundFolder = null;
+    if (seriesResult.files && seriesResult.files.length > 0) {
+        if (idPrefix) {
+            // Find the first folder that STARTS with the ID
+            foundFolder = seriesResult.files.find(f => f.name.startsWith(idPrefix));
+        } else {
+            foundFolder = seriesResult.files[0];
+        }
+    }
+
+    if (foundFolder) {
+        console.log(`[DirectUpload] Folder found: ${foundFolder.name} (ID: ${foundFolder.id})`);
+        return foundFolder.id;
+    }
+    
+    // Create series folder
+    console.log(`[DirectUpload] Creating series folder: ${folderName} in ${categoryName}`);
+    const createResult = await new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+            method: 'POST',
+            url: 'https://www.googleapis.com/drive/v3/files',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            data: JSON.stringify({
+                name: folderName,
+                mimeType: 'application/vnd.google-apps.folder',
+                parents: [categoryFolderId]
+            }),
+            timeout: 30000,
+            onload: (res) => {
+                try {
+                    resolve(JSON.parse(res.responseText));
+                } catch (e) {
+                    reject(e);
+                }
+            },
+            onerror: reject,
+            ontimeout: () => reject(new Error('[DirectUpload] 시리즈 폴더 생성 타임아웃 (30초)'))
+        });
+    });
+    
+    return createResult.id;
+}
+
+/**
+ * Finds or creates the centralized '_Thumbnails' folder
+ */
+async function getOrCreateThumbnailFolder(token, parentId) {
+    const thumbName = '_Thumbnails';
+    const searchUrl = `https://www.googleapis.com/drive/v3/files?` +
+        `q=name='${thumbName}' and '${parentId}' in parents and trashed=false and mimeType='application/vnd.google-apps.folder'` +
+        `&fields=files(id,name)`;
+    
+    const result = await new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: searchUrl,
+            headers: { 'Authorization': `Bearer ${token}` },
+            timeout: 30000,
+            onload: (res) => resolve(JSON.parse(res.responseText)),
+            onerror: reject,
+            ontimeout: () => reject(new Error('[DirectUpload] 썸네일 폴더 검색 타임아웃 (30초)'))
+        });
+    });
+
+    if (result.files && result.files.length > 0) {
+        return result.files[0].id; // Found
+    }
+
+    // Create
+    console.log(`[DirectUpload] Creating folder: ${thumbName}`);
+    const createResult = await new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+            method: 'POST',
+            url: 'https://www.googleapis.com/drive/v3/files',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            data: JSON.stringify({
+                name: thumbName,
+                mimeType: 'application/vnd.google-apps.folder',
+                parents: [parentId]
+            }),
+            timeout: 30000,
+            onload: (res) => resolve(JSON.parse(res.responseText)),
+            onerror: reject,
+            ontimeout: () => reject(new Error('[DirectUpload] 썸네일 폴더 생성 타임아웃 (30초)'))
+        });
+    });
+    return createResult.id;
+}
+
+/**
+ * Uploads file directly to Google Drive
+ * v1.4.0: Centralized Thumbnail Support
+ */
+async function uploadDirect(blob, folderName, fileName, metadata = {}) {
+    try {
+        console.log(`[DirectUpload] Starting upload: ${fileName} (${blob.size} bytes)`);
+        
+        const config = (0,core_config/* getConfig */.zj)();
+        const token = await getToken();
+        
+        // Determine category
+        const category = metadata.category || (fileName.endsWith('.epub') ? 'Novel' : 'Webtoon');
+        
+        // 1. Get Series Folder ID (Always needed for info.json and content)
+        const seriesFolderId = await getOrCreateFolder(folderName, config.folderId, token, category);
+        
+        let targetFolderId = seriesFolderId;
+        let finalFileName = fileName;
+
+        // 2. [v1.4.0] Centralized Thumbnail Logic
+        if (fileName === 'cover.jpg' || fileName === 'Cover.jpg') {
+            console.log('[DirectUpload] 🖼️ Detected Cover Image -> Redirecting to _Thumbnails');
+            
+            // Extract Series ID: "[12345] Title" -> "12345"
+            const idMatch = folderName.match(/^\[(\d+)\]/);
+            if (idMatch) {
+                const seriesId = idMatch[1];
+                finalFileName = `${seriesId}.jpg`;
+                targetFolderId = await getOrCreateThumbnailFolder(token, config.folderId);
+                console.log(`[DirectUpload] Target: _Thumbnails/${finalFileName}`);
+                
+                // Check for existing file and delete to prevent duplicates
+                try {
+                    const searchUrl = `https://www.googleapis.com/drive/v3/files?` +
+                        `q=name='${finalFileName}' and '${targetFolderId}' in parents and trashed=false` +
+                        `&fields=files(id,name)`;
+                    
+                    const searchResult = await new Promise((resolve, reject) => {
+                        GM_xmlhttpRequest({
+                            method: 'GET',
+                            url: searchUrl,
+                            headers: { 'Authorization': `Bearer ${token}` },
+                            timeout: 30000,
+                            onload: (res) => resolve(JSON.parse(res.responseText)),
+                            onerror: reject,
+                            ontimeout: () => reject(new Error('[DirectUpload] 기존 파일 검색 타임아웃 (30초)'))
+                        });
+                    });
+                    
+                    // Delete existing files (there might be duplicates)
+                    if (searchResult.files && searchResult.files.length > 0) {
+                        console.log(`[DirectUpload] Found ${searchResult.files.length} existing file(s), deleting...`);
+                        for (const file of searchResult.files) {
+                            await new Promise((resolve, reject) => {
+                                GM_xmlhttpRequest({
+                                    method: 'DELETE',
+                                    url: `https://www.googleapis.com/drive/v3/files/${file.id}`,
+                                    headers: { 'Authorization': `Bearer ${token}` },
+                                    timeout: 15000,
+                                    onload: () => {
+                                        console.log(`[DirectUpload] Deleted old file: ${file.id}`);
+                                        resolve();
+                                    },
+                                    onerror: reject,
+                                    ontimeout: () => reject(new Error('[DirectUpload] 파일 삭제 타임아웃 (15초)'))
+                                });
+                            });
+                        }
+                    }
+                } catch (deleteError) {
+                    console.warn('[DirectUpload] Failed to check/delete existing file:', deleteError);
+                    // Continue anyway - upload will create duplicate but system still works
+                }
+            } else {
+                console.warn('[DirectUpload] Could not extract Series ID, uploading to series folder as fallback.');
+            }
+        }
+
+        // 3. Upload File
+        const boundary = '-------314159265358979323846';
+        const delimiter = `\r\n--${boundary}\r\n`;
+        const closeDelim = `\r\n--${boundary}--`;
+        
+        const fileMetadata = {
+            name: finalFileName,
+            parents: [targetFolderId]
+        };
+        
+        const metadataPart = new Blob([
+            delimiter,
+            'Content-Type: application/json\r\n\r\n',
+            JSON.stringify(fileMetadata),
+            delimiter,
+            'Content-Type: application/octet-stream\r\n\r\n'
+        ], { type: 'text/plain' });
+        
+        const closePart = new Blob([closeDelim], { type: 'text/plain' });
+        const multipartBody = new Blob([metadataPart, blob, closePart]);
+        
+        return new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method: 'POST',
+                url: 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': `multipart/related; boundary=${boundary}`
+                },
+                data: multipartBody,
+                binary: true,
+                timeout: 300000,
+                onload: (response) => {
+                    if (response.status >= 200 && response.status < 300) {
+                        console.log(`[DirectUpload] ✅ Upload successful: ${finalFileName}`);
+                        resolve();
+                    } else {
+                        ui.LogBox.getInstance().error(`Upload failed: ${response.status} - ${finalFileName}`, 'Network:Upload');
+                        reject(new Error(`Upload failed: ${response.status}`));
+                    }
+                },
+                onerror: (e) => {
+                    ui.LogBox.getInstance().error(`Upload block network error: ${finalFileName}`, 'Network:Upload');
+                    reject(e);
+                },
+                ontimeout: () => {
+                    ui.LogBox.getInstance().error(`Upload request timed out (5m): ${finalFileName}`, 'Network:Upload');
+                    reject(new Error(`[DirectUpload] 파일 업로드 타임아웃 (5분): ${finalFileName}`));
+                }
+            });
+        });
+        
+    } catch (error) {
+        console.error(`[DirectUpload] Error:`, error);
+        ui.LogBox.getInstance().error(`[DirectUpload] Error: ${error.message}`, 'Network:UploadException');
+        throw error;
+    }
+}
+
+// Export helper for main.js migration
+const getOAuthToken = getToken;
+
+;// ./src/core/gas.js
+
+
+
+
+function arrayBufferToBase64(buffer) {
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) binary += String.fromCharCode(bytes[i]);
+    return window.btoa(binary);
+}
+
+/**
+ * Uploads a Blob to Google Drive via Direct Access (primary) or GAS Relay (fallback)
+ * @param {Blob} blob File content
+ * @param {string} folderName Target folder name (e.g. "[123] Title")
+ * @param {string} fileName Target file name (e.g. "[123] Title.zip")
+ */
+async function uploadToGAS(blob, folderName, fileName, options = {}) {
+    const config = (0,core_config/* getConfig */.zj)();
+    if (!(0,core_config/* isConfigValid */.Jb)()) throw new Error("GAS 설정이 누락되었습니다. 메뉴에서 설정을 완료해주세요.");
+    
+    // Try Direct Upload first
+    try {
+        console.log('[Upload] Attempting Direct Drive API upload...');
+        await uploadDirect(blob, folderName, fileName, options);
+        console.log('[Upload] ✅ Direct upload succeeded');
+        return; // Success!
+    } catch (directError) {
+        console.warn('[Upload] ⚠️  Direct upload failed, falling back to GAS relay:', directError.message);
+        ui.LogBox.getInstance().warn('Direct 업로드 실패 → GAS 릴레이 폴백: ' + directError.message + ' (' + fileName + ')', 'GAS:Upload');
+    }
+    
+    // Fallback to GAS Relay
+    console.log('[Upload] Using GAS relay fallback...');
+    await uploadViaGASRelay(blob, folderName, fileName, options);
+}
+
+/**
+ * 업로드 완료 후 GAS의 _toki_cache.json을 갱신합니다 (비동기, fire-and-forget)
+ * 에피소드 c30치 다운로드 완료 후 한 번만 호출하세요.
+ */
+async function refreshCacheAfterUpload(folderName, category = 'Unknown') {
+    const config = (0,core_config/* getConfig */.zj)();
+    if (!config.gasUrl || !config.folderId) return;
+    const logger = ui.LogBox.getInstance();
+    console.log(`[Cache] 업로드 완료 → Drive 캐시 갱신 요청 (${folderName})`);
+    return new Promise((resolve) => {
+        GM_xmlhttpRequest({
+            method: 'POST',
+            url: config.gasUrl,
+            data: JSON.stringify({
+                type: 'view_update_cache',
+                folderId: config.folderId,
+                folderName,
+                category,
+                apiKey: config.apiKey,
+                protocolVersion: 3,
+            }),
+            headers: { 'Content-Type': 'text/plain' },
+            timeout: 30000,
+            onload: (res) => {
+                try {
+                    const json = JSON.parse(res.responseText);
+                    console.log('[Cache] 갱신 요청 완료. 병합 파편 생성됨:', json.body);
+                } catch (e) {
+                    console.log('[Cache] 갱신 완료 응답 수신 (상세없음)');
+                }
+                resolve();
+            },
+            onerror: () => {
+                logger.warn(`캐시 갱신 네트워크 오류 (${folderName}) — 다음 실행 시 자동 복구됨`, 'GAS:Cache');
+                resolve();
+            },
+            ontimeout: () => {
+                logger.warn(`캐시 갱신 타임아웃 30초 (${folderName}) — 스킬폭 포함 가능`, 'GAS:Cache');
+                resolve();
+            },
+        });
+    });
+}
+
+/**
+ * Legacy GAS Relay Upload (Fallback)
+ * @param {Blob} blob File content
+ * @param {string} folderName Target folder name
+ * @param {string} fileName Target file name
+ */
+async function uploadViaGASRelay(blob, folderName, fileName, options = {}) {
+    const config = (0,core_config/* getConfig */.zj)();
+    if (!(0,core_config/* isConfigValid */.Jb)()) throw new Error("GAS 설정이 누락되었습니다. 메뉴에서 설정을 완료해주세요.");
+    const logger = ui.LogBox.getInstance();
+    
+    // Constants
+    const CHUNK_SIZE = 20 * 1024 * 1024; // 20MB
+    const CLIENT_VERSION = "1.2.2";
+    const totalSize = blob.size;
+    let uploadUrl = "";
+
+    console.log(`[GAS] 업로드 초기화 중... (${fileName})`);
+    
+    // Determine Category
+    // Default to Webtoon if not provided
+    const category = options.category || (fileName.endsWith('.epub') ? 'Novel' : 'Webtoon');
+
+    // 1. Init Session
+    await new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+            method: "POST", 
+            url: config.gasUrl,
+            data: JSON.stringify({ 
+                folderId: config.folderId, 
+                type: "init", 
+                protocolVersion: 3, 
+                clientVersion: CLIENT_VERSION, 
+                folderName: folderName, 
+                fileName: fileName,
+                category: category,
+                apiKey: config.apiKey
+            }),
+            headers: { "Content-Type": "text/plain" },
+            timeout: 30000,
+            onload: (res) => {
+                try {
+                    const json = JSON.parse(res.responseText);
+                    if (json.status === 'success') { 
+                        uploadUrl = (typeof json.body === 'object') ? json.body.uploadUrl : json.body;
+                        resolve(); 
+                    } else {
+                        logger.critical(`GAS 릴레이 세션 초기화 실패: ${json.body || 'Init failed'} (${fileName})`, 'GAS:Relay');
+                        reject(new Error(json.body || "Init failed"));
+                    }
+                } catch (e) { 
+                    logger.critical(`GAS 서버 응답 파싱 실패 (Init): ${res.responseText?.substring(0, 80)}`, 'GAS:Relay');
+                    reject(new Error("GAS 응답 오류(Init): " + res.responseText)); 
+                }
+            },
+            onerror: (e) => {
+                logger.critical(`GAS 릴레이 네트워크 오류 (Init) — ${fileName}`, 'GAS:Relay');
+                reject(new Error("네트워크 오류(Init)"));
+            },
+            ontimeout: () => {
+                logger.critical(`GAS 릴레이 세션 초기화 타임아웃 (30초) — ${fileName}`, 'GAS:Relay');
+                reject(new Error("[GAS] 업로드 초기화 타임아웃 (30초)"));
+            }
+        });
+    });
+
+    console.log(`[GAS] 세션 생성 완료. 업로드 시작...`);
+
+    // 2. Chunk Upload Loop
+    let start = 0;
+    const buffer = await blob.arrayBuffer();
+    
+    while (start < totalSize) {
+        const end = Math.min(start + CHUNK_SIZE, totalSize);
+        const chunkBuffer = buffer.slice(start, end);
+        const chunkBase64 = arrayBufferToBase64(chunkBuffer);
+        const percentage = Math.floor((end / totalSize) * 100);
+        
+        console.log(`[GAS] 전송 중... ${percentage}% (${start} ~ ${end} / ${totalSize})`);
+
+        await new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method: "POST", 
+                url: config.gasUrl,
+                data: JSON.stringify({ 
+                    folderId: config.folderId, 
+                    type: "upload", 
+                    clientVersion: CLIENT_VERSION, 
+                    uploadUrl: uploadUrl, 
+                    chunkData: chunkBase64, 
+                    start: start, end: end, total: totalSize,
+                    apiKey: config.apiKey
+                }),
+                headers: { "Content-Type": "text/plain" },
+                timeout: 300000,
+                onload: (res) => {
+                    try { 
+                        const json = JSON.parse(res.responseText); 
+                        if (json.status === 'success') resolve(); 
+                        else {
+                            logger.critical(`GAS 청크 업로드 실패: ${json.body || 'Upload failed'} (${start}~${end})`, 'GAS:Relay');
+                            reject(new Error(json.body || "Upload failed")); 
+                        }
+                    } catch (e) { 
+                        logger.critical(`GAS 청크 응답 파싱 실패 (${start}~${end})`, 'GAS:Relay');
+                        reject(new Error("GAS 응답 오류(Upload): " + res.responseText)); 
+                    }
+                },
+                onerror: (e) => {
+                    logger.critical(`GAS 청크 네트워크 오류 (${start}~${end} / ${totalSize})`, 'GAS:Relay');
+                    reject(new Error("네트워크 오류(Upload)"));
+                },
+                ontimeout: () => {
+                    logger.critical(`GAS 청크 타임아웃 5분 (${start}~${end} / ${totalSize})`, 'GAS:Relay');
+                    reject(new Error(`[GAS] 청크 업로드 타임아웃 (5분): ${start}~${end}`));
+                }
+            });
+        });
+        
+        start = end;
+    }
+
+    console.log(`[GAS] 업로드 완료!`);
+}
+
+/**
+ * Fetch download history from GAS
+ * @param {string} seriesTitle
+ * @param {string} category 
+ * @returns {Promise<string[]>} List of completed episode IDs
+ */
+async function fetchHistory(seriesTitle, category = 'Webtoon') {
+    const config = (0,core_config/* getConfig */.zj)();
+    if (!config.gasUrl) return [];
+    const logger = ui.LogBox.getInstance();
+
+    console.log(`[GAS] 다운로드 기록 조회 중... (${seriesTitle})`);
+
+    return new Promise((resolve) => {
+        GM_xmlhttpRequest({
+            method: "POST",
+            url: config.gasUrl,
+            data: JSON.stringify({
+                type: "check_history",
+                folderId: config.folderId,
+                folderName: seriesTitle,
+                category: category,
+                apiKey: config.apiKey
+            }),
+            headers: { "Content-Type": "text/plain" },
+            timeout: 30000,
+            onload: (res) => {
+                try {
+                    const json = JSON.parse(res.responseText);
+                    if (json.status === 'success') {
+                        resolve(Array.isArray(json.body) ? json.body : []);
+                    } else {
+                        logger.warn(`다운로드 기록 조회 실패: ${json.body}`, 'GAS:History');
+                        resolve([]);
+                    }
+                } catch (e) {
+                    logger.warn(`다운로드 기록 응답 파싱 실패`, 'GAS:History');
+                    resolve([]);
+                }
+            },
+            onerror: () => {
+                logger.warn(`다운로드 기록 조회 네트워크 오류`, 'GAS:History');
+                resolve([]);
+            },
+            ontimeout: () => {
+                logger.warn(`다운로드 기록 조회 타임아웃 (30초)`, 'GAS:History');
+                resolve([]);
+            }
+        });
+    });
+}
+
+/**
+ * [v1.6.0] Fetch cached episode list directly using cacheFileId
+ * @param {string} cacheFileId 
+ * @returns {Promise<Array>} List of cached episodes
+ */
+async function getBooksByCacheId(cacheFileId) {
+    const config = (0,core_config/* getConfig */.zj)();
+    if (!config.gasUrl) return [];
+    const logger = ui.LogBox.getInstance();
+
+    console.log(`[GAS] 캐시 파일 직행 조회 중... (${cacheFileId})`);
+
+    return new Promise((resolve) => {
+        GM_xmlhttpRequest({
+            method: "POST",
+            url: config.gasUrl,
+            data: JSON.stringify({
+                type: "view_get_books_by_cache",
+                cacheFileId: cacheFileId,
+                apiKey: config.apiKey
+            }),
+            headers: { "Content-Type": "text/plain" },
+            timeout: 10000,
+            onload: (res) => {
+                try {
+                    const json = JSON.parse(res.responseText);
+                    if (json.status === 'success') {
+                        resolve(Array.isArray(json.body) ? json.body : []);
+                    } else {
+                        logger.warn(`Fast Path 캐시 직행 조회 실패: ${json.body}`, 'GAS:FastPath');
+                        resolve([]);
+                    }
+                } catch (e) {
+                    logger.warn(`Fast Path 캐시 응답 파싱 실패`, 'GAS:FastPath');
+                    resolve([]);
+                }
+            },
+            onerror: () => {
+                logger.warn(`Fast Path 캐시 네트워크 오류`, 'GAS:FastPath');
+                resolve([]);
+            },
+            ontimeout: () => {
+                logger.warn(`Fast Path 캐시 조회 타임아웃 (10초)`, 'GAS:FastPath');
+                resolve([]);
+            }
+        });
+    });
+}
+
+/**
+ * [v1.6.0] Initialize an update upload session via GAS using fileId (Fast Path)
+ * @param {string} fileId 
+ * @param {string} fileName 
+ */
+async function initUpdateUploadViaGASRelay(fileId, fileName) {
+    const config = (0,core_config/* getConfig */.zj)();
+    if (!(0,core_config/* isConfigValid */.Jb)()) throw new Error("GAS 설정이 누락되었습니다.");
+
+    console.log(`[GAS] 빠른 덮어쓰기(PUT) 세션 초기화 중... (${fileName} -> ${fileId})`);
+
+    return new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+            method: "POST", 
+            url: config.gasUrl,
+            data: JSON.stringify({ 
+                type: "init_update", 
+                fileId: fileId,
+                fileName: fileName,
+                apiKey: config.apiKey
+            }),
+            headers: { "Content-Type": "text/plain" },
+            timeout: 30000,
+            onload: (res) => {
+                try {
+                    const json = JSON.parse(res.responseText);
+                    if (json.status === 'success') { 
+                        resolve((typeof json.body === 'object') ? json.body.uploadUrl : json.body);
+                    } else {
+                        ui.LogBox.getInstance().critical(`Fast Path PUT 세션 초기화 실패: ${json.body || 'Init Update failed'} (${fileName})`, 'GAS:FastPath');
+                        reject(new Error(json.body || "Init Update failed"));
+                    }
+                } catch (e) { 
+                    ui.LogBox.getInstance().critical(`Fast Path PUT 레스폰스 파싱 실패 (${fileName})`, 'GAS:FastPath');
+                    reject(new Error("GAS 응답 오류(Init Update): " + res.responseText)); 
+                }
+            },
+            onerror: (e) => {
+                ui.LogBox.getInstance().critical(`Fast Path PUT 네트워크 오류 (${fileName})`, 'GAS:FastPath');
+                reject(new Error("네트워크 오류(Init Update)"));
+            },
+            ontimeout: () => {
+                ui.LogBox.getInstance().critical(`Fast Path PUT 타임아웃 30초 (${fileName})`, 'GAS:FastPath');
+                reject(new Error("[GAS] 덧쓰기 세션 초기화 타임아웃 (30초)"));
+            }
+        });
+    });
+}
+
+/**
+ * [v1.6.1] Fetch Series-specific Merge Index Fragment
+ * Retrieves the temporary cacheFileId generated after recent uploads without needing a full master_index rebuild.
+ * @param {string} sourceId The `12345` ID of the series
+ * @returns {Promise<Object>} { found: boolean, data: { cacheFileId: string, ... } }
+ */
+async function getMergeIndexFragment(sourceId) {
+    const config = (0,core_config/* getConfig */.zj)();
+    if (!config.gasUrl || !config.folderId) return { found: false, data: null };
+    const logger = ui.LogBox.getInstance();
+
+    console.log(`[GAS] 병합 인덱스 파편 조회 중... (Source ID: ${sourceId})`);
+
+    return new Promise((resolve) => {
+        GM_xmlhttpRequest({
+            method: "POST",
+            url: config.gasUrl,
+            data: JSON.stringify({
+                type: "view_get_merge_index",
+                folderId: config.folderId,
+                sourceId: sourceId,
+                apiKey: config.apiKey
+            }),
+            headers: { "Content-Type": "text/plain" },
+            timeout: 10000,
+            onload: (res) => {
+                try {
+                    const json = JSON.parse(res.responseText);
+                    if (json.status === 'success') {
+                        resolve(json.body);
+                    } else {
+                        logger.warn(`MergeIndex 파편 조회 실패: ${json.body} (ID: ${sourceId})`, 'GAS:FastPath');
+                        resolve({ found: false, data: null });
+                    }
+                } catch (e) {
+                    logger.warn(`MergeIndex 파편 응답 파싱 실패`, 'GAS:FastPath');
+                    resolve({ found: false, data: null });
+                }
+            },
+            onerror: () => {
+                logger.warn(`MergeIndex 파편 조회 네트워크 오류`, 'GAS:FastPath');
+                resolve({ found: false, data: null });
+            },
+            ontimeout: () => {
+                logger.warn(`MergeIndex 파편 조회 타임아웃 (10초)`, 'GAS:FastPath');
+                resolve({ found: false, data: null });
+            }
+        });
+    });
+}
+
+
 ;// ./src/core/utils.js
 
 
@@ -1938,7 +2185,7 @@ async function waitIframeLoad(iframe, url) {
             
             if (isCaptcha || isCloudflare) {
                 console.warn('[Captcha] 감지됨! 사용자 조치 필요');
-                const logger = LogBox.getInstance();
+                const logger = ui.LogBox.getInstance();
                 logger.error('[Captcha] 캡차가 감지되었습니다. 해결 후 "재개" 버튼을 눌러주세요.');
                 await pauseForCaptcha(iframe);
             } else {
@@ -1979,6 +2226,7 @@ async function waitForContent(iframe, maxWaitMs = 8000) {
     }
     // 타임아웃 — 콘텐츠 없이 진행 (후속 로직에서 빈 결과 처리)
     console.warn(`[DOM Poll] ${maxWaitMs}ms 내 콘텐츠 미감지 — 갈무리 시도`);
+    ui.LogBox.getInstance().warn(`DOM 폴링 타임아웃 ${maxWaitMs}ms — 콘텐츠 미감지, 멈춰서 물 평가`, 'DOM:Poll');
 }
 
 /**
@@ -2157,7 +2405,7 @@ async function saveFile(data, filename, type = 'local', extension = 'zip', metad
         const finalPath = `TokiSync/${folderName}/${fullFileName}`.replace(/[<>:"|?*]/g, '_'); // Sanitization for safety
 
         console.log(`[Native] 자동 분류 다운로드 시도... (${finalPath})`);
-        const logger = LogBox.getInstance();
+        const logger = ui.LogBox.getInstance();
 
         return new Promise((resolve, reject) => {
             if (typeof GM_download !== 'function') {
@@ -2184,7 +2432,7 @@ async function saveFile(data, filename, type = 'local', extension = 'zip', metad
             });
         });
     } else if (type === 'drive') {
-        const logger = LogBox.getInstance();
+        const logger = ui.LogBox.getInstance();
         logger.log(`[Drive] 구글 드라이브 업로드 준비 중... (${fullFileName})`);
         
         try {
@@ -2402,32 +2650,33 @@ class EpubBuilder {
     }
 
     async build(metadata = {}) {
-        const zip = new JSZip();
-        const title = metadata.title || "Unknown Title";
-        const author = metadata.author || "Unknown Author";
-        const uid = "urn:uuid:" + (crypto.randomUUID ? crypto.randomUUID() : Date.now());
+        try {
+            const zip = new JSZip();
+            const title = metadata.title || "Unknown Title";
+            const author = metadata.author || "Unknown Author";
+            const uid = "urn:uuid:" + (crypto.randomUUID ? crypto.randomUUID() : Date.now());
 
-        // 1. mimetype (must be first, uncompressed)
-        zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
+            // 1. mimetype (must be first, uncompressed)
+            zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
 
-        // 2. container.xml
-        zip.folder("META-INF").file("container.xml", `<?xml version="1.0"?>
+            // 2. container.xml
+            zip.folder("META-INF").file("container.xml", `<?xml version="1.0"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
     <rootfiles>
         <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
     </rootfiles>
 </container>`);
 
-        // 3. OEBPS Folder
-        const oebps = zip.folder("OEBPS");
+            // 3. OEBPS Folder
+            const oebps = zip.folder("OEBPS");
 
-        // styles.css
-        oebps.file("styles.css", `body { font-family: sans-serif; } p { text-indent: 1em; margin-bottom: 0.5em; }`);
+            // styles.css
+            oebps.file("styles.css", `body { font-family: sans-serif; } p { text-indent: 1em; margin-bottom: 0.5em; }`);
 
-        // Chapters
-        this.chapters.forEach((chapter, index) => {
-            const filename = `chapter_${index + 1}.xhtml`;
-            const xhtml = `<?xml version="1.0" encoding="utf-8"?>
+            // Chapters
+            this.chapters.forEach((chapter, index) => {
+                const filename = `chapter_${index + 1}.xhtml`;
+                const xhtml = `<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
@@ -2439,25 +2688,25 @@ class EpubBuilder {
 ${chapter.content}
 </body>
 </html>`;
-            oebps.file(filename, xhtml);
-        });
+                oebps.file(filename, xhtml);
+            });
 
-        // content.opf
-        let manifest = `<item id="style" href="styles.css" media-type="text/css"/>\n`;
-        let spine = ``;
-        let tocNav = `<navMap>\n`;
+            // content.opf
+            let manifest = `<item id="style" href="styles.css" media-type="text/css"/>\n`;
+            let spine = ``;
+            let tocNav = `<navMap>\n`;
 
-        this.chapters.forEach((c, i) => {
-            const id = `chap${i + 1}`;
-            const href = `chapter_${i + 1}.xhtml`;
-            manifest += `<item id="${id}" href="${href}" media-type="application/xhtml+xml"/>\n`;
-            spine += `<itemref idref="${id}"/>\n`;
-            tocNav += `<navPoint id="${id}" playOrder="${i+1}"><navLabel><text>${c.title}</text></navLabel><content src="${href}"/></navPoint>\n`;
-        });
-        // Add NCX to manifest
-        manifest += `<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>`;
+            this.chapters.forEach((c, i) => {
+                const id = `chap${i + 1}`;
+                const href = `chapter_${i + 1}.xhtml`;
+                manifest += `<item id="${id}" href="${href}" media-type="application/xhtml+xml"/>\n`;
+                spine += `<itemref idref="${id}"/>\n`;
+                tocNav += `<navPoint id="${id}" playOrder="${i+1}"><navLabel><text>${c.title}</text></navLabel><content src="${href}"/></navPoint>\n`;
+            });
+            // Add NCX to manifest
+            manifest += `<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>`;
 
-        const opf = `<?xml version="1.0" encoding="utf-8"?>
+            const opf = `<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" unique-identifier="BookId" version="2.0">
     <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
         <dc:title>${title}</dc:title>
@@ -2473,10 +2722,10 @@ ${chapter.content}
     </spine>
 </package>`;
 
-        oebps.file("content.opf", opf);
+            oebps.file("content.opf", opf);
 
-        // toc.ncx
-        const ncx = `<?xml version="1.0" encoding="UTF-8"?>
+            // toc.ncx
+            const ncx = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN" "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd">
 <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
 <head>
@@ -2490,10 +2739,15 @@ ${tocNav}
 </navMap>
 </ncx>`;
 
-        oebps.file("toc.ncx", ncx);
+            oebps.file("toc.ncx", ncx);
 
-        // Return the ZIP object (which IS the EPUB)
-        return zip; 
+            // Return the ZIP object (which IS the EPUB)
+            return zip; 
+        } catch (e) {
+            const { LogBox } = await Promise.resolve(/* import() */).then(__webpack_require__.bind(__webpack_require__, 963));
+            LogBox.getInstance().critical(`EPUB 빌드 실패: ${e.message} (${metadata.title || 'unknown'})`, 'Builder:EPUB');
+            throw e;
+        }
     }
 }
 
@@ -2510,29 +2764,31 @@ class CbzBuilder {
     }
 
     async build(metadata = {}) {
-        const zip = new JSZip();
-        
-        // Kavita Compatibility: Images at root, no subfolders
-        // Note: As per new strategy, we only build one chapter per CBZ.
-        this.chapters.forEach((chapter) => {
-            chapter.images.forEach((img, idx) => {
-                if (img && img.blob) {
-                    // File name: "image_{0000}{ext}" 
-                    const filename = img.isMissing 
-                        ? `[PAGE_MISSING]_image_${String(idx).padStart(4, '0')}${img.ext}`
-                        : `image_${String(idx).padStart(4, '0')}${img.ext}`;
-                    
-                    // Put directly in root
-                    zip.file(filename, img.blob);
-                }
+        try {
+            const zip = new JSZip();
+            
+            // Kavita Compatibility: Images at root, no subfolders
+            // Note: As per new strategy, we only build one chapter per CBZ.
+            this.chapters.forEach((chapter) => {
+                chapter.images.forEach((img, idx) => {
+                    if (img && img.blob) {
+                        const filename = img.isMissing 
+                            ? `[PAGE_MISSING]_image_${String(idx).padStart(4, '0')}${img.ext}`
+                            : `image_${String(idx).padStart(4, '0')}${img.ext}`;
+                        zip.file(filename, img.blob);
+                    }
+                });
             });
-        });
 
-        // Add ComicInfo.xml for metadata recognition
-        const comicInfo = this.generateComicInfo(metadata);
-        zip.file("ComicInfo.xml", comicInfo);
+            const comicInfo = this.generateComicInfo(metadata);
+            zip.file("ComicInfo.xml", comicInfo);
 
-        return zip;
+            return zip;
+        } catch (e) {
+            const { LogBox } = await Promise.resolve(/* import() */).then(__webpack_require__.bind(__webpack_require__, 963));
+            LogBox.getInstance().critical(`CBZ 빌드 실패: ${e.message} (${metadata.title || 'unknown'})`, 'Builder:CBZ');
+            throw e;
+        }
     }
 
     generateComicInfo(metadata) {
@@ -2567,6 +2823,8 @@ class CbzBuilder {
     }
 }
 
+// EXTERNAL MODULE: ./src/core/anti_sleep.js
+var anti_sleep = __webpack_require__(209);
 ;// ./src/core/downloader.js
 
 
@@ -2593,7 +2851,7 @@ async function processItem(item, builder, siteInfo, iframe, seriesTitle = "") {
     await waitIframeLoad(iframe, item.src);
     
     // Apply Dynamic Sleep based on Policy
-    const config = getConfig();
+    const config = (0,core_config/* getConfig */.zj)();
     const policy = SLEEP_POLICIES[config.sleepMode] || SLEEP_POLICIES.agile;
     await sleep(policy.min, policy.max);
     
@@ -2620,7 +2878,7 @@ async function processItem(item, builder, siteInfo, iframe, seriesTitle = "") {
         }
 
         if (imageUrls.length === 0) {
-            LogBox.getInstance().error(`⚠️ 이미지 감지 실패: ${item.title} — 해당 챕터 건너뜀`);
+            ui.LogBox.getInstance().error(`⚠️ 이미지 감지 실패: ${item.title} — 해당 챕터 건너뜀`, 'Parser');
             return; // 빈 챕터 생성 방지
         }
 
@@ -2669,14 +2927,14 @@ function parseRangeSpec(spec) {
 }
 
 async function tokiDownload(rangeSpec, policy = 'zipOfCbzs') {
-    const logger = LogBox.getInstance();
+    const logger = ui.LogBox.getInstance();
     logger.init();
     logger.show();
     logger.log(`다운로드 시작 (정책: ${policy})...`);
 
     // Auto-start Anti-Sleep mode
     try {
-        startSilentAudio();
+        (0,anti_sleep/* startSilentAudio */.yS)();
         logger.success('[Anti-Sleep] 백그라운드 모드 자동 활성화');
     } catch (e) {
         logger.log('[Anti-Sleep] 자동 시작 실패 (사용자 상호작용 필요)', 'error');
@@ -2685,7 +2943,7 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs') {
     const siteInfo = detectSite();
     if (!siteInfo) {
         alert("지원하지 않는 사이트이거나 다운로드 페이지가 아닙니다.");
-        stopSilentAudio();
+        (0,anti_sleep/* stopSilentAudio */.Cv)();
         return;
     }
     const { site, protocolDomain, category } = siteInfo;
@@ -2744,9 +3002,17 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs') {
             logger.log(`범위 필터 적용: ${rangeSpec} → ${list.length}개 항목`);
         }
         
-        logger.log(`총 ${list.length}개 항목 처리 예정.`);
+        // Log episode range
+        if (list.length > 0) {
+            const firstTitle = list[list.length - 1].title; // usually reversed order
+            const lastTitle = list[0].title;
+            logger.log(`총 ${list.length}개 항목 처리 예정. (${firstTitle} ~ ${lastTitle})`, 'Downloader');
+        } else {
+            logger.log(`총 0개 항목 처리 예정.`, 'Downloader');
+        }
 
         if (list.length === 0) {
+            logger.warn('에피소드 목록이 0개입니다. 사이트 구조가 달라졌거나 올바른 목록 페이지인지 확인하세요.', 'Downloader');
             alert("다운로드할 항목이 없습니다.");
             return;
         }
@@ -2831,7 +3097,7 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs') {
                     logger.log('⚠️  썸네일을 찾을 수 없습니다 (건너뜀)', 'warn');
                 }
             } catch (thumbError) {
-                logger.error(`썸네일 업로드 실패 (계속 진행): ${thumbError.message}`);
+                logger.warn(`썸네일 업로드 실패 (계속 진행): ${thumbError.message}`, 'Downloader');
             }
         }
 
@@ -2861,7 +3127,7 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs') {
             // [v1.6.0] Phase B-2: Load Master Index -> Cache File ID -> Episode List
             try {
                 logger.log('⚡ 고속 업로드(Fast Path) 캐시 조회 중...');
-                const config = getConfig();
+                const config = (0,core_config/* getConfig */.zj)();
                 
                 // 1. Fetch Complete Master Index
                 const indexResponse = await new Promise((resolve, reject) => {
@@ -2959,7 +3225,7 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs') {
                 await processItem(item, currentBuilder, siteInfo, iframe, seriesTitle);
             } catch (err) {
                 console.error(err);
-                logger.error(`항목 실패 (${item.title}): ${err.message}`);
+                logger.error(`항목 처리 실패 (${item.title}): ${err.message}`, 'Downloader');
                 continue; // Skip faulty item but continue loop
             }
 
@@ -3057,10 +3323,10 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs') {
 
                                 await new Promise((res, rej) => {
                                     GM_xmlhttpRequest({
-                                        method: "POST", url: getConfig().gasUrl,
+                                        method: "POST", url: (0,core_config/* getConfig */.zj)().gasUrl,
                                         data: JSON.stringify({ 
                                             type: "upload", uploadUrl: updateUrl, chunkData: chunkBase64, 
-                                            start: start, end: end, total: totalSize, apiKey: getConfig().apiKey
+                                            start: start, end: end, total: totalSize, apiKey: (0,core_config/* getConfig */.zj)().apiKey
                                         }),
                                         headers: { "Content-Type": "text/plain" },
                                         timeout: 300000,
@@ -3076,10 +3342,10 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs') {
                                 start = end;
                             }
                             
-                            logger.success(`⚡ [Fast Path] ${fullFilename} 업데이트(PUT) 완료!`);
+                            logger.success(`⚡ [Fast Path] ${fullFilename} 업데이트(PUT) 완료!`, 'FastPath');
                             success = true;
                         } catch (fastPathErr) {
-                            logger.log(`⚠️ Fast Path 업로드 중 에러 발생 (${fastPathErr.message}), Fallback 시작...`, 'warn');
+                            logger.log(`⚠️ Fast Path 업로드 중 에러 발생 (${fastPathErr.message}), Fallback 시작...`, 'warn', 'FastPath');
                             success = false; // Fallback
                         }
                     }
@@ -3135,20 +3401,20 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs') {
         // [v1.5.5] 배치 완료 후 Drive 캐시 단일 갱신 (에피소드마다 호출하지 않음)
         if (destination === 'drive') {
             refreshCacheAfterUpload(rootFolder, category).catch(e =>
-                console.warn('[Cache] 배치 완료 직후 캐시 갱신 실패 (무시):', e.message)
+                logger.warn(`캐시 갱신 호출 중 실패 (무시): ${e.message}`, 'GAS:Cache')
             );
         }
 
         logger.success(`✅ 다운로드 완료!`);
-        Notifier.notify('TokiSync', `다운로드 완료! (${list.length}개 항목)`);
+        ui/* Notifier */.ze.notify('TokiSync', `다운로드 완료! (${list.length}개 항목)`);
 
     } catch (error) {
         console.error(error);
-        logger.error(`오류 발생: ${error.message}`);
+        logger.error(`전체 다운로드 루틴 오류 발생: ${error.message}`, 'System');
         alert(`다운로드 중 오류 발생:\n${error.message}`);
     } finally {
         // Auto-stop Anti-Sleep mode
-        stopSilentAudio();
+        (0,anti_sleep/* stopSilentAudio */.Cv)();
         logger.log('[Anti-Sleep] 백그라운드 모드 자동 종료');
         
         // Cleanup
@@ -3158,7 +3424,7 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs') {
 }
 
 async function fetchImages(imageUrls) {
-    const logger = LogBox.getInstance();
+    const logger = ui.LogBox.getInstance();
     const promises = imageUrls.map(async (src) => {
         let retries = 3;
         while (retries > 0) {
@@ -3192,7 +3458,7 @@ async function fetchImages(imageUrls) {
                 retries--;
                 if (retries === 0) {
                     console.error(`이미지 다운로드 최종 실패 (${src}):`, e);
-                    logger.error(`⚠️ 이미지 누락: ${src.split('/').pop()} (3회 재시도 실패)`);
+                    logger.error(`⚠️ 이미지 누락: ${src.split('/').pop()} (3회 재시도 실패)`, 'Network:Image');
                     
                     // [Fix] 다운로드 실패 시 null을 반환하여 페이지 자체를 누락시키는 대신,
                     // 안내 문구가 담긴 텍스트 플레이스홀더를 반환하여 CBZ 내에 기록을 남김 (이미지 순서 유지)
@@ -3222,14 +3488,14 @@ async function fetchImages(imageUrls) {
 
 
 function main() {
-    console.log("🚀 TokiDownloader Loaded (New Core v1.6.0)");
+    console.log("🚀 TokiDownloader Loaded (New Core v1.7.0)");
     
-    const logger = LogBox.getInstance();
+    const logger = ui.LogBox.getInstance();
 
     // -- Helper Functions for Menu Actions --
 
     const openViewer = () => {
-         const config = getConfig();
+         const config = (0,core_config/* getConfig */.zj)();
          const viewerUrl = "https://pray4skylark.github.io/tokiSync/";
          const win = window.open(viewerUrl, "_blank");
          
@@ -3248,7 +3514,7 @@ function main() {
     const runThumbnailMigration = async () => {
         if(!confirm("이 작업은 기존 다운로드된 작품들의 썸네일을 새로운 최적화 폴더(_Thumbnails)로 이동시킵니다.\n실행하시겠습니까? (서버 부하가 발생할 수 있습니다)")) return;
         
-        const config = getConfig();
+        const config = (0,core_config/* getConfig */.zj)();
         const win = window.open("", "MigrationLog", "width=600,height=800");
         win.document.write("<h3>🚀 v1.4.0 Migration Started...</h3><pre id='log'></pre>");
         
@@ -3303,7 +3569,7 @@ function main() {
             logger.log('이름 변경 작업 요청 중...');
             
             const token = await getOAuthToken(); // FIXME: OAuth or API Key? Config uses API Key usually.
-            const config = getConfig();
+            const config = (0,core_config/* getConfig */.zj)();
             
             if (!config.gasUrl) {
                 alert('GAS URL이 설정되지 않았습니다.');
@@ -3350,21 +3616,21 @@ function main() {
     };
 
     // -- 1. Initialize MenuModal --
-    new MenuModal({
+    new ui/* MenuModal */.fo({
         onDownload: () => {}, // Not used directly, specific methods below
         downloadAll: () => {
-            const config = getConfig();
+            const config = (0,core_config/* getConfig */.zj)();
             tokiDownload(undefined, config.policy);
         },
         downloadRange: (spec) => {
-            const config = getConfig();
+            const config = (0,core_config/* getConfig */.zj)();
             tokiDownload(spec, config.policy);
         },
         openViewer: openViewer,
-        openSettings: () => showConfigModal(),
+        openSettings: () => (0,core_config/* showConfigModal */.Vh)(),
         toggleLog: () => logger.toggle(),
-        getConfig: getConfig,
-        setConfig: setConfig,
+        getConfig: core_config/* getConfig */.zj,
+        setConfig: core_config/* setConfig */.Nk,
         getEpisodeRange: () => {
             const list = getListItems();
             if (list.length > 0) {
@@ -3393,11 +3659,11 @@ function main() {
 
     // -- 2. Register Legacy Menu Commands (Fallback) --
     if (typeof GM_registerMenuCommand !== 'undefined') {
-        GM_registerMenuCommand('⚙️ 설정 (Settings)', () => showConfigModal());
+        GM_registerMenuCommand('⚙️ 설정 (Settings)', () => (0,core_config/* showConfigModal */.Vh)());
         GM_registerMenuCommand('📜 로그창 토글 (Log)', () => logger.toggle());
         GM_registerMenuCommand('🌐 Viewer 열기', openViewer);
         GM_registerMenuCommand('📥 전체 다운로드', () => {
-            const config = getConfig();
+            const config = (0,core_config/* getConfig */.zj)();
             tokiDownload(undefined, config.policy);
         });
         GM_registerMenuCommand('📂 파일명 표준화 (Migration)', runFilenameMigration);
@@ -3500,7 +3766,7 @@ function main() {
             const history = await fetchHistory(rootFolder, category);
             console.log(`[TokiSync] Received ${history.length} history items:`, history);
             if (history.length > 0) {
-                markDownloadedItems(history);
+                (0,ui/* markDownloadedItems */.hV)(history);
             } else {
                 console.log('[TokiSync] No history items to mark');
             }
@@ -3525,7 +3791,7 @@ function main() {
     if (location.hostname.includes('github.io') || location.hostname.includes('localhost') || location.hostname.includes('127.0.0.1')) {
         console.log("📂 TokiView (Frontend) detected. Injecting Config...");
         
-        const config = getConfig();
+        const config = (0,core_config/* getConfig */.zj)();
         
         if (config.gasUrl && config.folderId) {
             // [Fix] Retry injection to handle timing issues (Viewer might not be ready)
