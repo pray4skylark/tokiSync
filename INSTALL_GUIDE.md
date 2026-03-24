@@ -17,6 +17,7 @@
 1. [Google Apps Script](https://script.google.com/) 접속 -> **새 프로젝트**.
 2. 프로젝트 이름: `TokiSync Server v1.6.0`.
 3. 👉 **[TokiSync_Server_Bundle.gs (서버 코드)](https://pray4skylark.github.io/tokiSync/TokiSync_Server_Bundle.gs)** 링크 클릭 후 화면의 전체 내용을 복사하여 `Code.gs`에 붙여넣기.
+3-1. 👉 **[TokiSync_Server_Bundle.gs (개발 빌드)](https://pray4skylark.github.io/tokiSync/dev/TokiSync_Server_Bundle.gs)** 링크 클릭 후 화면의 전체 내용을 복사하여 `Code.gs`에 붙여넣기.
 4. **저장** (Ctrl+S).
 
 ### 1-1-b. appsscript.json 매니페스트 설정 (중요)
@@ -99,8 +100,9 @@ GAS 매니페스트 파일(`appsscript.json`)이 올바르게 설정되어야 Dr
 1. 브라우저에 [Tampermonkey](https://www.tampermonkey.net/) 설치.
 2. 다음 링크를 클릭하여 스크립트를 설치합니다:
    👉 **[TokiSync UserScript 설치하기](https://pray4skylark.github.io/tokiSync/tokiSync.user.js)**
-3. Tampermonkey 설치 화면이 뜨면 **설치(Install)**를 클릭합니다.
-4. **동작 확인 및 설정**:
+   👉 **[TokiSync UserScript 개발빌드 설치하기](https://pray4skylark.github.io/tokiSync/dev/tokiSync.user.js)**
+4. Tampermonkey 설치 화면이 뜨면 **설치(Install)**를 클릭합니다.
+5. **동작 확인 및 설정**:
    - 뉴토끼/북토끼 사이트 접속.
    - 우측 하단의 **원형 플로팅 메뉴 버튼(⚙️)**을 누르거나, 단축키 **`Ctrl + Shift + T`**를 눌러 **통합 메뉴 모달**을 엽니다.
    - `Settings` 섹션을 열고 다음 항목을 입력합니다:
