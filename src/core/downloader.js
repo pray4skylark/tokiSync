@@ -1,5 +1,5 @@
 import { sleep, waitIframeLoad, saveFile, getCommonPrefix, scrollToLoad } from './utils.js';
-import { getListItems, parseListItem, getNovelContent, getImageList, getThumbnailUrl, getSeriesTitle } from './parser.js';
+import { getListItems, parseListItem, getNovelContent, getImageList, getThumbnailUrl, getSeriesTitle, getSeriesMetadata } from './parser.js';
 import { detectSite } from './detector.js';
 import { EpubBuilder } from './epub.js';
 import { CbzBuilder } from './cbz.js';
@@ -39,14 +39,14 @@ export async function processItem(item, builder, siteInfo, iframe, seriesTitle =
         await scrollToLoad(iframeDoc);
 
         let imageUrls = getImageList(iframeDoc, protocolDomain);
-        console.log(`이미지 ${imageUrls.length}개 감지`);
+        LogBox.getInstance().log(`이미지 ${imageUrls.length}개 감지`, 'Parser');
 
         // [Fix] 시나리오 C: 0개 감지 시 1.5초 추가 대기 후 재파싱 1회
         if (imageUrls.length === 0) {
-            console.warn('[Parser] 이미지 0개 — 1.5초 후 재파싱 시도');
+            LogBox.getInstance().warn('[Parser] 이미지 0개 — 1.5초 후 재파싱 시도', 'Parser');
             await sleep(1500);
             imageUrls = getImageList(iframeDoc, protocolDomain);
-            console.log(`[Parser] 재파싱 결과: ${imageUrls.length}개`);
+            LogBox.getInstance().log(`[Parser] 재파싱 결과: ${imageUrls.length}개`, 'Parser');
         }
 
         if (imageUrls.length === 0) {
@@ -238,6 +238,13 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs') {
                  }
             }
         }
+
+        // [v1.7.0] Collect detailed metadata for Phase 3 Persistence
+        const seriesMetadata = {
+            ...getSeriesMetadata(),
+            title: seriesTitle || rootFolder,
+            thumbnail: getThumbnailUrl() || ""
+        };
 
         // [Fix] Append Range [Start-End] for Local Merged Files (folderInCbz / zipOfCbzs)
         // GAS Upload uses individual files so no range needed in folder name
@@ -572,7 +579,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs') {
 
         // [v1.5.5] 배치 완료 후 Drive 캐시 단일 갱신 (에피소드마다 호출하지 않음)
         if (destination === 'drive') {
-            refreshCacheAfterUpload(rootFolder, category).catch(e =>
+            refreshCacheAfterUpload(rootFolder, category, seriesMetadata).catch(e =>
                 logger.warn(`캐시 갱신 호출 중 실패 (무시): ${e.message}`, 'GAS:Cache')
             );
         }
@@ -640,7 +647,9 @@ async function fetchImages(imageUrls) {
                 return { src, blob, ext };
             } catch (e) {
                 retries--;
-                console.warn(`이미지 다운로드 재시도 중... (${3 - retries}/3) [사유: ${e.message}] - ${src}`);
+                const retryCount = 3 - retries;
+                logger.warn(`이미지 다운로드 재시도 (${retryCount}/3): ${e.message}`, 'Network:Image');
+                console.warn(`이미지 다운로드 재시도 중... (${retryCount}/3) [사유: ${e.message}] - ${src}`);
                 
                 if (retries === 0) {
                     // 3회 모두 실패했으나 lastBlob이 존재한다면 (100KB 이하 정규 컷일 가능성) -> 수용

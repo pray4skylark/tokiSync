@@ -60,8 +60,22 @@
 
         <!-- Scroll Mode -->
         <div v-if="viewerData.mode === 'scroll'" class="max-w-4xl w-full">
-          <img v-for="(src, i) in viewerContent.images" :key="i" :src="src"
-               class="w-full h-auto block select-none shadow-2xl border-b border-white/5" loading="lazy">
+          <div v-for="(src, i) in viewerContent.images" :key="i" 
+               class="w-full relative min-h-[400px]"
+               :ref="el => { if (el && viewerDefaults.virtualScroll) observeElement(el); }"
+               :data-index="i">
+            
+            <!-- Render if Virtual Scroll is OFF OR if current image is visible -->
+            <img v-if="!viewerDefaults.virtualScroll || isVisible(i)" :src="src"
+                 @load="viewerDefaults.autoCrop ? loadBounds(i, src) : null"
+                 class="w-full h-auto block select-none shadow-2xl transition-opacity duration-300"
+                 :style="(viewerDefaults.autoCrop && imageBoundsMap[i]) ? { clipPath: `inset(${imageBoundsMap[i].top}% ${imageBoundsMap[i].right}% ${imageBoundsMap[i].bottom}% ${imageBoundsMap[i].left}%)` } : {}">
+            
+            <!-- Placeholder for virtual scroll -->
+            <div v-else-if="viewerDefaults.virtualScroll" class="w-full h-[800px] flex items-center justify-center bg-zinc-900/10">
+              <div class="w-8 h-8 border-2 border-zinc-800 border-t-zinc-600 rounded-full animate-spin"></div>
+            </div>
+          </div>
           <!-- End of Chapter: 다음 화 안내 인라인 섹션 -->
           <div class="next-ep-guide">
             <p class="next-ep-guide-label">End of Chapter</p>
@@ -106,21 +120,36 @@
             <template v-if="viewerDefaults.spread && currentSlotData">
               <!-- Slot-based: single (cover etc.) → 1 image -->
               <template v-if="currentSlotData.type === 'single'">
-                <img :key="'s'+currentSlotIndex" :src="currentSlotData.images[0]" class="single-image shadow-2xl">
+                <img :key="'s'+currentSlotIndex" :src="currentSlotData.images[0]" 
+                     @load="viewerDefaults.autoCrop ? loadBounds(currentSlotData.pages[0], currentSlotData.images[0]) : null"
+                     class="single-image shadow-2xl transition-all duration-500"
+                     :style="(viewerDefaults.autoCrop && imageBoundsMap[currentSlotData.pages[0]]) ? { clipPath: `inset(${imageBoundsMap[currentSlotData.pages[0]].top}% ${imageBoundsMap[currentSlotData.pages[0]].right}% ${imageBoundsMap[currentSlotData.pages[0]].bottom}% ${imageBoundsMap[currentSlotData.pages[0]].left}%)` } : {}">
               </template>
               <!-- Slot-based: spread (wide image) → full width -->
               <template v-else-if="currentSlotData.type === 'spread'">
-                <img :key="'s'+currentSlotIndex" :src="currentSlotData.images[0]" class="spread-wide-image shadow-2xl">
+                <img :key="'s'+currentSlotIndex" :src="currentSlotData.images[0]" 
+                     @load="viewerDefaults.autoCrop ? loadBounds(currentSlotData.pages[0], currentSlotData.images[0]) : null"
+                     class="spread-wide-image shadow-2xl transition-all duration-500"
+                     :style="(viewerDefaults.autoCrop && imageBoundsMap[currentSlotData.pages[0]]) ? { clipPath: `inset(${imageBoundsMap[currentSlotData.pages[0]].top}% ${imageBoundsMap[currentSlotData.pages[0]].right}% ${imageBoundsMap[currentSlotData.pages[0]].bottom}% ${imageBoundsMap[currentSlotData.pages[0]].left}%)` } : {}">
               </template>
               <!-- Slot-based: pair → 2 images side by side -->
               <template v-else-if="currentSlotData.type === 'pair'">
-                <img :key="'s'+currentSlotIndex+'a'" :src="currentSlotData.images[0]" class="spread-image shadow-2xl">
-                <img :key="'s'+currentSlotIndex+'b'" :src="currentSlotData.images[1]" class="spread-image shadow-2xl">
+                <img :key="'s'+currentSlotIndex+'a'" :src="currentSlotData.images[0]" 
+                     @load="viewerDefaults.autoCrop ? loadBounds(currentSlotData.pages[0], currentSlotData.images[0]) : null"
+                     class="spread-image shadow-2xl transition-all duration-500"
+                     :style="(viewerDefaults.autoCrop && imageBoundsMap[currentSlotData.pages[0]]) ? { clipPath: `inset(${imageBoundsMap[currentSlotData.pages[0]].top}% ${imageBoundsMap[currentSlotData.pages[0]].right}% ${imageBoundsMap[currentSlotData.pages[0]].bottom}% ${imageBoundsMap[currentSlotData.pages[0]].left}%)` } : {}">
+                <img :key="'s'+currentSlotIndex+'b'" :src="currentSlotData.images[1]" 
+                     @load="viewerDefaults.autoCrop ? loadBounds(currentSlotData.pages[1], currentSlotData.images[1]) : null"
+                     class="spread-image shadow-2xl transition-all duration-500"
+                     :style="(viewerDefaults.autoCrop && imageBoundsMap[currentSlotData.pages[1]]) ? { clipPath: `inset(${imageBoundsMap[currentSlotData.pages[1]].top}% ${imageBoundsMap[currentSlotData.pages[1]].right}% ${imageBoundsMap[currentSlotData.pages[1]].bottom}% ${imageBoundsMap[currentSlotData.pages[1]].left}%)` } : {}">
               </template>
             </template>
             <template v-else>
               <!-- Single page mode (no spread) -->
-              <img v-if="currentImage" :key="'p'+currentPage" :src="currentImage" class="single-image shadow-2xl">
+              <img v-if="currentImage" :key="'p'+currentPage" :src="currentImage" 
+                   @load="viewerDefaults.autoCrop ? loadBounds(currentPage - 1, currentImage) : null"
+                   class="single-image shadow-2xl transition-all duration-500"
+                   :style="(viewerDefaults.autoCrop && imageBoundsMap[currentPage - 1]) ? { clipPath: `inset(${imageBoundsMap[currentPage - 1].top}% ${imageBoundsMap[currentPage - 1].right}% ${imageBoundsMap[currentPage - 1].bottom}% ${imageBoundsMap[currentPage - 1].left}%)` } : {}">
             </template>
           </div>
           </template>
@@ -231,6 +260,8 @@ import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
 import { useStore } from '../composables/useStore';
 import { useViewerInput } from '../composables/useViewerInput';
 import { useKeyboard } from '../composables/useKeyboard';
+import { useVirtualScroll } from '../composables/useVirtualScroll';
+import { useAutoCrop } from '../composables/useAutoCrop';
 
 const {
   showViewerControls, showEpisodeModal,
@@ -247,6 +278,19 @@ const {
   cleanupBlobUrls,
   setNovelTheme, adjustFontSize, setLineHeight, toggleNovelSpread,
 } = useStore();
+
+const { initObserver, observeElement, unobserveElement, isVisible, cleanup: cleanupVirtual } = useVirtualScroll();
+const { getBounds } = useAutoCrop();
+
+// Cache for image bounds [index] -> { top, right, bottom, left }
+const imageBoundsMap = reactive({});
+const imageRefs = ref([]);
+
+async function loadBounds(index, url) {
+  if (imageBoundsMap[index]) return;
+  const bounds = await getBounds(selectedItem.value.id, currentEpisode.value.id, index, url);
+  if (bounds) imageBoundsMap[index] = bounds;
+}
 
 const isNovelMode = computed(() => viewerContent.value?.type === 'text');
 
@@ -307,6 +351,11 @@ watch(() => viewerContent.value, () => {
     novelCurrentPage.value = 0;
     nextTick(() => setTimeout(recalcNovelPages, 100));
   }
+  // [v1.7.0] [취약점 2 수정] 화 전환 시 가상 스크롤 옵저버 재시작
+  if (viewerData.mode === 'scroll' && viewerDefaults.virtualScroll) {
+    cleanupVirtual();
+    nextTick(() => initObserver());
+  }
 });
 
 // Watch slider (currentPage) changes → sync novelCurrentPage
@@ -327,6 +376,7 @@ let resizeObserver = null;
 onMounted(() => {
   input.attach();
   keyboard.attach();
+  initObserver();
 
   // ResizeObserver for re-pagination on window resize
   resizeObserver = new ResizeObserver(() => {
@@ -343,6 +393,7 @@ onUnmounted(() => {
   input.detach();
   keyboard.detach();
   cleanupBlobUrls();
+  cleanupVirtual();
   if (resizeObserver) resizeObserver.disconnect();
 });
 </script>

@@ -136,7 +136,8 @@ async function waitForContent(iframe, maxWaitMs = 8000) {
             const hasNovel  = iframeDoc.querySelector('#novel_content') !== null;
             
             if (hasImages || hasNovel) {
-                console.log(`[DOM Poll] 콘텐츠 감지 (${(i + 1) * POLL_INTERVAL}ms)`);
+                const type = hasImages ? 'Webtoon' : 'Novel';
+                LogBox.getInstance().log(`[DOM Poll] ${type} 콘텐츠 감지 (${(i + 1) * POLL_INTERVAL}ms)`, 'DOM:Poll');
                 return; // 콘텐츠 발견 → 즉시 반환
             }
         } catch (e) {
@@ -167,6 +168,7 @@ export async function scrollToLoad(iframeDoc, maxWaitMs = 8000) {
     let maxScroll = iframeDoc.documentElement.scrollHeight - iframeDoc.documentElement.clientHeight;
     
     // 강제 스크롤 다운
+    LogBox.getInstance().log('강제 스크롤을 통한 이미지 활성화 시작...', 'DOM:Scroll');
     while (currentScroll < maxScroll && attempts < maxAttempts) {
         currentScroll += scrollStep;
         win.scrollTo({ top: currentScroll, behavior: 'smooth' });
@@ -185,7 +187,7 @@ export async function scrollToLoad(iframeDoc, maxWaitMs = 8000) {
         });
         
         if (!remainingLazy) {
-            console.log(`[ScrollToLoad] 모든 이미지 URL 로드 완료 (${attempts * interval}ms)`);
+            LogBox.getInstance().log(`[ScrollToLoad] 모든 이미지 URL 활성화 완료 (${attempts * interval}ms)`, 'DOM:Scroll');
             break;
         }
         

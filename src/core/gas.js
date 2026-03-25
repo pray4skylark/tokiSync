@@ -40,7 +40,7 @@ export async function uploadToGAS(blob, folderName, fileName, options = {}) {
  * 업로드 완료 후 GAS의 _toki_cache.json을 갱신합니다 (비동기, fire-and-forget)
  * 에피소드 c30치 다운로드 완료 후 한 번만 호출하세요.
  */
-export async function refreshCacheAfterUpload(folderName, category = 'Unknown') {
+export async function refreshCacheAfterUpload(folderName, category = 'Unknown', metadata = {}) {
     const config = getConfig();
     if (!config.gasUrl || !config.folderId) return;
     const logger = LogBox.getInstance();
@@ -54,6 +54,7 @@ export async function refreshCacheAfterUpload(folderName, category = 'Unknown') 
                 folderId: config.folderId,
                 folderName,
                 category,
+                metadata, // [v1.7.0] Pass full metadata
                 apiKey: config.apiKey,
                 protocolVersion: 3,
             }),

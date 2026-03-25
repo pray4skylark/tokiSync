@@ -2,7 +2,7 @@
   <div class="min-h-screen flex flex-col">
     <!-- Header & Settings (hidden in reader) -->
     <NavHeader v-if="currentView !== 'viewer'" />
-    <SettingsPanel v-if="currentView !== 'viewer'" />
+    <SettingsPanel />
 
     <!-- View Router -->
     <transition name="fade" mode="out-in">

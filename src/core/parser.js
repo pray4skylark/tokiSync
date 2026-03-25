@@ -146,3 +146,41 @@ export function getSeriesTitle() {
 
     return null;
 }
+
+/**
+ * [v1.7.0] Extract full series metadata for Phase 3 Persistence
+ * @returns {Object} { author: string, status: string, summary: string }
+ */
+export function getSeriesMetadata() {
+    const meta = {
+        author: "",
+        status: "연재중",
+        summary: ""
+    };
+
+    try {
+        // 1. Extract Author & Status from .view-content (ManaToki/BookToki common)
+        const viewContent = document.querySelector('.view-content');
+        if (viewContent) {
+            const text = viewContent.innerText;
+            
+            // Regex for Author: "작가 : 이름", "저자 : 이름", "글작가 : 이름" 등 대응
+            const authorMatch = text.match(/(?:작가|저자|글작가|글)\s*:\s*([^ \n\r,·/]+)/);
+            if (authorMatch) meta.author = authorMatch[1].trim();
+
+            // Regex for Status: "분류 : 연재중", "분류 : 완결"
+            if (text.includes('완결')) meta.status = '완결';
+            else if (text.includes('연재')) meta.status = '연재중';
+        }
+
+        // 2. Extract Summary (og:description or specific div)
+        const ogDesc = document.querySelector('meta[property="og:description"]');
+        if (ogDesc && ogDesc.content) {
+            meta.summary = ogDesc.content.trim();
+        }
+    } catch (e) {
+        console.warn('[Parser] Metadata extraction failed:', e);
+    }
+
+    return meta;
+}

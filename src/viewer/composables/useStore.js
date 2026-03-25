@@ -1,22 +1,11 @@
-import { ref, reactive, computed, watch } from 'vue';
-import Dexie from 'dexie';
+import { ref, reactive, computed, watch, toRaw } from 'vue';
+import { db } from './db.js';
 import { useBridge } from './useBridge.js';
 import { useGAS } from './useGAS.js';
 import { useFetcher } from './useFetcher.js';
+import { useSpread } from './useSpread.js';
 
-// --- Dexie.js (Offline-First Cache) ---
-const db = new Dexie('ViewerHubDB');
-db.version(1).stores({ library: '++id, title, type, fileId, progress' });
-db.version(2).stores({
-  library: '++id, title, type, fileId, progress',
-  readHistory: 'episodeId, seriesId, lastReadAt',
-});
-db.version(3).stores({
-  library: '++id, title, type, fileId, progress',
-  readHistory: 'episodeId, seriesId, lastReadAt',
-  libraryCache: 'id',            // 단일 레코드 { id:'default', data:[], cachedAt }
-  episodeCache: '[seriesId+id], seriesId, cachedAt', // 에피소드 목록 (seriesId 단위)
-});
+// Removed local Dexie setup (now in db.js)
 
 // --- Cache TTL (ms) ---
 const LIBRARY_TTL = 60 * 60 * 1000;   // 1시간
@@ -43,7 +32,30 @@ const isSyncing = ref(false);
 const notification = ref('');
 
 const config = reactive({ deploymentId: '', apiKey: '', folderId: '' });
-const viewerDefaults = reactive({ spread: true, rtl: false, coverFirst: true });
+const viewerDefaults = reactive({ 
+  spread: true, 
+  rtl: false, 
+  coverFirst: true,
+  autoCrop: false,      
+  virtualScroll: true    
+});
+
+// [v1.7.0] [오류 2 수정] viewerDefaults 영속화
+(function loadViewerDefaults() {
+  const saved = localStorage.getItem('TOKI_VIEWER_DEFAULTS');
+  if (saved) {
+    try {
+      Object.assign(viewerDefaults, JSON.parse(saved));
+    } catch (e) {
+      console.warn('[Store] Failed to load viewerDefaults:', e);
+    }
+  }
+})();
+
+watch(viewerDefaults, (val) => {
+  localStorage.setItem('TOKI_VIEWER_DEFAULTS', JSON.stringify(toRaw(val)));
+}, { deep: true });
+
 const viewerData = reactive({ mode: 'page' });
 const novelSettings = reactive({ theme: 'dark', fontSize: 26, lineHeight: 2.0, spread: false, lastMode: 'scroll' });
 const novelPageCount = ref(1);
@@ -164,40 +176,31 @@ function buildPageSlots() {
     return;
   }
 
-  const images = content.images;
-  const dims = content.dimensions || [];
-  const slots = [];
-  let i = 0;
+  const { calculateSlots } = useSpread();
+  const imagesWithDims = content.images.map((url, i) => ({
+    url,
+    width: content.dimensions?.[i]?.w || 0,
+    height: content.dimensions?.[i]?.h || 0,
+    originalIndex: i // [오류 6 수정] index 역추적을 위해 보존
+  }));
 
-  // Cover First: first image always single
-  if (viewerDefaults.coverFirst && images.length > 0) {
-    slots.push({ type: 'single', pages: [i++] });
-  }
+  const slots = calculateSlots(imagesWithDims, {
+    spread: viewerDefaults.spread,
+    rtl: viewerDefaults.rtl,
+    coverFirst: viewerDefaults.coverFirst
+  });
 
-  while (i < images.length) {
-    const wideI = isWideImage(dims[i]);
+  // Map to the internal slot structure { type, pages: [indices] }
+  pageSlots.value = slots.map(slot => {
+    let type = 'single';
+    if (slot.length > 1) type = 'pair';
+    else if (slot[0].width > slot[0].height * 1.15) type = 'spread';
+    
+    // [오류 6 수정] indexOf 대신 originalIndex 사용
+    const indices = slot.map(s => s.originalIndex);
+    return { type, pages: indices };
+  });
 
-    if (wideI) {
-      // Wide image → spread slot (single full-width)
-      slots.push({ type: 'spread', pages: [i++] });
-    } else if (i + 1 < images.length) {
-      const wideNext = isWideImage(dims[i + 1]);
-      if (wideNext) {
-        // Next is wide → current goes single, next will be spread on next iteration
-        slots.push({ type: 'single', pages: [i++] });
-      } else {
-        // Both normal → pair
-        slots.push({ type: 'pair', pages: [i, i + 1] });
-        i += 2;
-      }
-    } else {
-      // Last remaining image → single
-      slots.push({ type: 'single', pages: [i++] });
-    }
-  }
-
-  pageSlots.value = slots;
-  // Sync currentPage to slot
   currentSlotIndex.value = 0;
   currentPage.value = 1;
 }
