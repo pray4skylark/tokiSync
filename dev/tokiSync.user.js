@@ -1710,7 +1710,7 @@ async function uploadToGAS(blob, folderName, fileName, options = {}) {
  * 업로드 완료 후 GAS의 _toki_cache.json을 갱신합니다 (비동기, fire-and-forget)
  * 에피소드 c30치 다운로드 완료 후 한 번만 호출하세요.
  */
-async function refreshCacheAfterUpload(folderName, category = 'Unknown') {
+async function refreshCacheAfterUpload(folderName, category = 'Unknown', metadata = {}) {
     const config = (0,core_config/* getConfig */.zj)();
     if (!config.gasUrl || !config.folderId) return;
     const logger = ui.LogBox.getInstance();
@@ -1724,6 +1724,7 @@ async function refreshCacheAfterUpload(folderName, category = 'Unknown') {
                 folderId: config.folderId,
                 folderName,
                 category,
+                metadata, // [v1.7.0] Pass full metadata
                 apiKey: config.apiKey,
                 protocolVersion: 3,
             }),
@@ -2216,7 +2217,8 @@ async function waitForContent(iframe, maxWaitMs = 8000) {
             const hasNovel  = iframeDoc.querySelector('#novel_content') !== null;
             
             if (hasImages || hasNovel) {
-                console.log(`[DOM Poll] 콘텐츠 감지 (${(i + 1) * POLL_INTERVAL}ms)`);
+                const type = hasImages ? 'Webtoon' : 'Novel';
+                ui.LogBox.getInstance().log(`[DOM Poll] ${type} 콘텐츠 감지 (${(i + 1) * POLL_INTERVAL}ms)`, 'DOM:Poll');
                 return; // 콘텐츠 발견 → 즉시 반환
             }
         } catch (e) {
@@ -2247,6 +2249,7 @@ async function scrollToLoad(iframeDoc, maxWaitMs = 8000) {
     let maxScroll = iframeDoc.documentElement.scrollHeight - iframeDoc.documentElement.clientHeight;
     
     // 강제 스크롤 다운
+    ui.LogBox.getInstance().log('강제 스크롤을 통한 이미지 활성화 시작...', 'DOM:Scroll');
     while (currentScroll < maxScroll && attempts < maxAttempts) {
         currentScroll += scrollStep;
         win.scrollTo({ top: currentScroll, behavior: 'smooth' });
@@ -2265,7 +2268,7 @@ async function scrollToLoad(iframeDoc, maxWaitMs = 8000) {
         });
         
         if (!remainingLazy) {
-            console.log(`[ScrollToLoad] 모든 이미지 URL 로드 완료 (${attempts * interval}ms)`);
+            ui.LogBox.getInstance().log(`[ScrollToLoad] 모든 이미지 URL 활성화 완료 (${attempts * interval}ms)`, 'DOM:Scroll');
             break;
         }
         
@@ -2601,6 +2604,44 @@ function getSeriesTitle() {
     return null;
 }
 
+/**
+ * [v1.7.0] Extract full series metadata for Phase 3 Persistence
+ * @returns {Object} { author: string, status: string, summary: string }
+ */
+function getSeriesMetadata() {
+    const meta = {
+        author: "",
+        status: "연재중",
+        summary: ""
+    };
+
+    try {
+        // 1. Extract Author & Status from .view-content (ManaToki/BookToki common)
+        const viewContent = document.querySelector('.view-content');
+        if (viewContent) {
+            const text = viewContent.innerText;
+            
+            // Regex for Author: "작가 : 이름", "저자 : 이름", "글작가 : 이름" 등 대응
+            const authorMatch = text.match(/(?:작가|저자|글작가|글)\s*:\s*([^ \n\r,·/]+)/);
+            if (authorMatch) meta.author = authorMatch[1].trim();
+
+            // Regex for Status: "분류 : 연재중", "분류 : 완결"
+            if (text.includes('완결')) meta.status = '완결';
+            else if (text.includes('연재')) meta.status = '연재중';
+        }
+
+        // 2. Extract Summary (og:description or specific div)
+        const ogDesc = document.querySelector('meta[property="og:description"]');
+        if (ogDesc && ogDesc.content) {
+            meta.summary = ogDesc.content.trim();
+        }
+    } catch (e) {
+        console.warn('[Parser] Metadata extraction failed:', e);
+    }
+
+    return meta;
+}
+
 ;// ./src/core/detector.js
 function detectSite() {
     const currentURL = document.URL;
@@ -2867,14 +2908,14 @@ async function processItem(item, builder, siteInfo, iframe, seriesTitle = "") {
         await scrollToLoad(iframeDoc);
 
         let imageUrls = getImageList(iframeDoc, protocolDomain);
-        console.log(`이미지 ${imageUrls.length}개 감지`);
+        ui.LogBox.getInstance().log(`이미지 ${imageUrls.length}개 감지`, 'Parser');
 
         // [Fix] 시나리오 C: 0개 감지 시 1.5초 추가 대기 후 재파싱 1회
         if (imageUrls.length === 0) {
-            console.warn('[Parser] 이미지 0개 — 1.5초 후 재파싱 시도');
+            ui.LogBox.getInstance().warn('[Parser] 이미지 0개 — 1.5초 후 재파싱 시도', 'Parser');
             await sleep(1500);
             imageUrls = getImageList(iframeDoc, protocolDomain);
-            console.log(`[Parser] 재파싱 결과: ${imageUrls.length}개`);
+            ui.LogBox.getInstance().log(`[Parser] 재파싱 결과: ${imageUrls.length}개`, 'Parser');
         }
 
         if (imageUrls.length === 0) {
@@ -3066,6 +3107,13 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs') {
                  }
             }
         }
+
+        // [v1.7.0] Collect detailed metadata for Phase 3 Persistence
+        const seriesMetadata = {
+            ...getSeriesMetadata(),
+            title: seriesTitle || rootFolder,
+            thumbnail: getThumbnailUrl() || ""
+        };
 
         // [Fix] Append Range [Start-End] for Local Merged Files (folderInCbz / zipOfCbzs)
         // GAS Upload uses individual files so no range needed in folder name
@@ -3400,7 +3448,7 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs') {
 
         // [v1.5.5] 배치 완료 후 Drive 캐시 단일 갱신 (에피소드마다 호출하지 않음)
         if (destination === 'drive') {
-            refreshCacheAfterUpload(rootFolder, category).catch(e =>
+            refreshCacheAfterUpload(rootFolder, category, seriesMetadata).catch(e =>
                 logger.warn(`캐시 갱신 호출 중 실패 (무시): ${e.message}`, 'GAS:Cache')
             );
         }
@@ -3468,7 +3516,9 @@ async function fetchImages(imageUrls) {
                 return { src, blob, ext };
             } catch (e) {
                 retries--;
-                console.warn(`이미지 다운로드 재시도 중... (${3 - retries}/3) [사유: ${e.message}] - ${src}`);
+                const retryCount = 3 - retries;
+                logger.warn(`이미지 다운로드 재시도 (${retryCount}/3): ${e.message}`, 'Network:Image');
+                console.warn(`이미지 다운로드 재시도 중... (${retryCount}/3) [사유: ${e.message}] - ${src}`);
                 
                 if (retries === 0) {
                     // 3회 모두 실패했으나 lastBlob이 존재한다면 (100KB 이하 정규 컷일 가능성) -> 수용

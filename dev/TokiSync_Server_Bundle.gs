@@ -1,4 +1,4 @@
-/* ⚙️ TokiSync Server Code Bundle v1.0.0 (Generated: 2026-03-25T01:08:24.265Z) */
+/* ⚙️ TokiSync Server Code Bundle v1.0.0 (Generated: 2026-03-25T15:54:03.199Z) */
 
 /* ========================================================================== */
 /* FILE: Main.gs */
@@ -947,6 +947,7 @@ function View_Dispatcher(data) {
                 // Extract clean title from "[12345] 작품명" → "작품명"
                 const titleClean = seriesFolderName.replace(/^\[\d+\]\s*/, '').trim();
                 
+                const extraMeta = data.metadata || {};
                 const fragData = JSON.stringify({
                     id: seriesId,
                     sourceId: sourceId,
@@ -954,6 +955,10 @@ function View_Dispatcher(data) {
                     folderName: seriesFolderName,
                     url: seriesFolder.getUrl(),
                     category: data.category || "Unknown",
+                    author: extraMeta.author || "",
+                    status: extraMeta.status || "연재중",
+                    summary: extraMeta.summary || "",
+                    thumbnail: extraMeta.thumbnail || "",
                     created: seriesFolder.getDateCreated().toISOString(),
                     cacheFileId: cacheFileId,
                     itemsCount: itemsCount,
@@ -968,6 +973,17 @@ function View_Dispatcher(data) {
                     mergeFolder.createFile(fragName, fragData, MimeType.PLAIN_TEXT);
                 }
                 Debug.log(`[MergeIndex] Created fragment for ${sourceId} / ${cacheFileId}`);
+
+                // [v1.7.0] Metadata Persistence (Phase 3)
+                // Save series metadata into _toki_meta.json within the series folder itself
+                const metaName = "_toki_meta.json";
+                const metaFiles = seriesFolder.getFilesByName(metaName);
+                if (metaFiles.hasNext()) {
+                    metaFiles.next().setContent(fragData); // Re-use fragData as it's the same schema
+                } else {
+                    seriesFolder.createFile(metaName, fragData, MimeType.PLAIN_TEXT);
+                }
+                Debug.log(`[Metadata] Persisted metadata in series folder: ${seriesFolderName}`);
             }
             
             resultBody = { updated: true, seriesId: seriesId, mergeStatus: "success" };
@@ -1551,7 +1567,38 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
   let booksCount = 0;
   let thumbnailId = "";
 
-  // ID Parsing "[12345] Title"
+  // 1. [v1.7.0] Metadata Persistence (Phase 3) - Self-Healing
+  const metaFiles = folder.getFilesByName("_toki_meta.json");
+  if (metaFiles.hasNext()) {
+    try {
+      const metaData = JSON.parse(metaFiles.next().getBlob().getDataAsString());
+      const tid = (thumbMap && metaData.sourceId) ? thumbMap[metaData.sourceId] : "";
+      return {
+        id: metaData.id || folder.getId(),
+        sourceId: metaData.sourceId || "",
+        name: metaData.name || folderName,
+        folderName: folderName,
+        url: metaData.url || folder.getUrl(),
+        booksCount: metaData.itemsCount || 0,
+        cacheFileId: metaData.cacheFileId || "",
+        thumbnailId: tid,
+        thumbnail: tid ? "" : (metaData.thumbnail || ""), 
+        hasCover: !!tid,
+        lastModified: metaData.lastUpdated || folder.getLastUpdated().toISOString(),
+        category: metaData.category || categoryContext,
+        metadata: {
+            category: metaData.category || categoryContext,
+            status: metaData.status || "ONGOING",
+            authors: metaData.author ? [metaData.author] : [],
+            summary: metaData.summary || ""
+        }
+      };
+    } catch (e) {
+      Debug.log(`[Metadata] Failed to parse _toki_meta.json for ${folderName}: ${e}`);
+    }
+  }
+
+  // 2. ID Parsing "[12345] Title" (Fallback)
   const idMatch = folderName.match(/^\[(\d+)\]/);
   if (idMatch) {
     sourceId = idMatch[1];
