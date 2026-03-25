@@ -1,4 +1,4 @@
-/* ⚙️ TokiSync Server Code Bundle v1.0.0 (Generated: 2026-03-24T10:25:14.607Z) */
+/* ⚙️ TokiSync Server Code Bundle v1.0.0 (Generated: 2026-03-25T01:08:24.265Z) */
 
 /* ========================================================================== */
 /* FILE: Main.gs */
@@ -953,6 +953,7 @@ function View_Dispatcher(data) {
                     name: titleClean,
                     folderName: seriesFolderName,
                     url: seriesFolder.getUrl(),
+                    category: data.category || "Unknown",
                     created: seriesFolder.getDateCreated().toISOString(),
                     cacheFileId: cacheFileId,
                     itemsCount: itemsCount,
@@ -1370,6 +1371,7 @@ function SweepMergeIndex(folderId, cachedList) {
                                 url: fragData.url || "",
                                 cacheFileId: fragData.cacheFileId,
                                 itemsCount: fragData.itemsCount || 0,
+                                category: fragData.category || "Unknown",
                                 created: fragData.created || new Date().toISOString(),
                                 lastModified: new Date(fragData.lastUpdated || Date.now())
                             });
