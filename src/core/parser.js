@@ -48,18 +48,18 @@ export function getImageList(iframeDocument, protocolDomain) {
         // [Fix] 시나리오 2: outerHTML 정규식(/data) 의존 제거
         // 우선순위: src 직접 → 주요 data-* 속성 → outerHTML 정규식 폴백
         try {
-            // 1순위: src가 실제 이미지 URL인 경우 (이미 로드 완료)
-            const directSrc = img.src;
-            if (directSrc && !directSrc.includes('data:') && directSrc.startsWith('http')) {
-                return directSrc;
-            }
-            
-            // 2순위: 흔히 쓰이는 lazy-load data 속성
+            // 1순위: 흔히 쓰이는 lazy-load data 속성 (Placeholder 우회를 위해 최우선 체크)
             const lazyAttrs = ['data-src', 'data-original', 'data-lazy', 'data-url', 'data-img'];
             for (const attr of lazyAttrs) {
                 const val = img.getAttribute(attr);
                 if (val && val.startsWith('/')) return `${protocolDomain}${val}`;
                 if (val && val.startsWith('http')) return val;
+            }
+
+            // 2순위: src가 실제 이미지 URL인 경우 (Lazy 로딩이 없는 일반 이미지)
+            const directSrc = img.src;
+            if (directSrc && !directSrc.includes('data:') && directSrc.startsWith('http')) {
+                return directSrc;
             }
             
             // 3순위: 전체 data-* 속성을 순회해 경로로 보이는 값 추출

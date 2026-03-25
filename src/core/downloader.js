@@ -599,6 +599,9 @@ async function fetchImages(imageUrls) {
     const logger = LogBox.getInstance();
     const promises = imageUrls.map(async (src) => {
         let retries = 3;
+        let lastBlob = null;
+        let lastExt = '.jpg';
+        
         while (retries > 0) {
             try {
                 const response = await fetch(src);
@@ -625,22 +628,39 @@ async function fetchImages(imageUrls) {
                     }
                 }
 
+                lastBlob = blob;
+                lastExt = ext;
+
+                // [v1.7.1] 레이지 더미 이미지(주로 50kb GIF) 방어 로직
+                // 100KB 이하일 경우 Dummy일 확률이 높음. 단, 마지막 시도(retries === 1)에서는 통과시킴
+                if (blob.size < 100 * 1024 && retries > 1) {
+                    throw new Error(`저용량 의심 (Blob size: ${(blob.size/1024).toFixed(1)}KB) - Lazy 더미 이미지일 수 있으므로 재시도`);
+                }
+
                 return { src, blob, ext };
             } catch (e) {
                 retries--;
+                console.warn(`이미지 다운로드 재시도 중... (${3 - retries}/3) [사유: ${e.message}] - ${src}`);
+                
                 if (retries === 0) {
+                    // 3회 모두 실패했으나 lastBlob이 존재한다면 (100KB 이하 정규 컷일 가능성) -> 수용
+                    if (lastBlob && lastBlob.size > 0) {
+                        logger.log(`⚠️ 용량이 작습니다 (${(lastBlob.size/1024).toFixed(1)}KB): 정규 파일로 간주해 저장 승인.`, 'Network:Image');
+                        return { src, blob: lastBlob, ext: lastExt };
+                    }
+                    
                     console.error(`이미지 다운로드 최종 실패 (${src}):`, e);
                     logger.error(`⚠️ 이미지 누락: ${src.split('/').pop()} (3회 재시도 실패)`, 'Network:Image');
                     
-                    // [Fix] 다운로드 실패 시 null을 반환하여 페이지 자체를 누락시키는 대신,
-                    // 안내 문구가 담긴 텍스트 플레이스홀더를 반환하여 CBZ 내에 기록을 남김 (이미지 순서 유지)
-                    const placeholderText = `[PAGE_MISSING]\n\n해당 웹툰 페이지를 다운로드할 수 없었습니다.\n원인: 서버 접근 차단 또는 404 (원본 서버 이미지 삭제됨)\n\nURL: ${src}`;
+                    // [Fix] 다운로드 실패 시 null 반환 대신 안내 페이지 삽입
+                    const placeholderText = `[PAGE_MISSING]\n\n해당 웹툰 페이지를 다운로드할 수 없었습니다.\n원인: 서버 제한 또는 404\n\nURL: ${src}`;
                     const placeholderBlob = new Blob([placeholderText], { type: 'text/plain' });
                     
                     return { src, blob: placeholderBlob, ext: '.txt', isMissing: true };
                 }
-                console.warn(`이미지 다운로드 실패, 재시도 중... (${3 - retries}/3) - ${src}`);
-                await new Promise((resolve) => setTimeout(resolve, 1000)); // 1초 대기 후 재시도
+                
+                // 재시도 대기 (1.5초)
+                await new Promise((resolve) => setTimeout(resolve, 1500));
             }
         }
     });

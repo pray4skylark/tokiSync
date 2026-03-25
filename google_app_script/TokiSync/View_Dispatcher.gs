@@ -142,6 +142,7 @@ function View_Dispatcher(data) {
                     name: titleClean,
                     folderName: seriesFolderName,
                     url: seriesFolder.getUrl(),
+                    category: data.category || "Unknown",
                     created: seriesFolder.getDateCreated().toISOString(),
                     cacheFileId: cacheFileId,
                     itemsCount: itemsCount,

@@ -133,6 +133,7 @@ function SweepMergeIndex(folderId, cachedList) {
                                 url: fragData.url || "",
                                 cacheFileId: fragData.cacheFileId,
                                 itemsCount: fragData.itemsCount || 0,
+                                category: fragData.category || "Unknown",
                                 created: fragData.created || new Date().toISOString(),
                                 lastModified: new Date(fragData.lastUpdated || Date.now())
                             });
