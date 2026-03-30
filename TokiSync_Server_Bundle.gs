@@ -1,4 +1,4 @@
-/* ⚙️ TokiSync Server Code Bundle v1.0.0 (Generated: 2026-03-24T10:26:17.556Z) */
+/* ⚙️ TokiSync Server Code Bundle v1.0.0 (Generated: 2026-03-30T05:18:49.748Z) */
 
 /* ========================================================================== */
 /* FILE: Main.gs */
@@ -947,12 +947,18 @@ function View_Dispatcher(data) {
                 // Extract clean title from "[12345] 작품명" → "작품명"
                 const titleClean = seriesFolderName.replace(/^\[\d+\]\s*/, '').trim();
                 
+                const extraMeta = data.metadata || {};
                 const fragData = JSON.stringify({
                     id: seriesId,
                     sourceId: sourceId,
                     name: titleClean,
                     folderName: seriesFolderName,
                     url: seriesFolder.getUrl(),
+                    category: data.category || "Unknown",
+                    author: extraMeta.author || "",
+                    status: extraMeta.status || "연재중",
+                    summary: extraMeta.summary || "",
+                    thumbnail: extraMeta.thumbnail || "",
                     created: seriesFolder.getDateCreated().toISOString(),
                     cacheFileId: cacheFileId,
                     itemsCount: itemsCount,
@@ -967,6 +973,17 @@ function View_Dispatcher(data) {
                     mergeFolder.createFile(fragName, fragData, MimeType.PLAIN_TEXT);
                 }
                 Debug.log(`[MergeIndex] Created fragment for ${sourceId} / ${cacheFileId}`);
+
+                // [v1.7.0] Metadata Persistence (Phase 3)
+                // Save series metadata into _toki_meta.json within the series folder itself
+                const metaName = "_toki_meta.json";
+                const metaFiles = seriesFolder.getFilesByName(metaName);
+                if (metaFiles.hasNext()) {
+                    metaFiles.next().setContent(fragData); // Re-use fragData as it's the same schema
+                } else {
+                    seriesFolder.createFile(metaName, fragData, MimeType.PLAIN_TEXT);
+                }
+                Debug.log(`[Metadata] Persisted metadata in series folder: ${seriesFolderName}`);
             }
             
             resultBody = { updated: true, seriesId: seriesId, mergeStatus: "success" };
@@ -1370,6 +1387,7 @@ function SweepMergeIndex(folderId, cachedList) {
                                 url: fragData.url || "",
                                 cacheFileId: fragData.cacheFileId,
                                 itemsCount: fragData.itemsCount || 0,
+                                category: fragData.category || "Unknown",
                                 created: fragData.created || new Date().toISOString(),
                                 lastModified: new Date(fragData.lastUpdated || Date.now())
                             });
@@ -1549,7 +1567,38 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
   let booksCount = 0;
   let thumbnailId = "";
 
-  // ID Parsing "[12345] Title"
+  // 1. [v1.7.0] Metadata Persistence (Phase 3) - Self-Healing
+  const metaFiles = folder.getFilesByName("_toki_meta.json");
+  if (metaFiles.hasNext()) {
+    try {
+      const metaData = JSON.parse(metaFiles.next().getBlob().getDataAsString());
+      const tid = (thumbMap && metaData.sourceId) ? thumbMap[metaData.sourceId] : "";
+      return {
+        id: metaData.id || folder.getId(),
+        sourceId: metaData.sourceId || "",
+        name: metaData.name || folderName,
+        folderName: folderName,
+        url: metaData.url || folder.getUrl(),
+        booksCount: metaData.itemsCount || 0,
+        cacheFileId: metaData.cacheFileId || "",
+        thumbnailId: tid,
+        thumbnail: tid ? "" : (metaData.thumbnail || ""), 
+        hasCover: !!tid,
+        lastModified: metaData.lastUpdated || folder.getLastUpdated().toISOString(),
+        category: metaData.category || categoryContext,
+        metadata: {
+            category: metaData.category || categoryContext,
+            status: metaData.status || "ONGOING",
+            authors: metaData.author ? [metaData.author] : [],
+            summary: metaData.summary || ""
+        }
+      };
+    } catch (e) {
+      Debug.log(`[Metadata] Failed to parse _toki_meta.json for ${folderName}: ${e}`);
+    }
+  }
+
+  // 2. ID Parsing "[12345] Title" (Fallback)
   const idMatch = folderName.match(/^\[(\d+)\]/);
   if (idMatch) {
     sourceId = idMatch[1];
@@ -1667,34 +1716,88 @@ function View_getReadHistory(folderId) {
 }
 
 /**
- * read_history.json 저장 (전체 덮어쓰기)
+ * read_history.json 저장 (Retry + Advanced Service 적용)
  * Merge는 클라이언트에서 완료된 상태로 받음
  * @param {Object} data - { history: Array }
  * @param {string} folderId - 루트 폴더 ID
  */
 function View_saveReadHistory(data, folderId) {
-  try {
-    if (!Array.isArray(data.history)) {
-      return createRes(
-        "error",
-        "Invalid history payload: history must be an array",
+  const MAX_RETRIES = 3;
+  let lastError;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      if (!Array.isArray(data.history)) {
+        return createRes(
+          "error",
+          "Invalid history payload: history must be an array",
+        );
+      }
+
+      const jsonString = JSON.stringify(data.history);
+      const blob = Utilities.newBlob(
+        jsonString,
+        "application/json",
+        HISTORY_FILE_NAME,
       );
+
+      // 1. Find existing file using Advanced Service (V3)
+      // DriveApp.getFilesByName 보다 빠르고 안정적입니다.
+      const query = `'${folderId}' in parents and name = '${HISTORY_FILE_NAME}' and trashed = false`;
+      const result = Drive.Files.list({
+        q: query,
+        fields: "files(id)",
+        pageSize: 10,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+      });
+
+      if (result.files && result.files.length > 0) {
+        // 2. Update existing file
+        const fileId = result.files[0].id;
+        Drive.Files.update({}, fileId, blob, { supportsAllDrives: true });
+
+        // 3. Cleanup duplicates if any
+        if (result.files.length > 1) {
+          for (let i = 1; i < result.files.length; i++) {
+            Drive.Files.update(
+              { trashed: true },
+              result.files[i].id,
+              null,
+              { supportsAllDrives: true },
+            );
+          }
+        }
+      } else {
+        // 4. Create new file
+        Drive.Files.create(
+          {
+            name: HISTORY_FILE_NAME,
+            parents: [folderId],
+          },
+          blob,
+          { supportsAllDrives: true },
+        );
+      }
+
+      Debug.log(
+        `[History] 저장 성공 (시도: ${attempt}/${MAX_RETRIES}, 레코드: ${data.history.length})`,
+      );
+      return createRes("success", "History saved");
+    } catch (e) {
+      lastError = e;
+      Debug.warn(`[History] 저장 시도 ${attempt} 실패: ${e.message}`);
+      if (attempt < MAX_RETRIES) {
+        Utilities.sleep(1000 * attempt); // Exp backoff
+      }
     }
-    const folder = DriveApp.getFolderById(folderId);
-    const jsonString = JSON.stringify(data.history);
-    const files = folder.getFilesByName(HISTORY_FILE_NAME);
-    if (files.hasNext()) {
-      files.next().setContent(jsonString);
-      while (files.hasNext()) files.next().setTrashed(true);
-    } else {
-      folder.createFile(HISTORY_FILE_NAME, jsonString, MimeType.PLAIN_TEXT);
-    }
-    Debug.log(`[History] 저장 완료: ${data.history.length}개 레코드`);
-    return createRes("success", "History saved");
-  } catch (e) {
-    Debug.error("[History] 저장 실패", e);
-    return createRes("error", `History save failed: ${e.message}`);
   }
+
+  Debug.error(`[History] 최종 저장 실패 (${MAX_RETRIES}회 시도)`, lastError);
+  return createRes(
+    "error",
+    `History save failed after ${MAX_RETRIES} attempts: ${lastError.message}`,
+  );
 }
 
 
