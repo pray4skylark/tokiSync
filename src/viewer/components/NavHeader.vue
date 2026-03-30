@@ -23,7 +23,7 @@
         <span class="text-base leading-none">{{ appTheme === 'dark' ? '☀️' : '🌙' }}</span>
       </button>
       <button @click="showSettings = !showSettings" class="w-9 h-9 flex items-center justify-center text-theme-sub hover:text-theme-text transition-colors rounded-full hover:bg-theme-surface-hover" :class="{'text-theme-text': showSettings}">⚙️</button>
-      <button @click="isAddModalOpen = true" class="bg-blue-600 hover:bg-blue-500 text-white px-8 py-2.5 rounded-full text-[11px] font-black shadow-xl tracking-widest">+ ADD NEW</button>
+
     </div>
   </nav>
 </template>

@@ -277,6 +277,7 @@ export async function getBooksByCacheId(cacheFileId) {
             data: JSON.stringify({
                 type: "view_get_books_by_cache",
                 cacheFileId: cacheFileId,
+                folderId: config.folderId,
                 apiKey: config.apiKey
             }),
             headers: { "Content-Type": "text/plain" },
@@ -326,6 +327,7 @@ export async function initUpdateUploadViaGASRelay(fileId, fileName) {
                 type: "init_update", 
                 fileId: fileId,
                 fileName: fileName,
+                folderId: config.folderId,
                 apiKey: config.apiKey
             }),
             headers: { "Content-Type": "text/plain" },

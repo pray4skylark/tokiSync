@@ -139,13 +139,13 @@ export function main() {
     // -- 1. Initialize MenuModal --
     new MenuModal({
         onDownload: () => {}, // Not used directly, specific methods below
-        downloadAll: () => {
+        downloadAll: (forceOverwrite) => {
             const config = getConfig();
-            tokiDownload(undefined, config.policy);
+            tokiDownload(undefined, config.policy, forceOverwrite);
         },
-        downloadRange: (spec) => {
+        downloadRange: (spec, forceOverwrite) => {
             const config = getConfig();
-            tokiDownload(spec, config.policy);
+            tokiDownload(spec, config.policy, forceOverwrite);
         },
         openViewer: openViewer,
         openSettings: () => showConfigModal(),
@@ -219,6 +219,15 @@ export function main() {
                             payload = res.responseText;
                         }
 
+                        // [v1.7.0] Cross-tab 상태 갱신 인지: Viewer가 GAS에 뭔가 썼을 경우 (업로드 / 이력 갱신)
+                        if (options.data && typeof options.data === 'string') {
+                            if (options.data.includes('"type":"upload"') || options.data.includes('"type":"view_update_cache"')) {
+                                if (typeof payload === 'string' && payload.includes('"status":"success"')) {
+                                    if (typeof GM_setValue !== 'undefined') GM_setValue("TOKI_HISTORY_DIRTY", Date.now());
+                                }
+                            }
+                        }
+
                         sourceWindow.postMessage({
                             type: 'TOKI_BRIDGE_RESPONSE',
                             requestId: requestId,
@@ -248,9 +257,13 @@ export function main() {
     const siteInfo = detectSite();
     if(!siteInfo) return; 
 
-    // -- 4. History Sync (Async) --
-    console.log('[TokiSync] Starting history sync...');
-    (async () => {
+    // -- 4. History Sync (Async) & Cross-Tab Auto Refresh --
+    let lastSyncTime = Date.now();
+    let isSyncing = false;
+
+    const syncHistory = async () => {
+        if (isSyncing) return;
+        isSyncing = true;
         try {
             const list = getListItems();
             console.log(`[TokiSync] Found ${list.length} list items`);
@@ -285,7 +298,7 @@ export function main() {
 
             console.log(`[TokiSync] Fetching history for: ${rootFolder} (${category})`);
             const history = await fetchHistory(rootFolder, category);
-            console.log(`[TokiSync] Received ${history.length} history items:`, history);
+            console.log(`[TokiSync] Received ${history.length} history items`);
             if (history.length > 0) {
                 markDownloadedItems(history);
             } else {
@@ -293,8 +306,28 @@ export function main() {
             }
         } catch (e) {
             console.warn('[TokiSync] History check failed:', e);
+        } finally {
+            isSyncing = false;
+            lastSyncTime = Date.now();
         }
-    })();
+    };
+
+    // Initial load
+    console.log('[TokiSync] Starting history sync...');
+    syncHistory();
+
+    // Cross-tab sync listener
+    document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") {
+            if (typeof GM_getValue !== 'undefined') {
+                const dirtyTime = GM_getValue("TOKI_HISTORY_DIRTY", 0);
+                if (dirtyTime > lastSyncTime) {
+                    console.log(`[TokiSync] 다른 탭에서 이력 갱신 감지! 백그라운드 새로고침 수행...`);
+                    syncHistory();
+                }
+            }
+        }
+    });
 }
 
 // Auto-run main if imported? Or let index.js call it.

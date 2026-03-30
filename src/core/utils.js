@@ -152,47 +152,111 @@ async function waitForContent(iframe, maxWaitMs = 8000) {
 
 /**
  * iframe 내부를 끝까지 스크롤하여 레이지 로딩 이미지가 실제 URL을 불러오도록 강제하는 함수
- * @param {HTMLDocument} iframeDoc 
- * @param {number} maxWaitMs 최대 대기 시간 (ms), 기본 8000
+ * [v1.7.4] 시간 기반 → 진행도 기반으로 개편
+ *   Phase 1: 페이지 최하단까지 스크롤 (횟수 제한 없음, 위치 기반 종료)
+ *   Phase 2: 모든 lazy 이미지가 실제 URL로 전환될 때까지 폴링
+ *            - 개수가 줄어드는 한 계속 대기 (진행 중)
+ *            - stallTimeoutMs 동안 변화 없으면 포기 (스톨)
+ * @param {HTMLDocument} iframeDoc
+ * @param {number} stallTimeoutMs 진행 없을 때 포기하는 시간 (ms), 기본 20000
  */
-export async function scrollToLoad(iframeDoc, maxWaitMs = 8000) {
+export async function scrollToLoad(iframeDoc, stallTimeoutMs = 20000) {
     const scrollStep = 800;
-    const interval = 200;
-    const maxAttempts = Math.ceil(maxWaitMs / interval);
-    let attempts = 0;
+    const POLL_INTERVAL = 300;
 
     const win = iframeDoc.defaultView || iframeDoc.parentWindow;
     if (!win) return;
 
+    const isHidden = document.visibilityState === 'hidden';
+    const behavior = isHidden ? 'auto' : 'smooth';
+    const scrollInterval = isHidden ? 400 : 200;
+
+    const logger = LogBox.getInstance();
+
+    // ── Phase 1: 페이지 끝까지 스크롤 (위치 기반, 횟수 제한 없음) ──
+    logger.log(`[ScrollToLoad] Phase 1: 스크롤 시작 (${behavior} 모드)`, 'DOM:Scroll');
+
     let currentScroll = 0;
     let maxScroll = iframeDoc.documentElement.scrollHeight - iframeDoc.documentElement.clientHeight;
-    
-    // 강제 스크롤 다운
-    LogBox.getInstance().log('강제 스크롤을 통한 이미지 활성화 시작...', 'DOM:Scroll');
-    while (currentScroll < maxScroll && attempts < maxAttempts) {
+
+    while (currentScroll < maxScroll) {
         currentScroll += scrollStep;
-        win.scrollTo({ top: currentScroll, behavior: 'smooth' });
-        await sleep(interval);
-        
-        // DOM 높이가 늘어나는 경우를 대비하여 갱신
+        win.scrollTo({ top: currentScroll, behavior });
+        await sleep(scrollInterval);
+
+        // 동적으로 늘어나는 페이지 높이 반영
         maxScroll = iframeDoc.documentElement.scrollHeight - iframeDoc.documentElement.clientHeight;
-        attempts++;
+
+        // 백그라운드 탭: scroll 이벤트 강제 발화
+        if (isHidden) win.dispatchEvent(new Event('scroll'));
     }
-    
-    // 스크롤이 끝난 뒤에도 아직 로딩되지 않은 이미지(data:, src="") 대기
-    while (attempts < maxAttempts) {
-        const remainingLazy = Array.from(iframeDoc.querySelectorAll('.view-padding div img')).some(img => {
-            const src = img.src || "";
-            return src.startsWith('data:image') || src.trim() === "";
+
+    logger.log('[ScrollToLoad] Phase 1 완료 (페이지 끝 도달). Phase 2: 이미지 활성화 대기...', 'DOM:Scroll');
+
+    // ── Phase 2: lazy 이미지가 모두 실제 URL로 바뀔 때까지 폴링 ────
+    const isDummySrc = (src) => {
+        if (!src || src.trim() === '') return true;
+        if (src.startsWith('data:image')) return true;
+        const lower = src.toLowerCase();
+        return lower.includes('blank.gif') || lower.includes('loading.gif') || lower.includes('pixel.gif');
+    };
+
+    let lastCount = -1;
+    let stallElapsed = 0;
+
+    while (true) {
+        const images = Array.from(iframeDoc.querySelectorAll('.view-padding div img'));
+        const remaining = images.filter(img => {
+            const src = img.src || '';
+            // 1. 알려진 플레이스홀더 URL → 대기
+            if (isDummySrc(src)) return true;
+            // 2. 이미지가 아직 로딩 중 → 대기
+            if (!img.complete) return true;
+            // 3. complete=true → 성공이든 실패든 확정 상태, 더 기다려도 바뀌지 않음
+            //    (naturalWidth=0 + complete=true = HTML 페이지 URL이거나 CORS/404 실패)
+            return false;
         });
-        
-        if (!remainingLazy) {
-            LogBox.getInstance().log(`[ScrollToLoad] 모든 이미지 URL 활성화 완료 (${attempts * interval}ms)`, 'DOM:Scroll');
+
+        if (remaining.length === 0) {
+            logger.log('[ScrollToLoad] Phase 2 완료: 모든 이미지 URL 활성화!', 'DOM:Scroll');
             break;
         }
-        
-        await sleep(interval);
-        attempts++;
+
+        if (remaining.length < lastCount || lastCount === -1) {
+            // 진행 중 → 스톨 타이머 리셋
+            stallElapsed = 0;
+            logger.log(`[ScrollToLoad] 진행 중... 잔여 lazy: ${remaining.length}개`, 'DOM:Scroll');
+        } else {
+            // 변화 없음 → 스톨 누적
+            stallElapsed += POLL_INTERVAL;
+
+            // 5초마다 스톨 대상 이미지 상세 정보 출력
+            if (stallElapsed % 5000 < POLL_INTERVAL) {
+                logger.warn(`[ScrollToLoad] 스톨 중 (${stallElapsed / 1000}s 경과) — 미해결 이미지 목록:`, 'DOM:Scroll');
+                remaining.forEach((img, i) => {
+                    const src = img.src || '(empty)';
+                    const shortSrc = src.length > 80 ? '...' + src.slice(-77) : src;
+                    const reason = isDummySrc(img.src || '')
+                        ? ((!img.src || img.src.trim() === '') ? 'src 없음' : img.src.startsWith('data:image') ? 'data:image' : '더미 URL 패턴')
+                        : `naturalWidth=${img.naturalWidth} (complete=${img.complete})`;
+                    logger.warn(`  [${i + 1}] ${reason} | ${shortSrc}`, 'DOM:Stall');
+                });
+            }
+
+            if (stallElapsed >= stallTimeoutMs) {
+                logger.warn(`[ScrollToLoad] 스톨 감지: ${remaining.length}개 미활성화 상태로 ${stallTimeoutMs / 1000}초 경과. 갈무리 진행.`, 'DOM:Scroll');
+                // 최종 스톨 목록 출력
+                remaining.forEach((img, i) => {
+                    const src = img.src || '(empty)';
+                    const shortSrc = src.length > 80 ? '...' + src.slice(-77) : src;
+                    logger.warn(`  [최종 스톨 ${i + 1}] src="${shortSrc}" | naturalWidth=${img.naturalWidth} | complete=${img.complete}`, 'DOM:Stall');
+                });
+                break;
+            }
+        }
+
+        lastCount = remaining.length;
+        await sleep(POLL_INTERVAL);
     }
 }
 
@@ -370,5 +434,22 @@ export async function saveFile(data, filename, type = 'local', extension = 'zip'
             logger.error(`[Drive] 업로드 실패: ${e.message}`);
             // Optional: Notify on error only if it's critical, but for individual files, log is better.
         }
+    }
+}
+
+/**
+ * Blob으로부터 이미지의 가로/세로 크기를 추출 (비동기)
+ * @param {Blob} blob 
+ * @returns {Promise<{width: number, height: number}>}
+ */
+export async function getImageDimensions(blob) {
+    try {
+        const bitmap = await createImageBitmap(blob);
+        const dimensions = { width: bitmap.width, height: bitmap.height };
+        bitmap.close(); // 메모리 해제
+        return dimensions;
+    } catch (e) {
+        console.warn('[Utils] Image dimensions extraction failed:', e);
+        return { width: 0, height: 0 };
     }
 }

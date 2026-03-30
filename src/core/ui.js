@@ -360,6 +360,7 @@ ${fmt(info)}
             this.hide();
         }
     }
+
 }
 
 export class Notifier {
@@ -467,6 +468,11 @@ export class MenuModal {
                         <input type="text" id="toki-range-input" class="toki-range-input"
                             placeholder="예: 1,2,4-10,15 (비우면 전체)">
                         <div class="toki-range-hint">쉼표(,)로 개별 번호, 하이픈(-)으로 연속 범위 지정</div>
+                    </div>
+                    <div class="toki-control-group">
+                        <label class="toki-label" style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+                            <input type="checkbox" id="toki-chk-force-overwrite" style="accent-color:#facc15;"> ⚠️ 강제 재다운로드 (기존 파일 덮어쓰기)
+                        </label>
                     </div>
                     <button class="toki-btn-action" id="toki-btn-down-range" style="margin-top: 10px;">
                         <span>선택 다운로드 시작</span>
@@ -579,13 +585,15 @@ export class MenuModal {
 
         // Download
         document.getElementById('toki-btn-down-all').onclick = () => {
-            if(this.handlers.downloadAll) this.handlers.downloadAll();
+            const force = document.getElementById('toki-chk-force-overwrite').checked;
+            if(this.handlers.downloadAll) this.handlers.downloadAll(force);
             this.close(overlay);
         };
         document.getElementById('toki-btn-down-range').onclick = () => {
             const spec = document.getElementById('toki-range-input').value.trim();
+            const force = document.getElementById('toki-chk-force-overwrite').checked;
             if (this.handlers.downloadRange) {
-                this.handlers.downloadRange(spec || undefined);
+                this.handlers.downloadRange(spec || undefined, force);
             }
             this.close(overlay);
         };

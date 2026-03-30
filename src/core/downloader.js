@@ -7,6 +7,7 @@ import { LogBox, Notifier } from './ui.js';
 import { getConfig } from './config.js';
 import { startSilentAudio, stopSilentAudio } from './anti_sleep.js';
 import { fetchHistory, refreshCacheAfterUpload, getBooksByCacheId, initUpdateUploadViaGASRelay, getMergeIndexFragment } from './gas.js';
+import { fetchHistoryDirect } from './network.js';
 
 // Sleep Policy Presets
 const SLEEP_POLICIES = {
@@ -34,41 +35,66 @@ export async function processItem(item, builder, siteInfo, iframe, seriesTitle =
         builder.addChapter(item.title, text);
     } 
     else {
-        // Webtoon / Manga
-        // [Fix] 강제 스크롤을 통해 레이지 로딩 이미지 불러오기
+        // Webtoon / Manga (v1.7.1 Hybrid Collection)
+        const logger = LogBox.getInstance();
+        
+        // 1. 스크롤 전 URL 선점 수집 (프로토타입 방식의 장점: data-original 등에 숨은 진짜 URL 확보)
+        const initialUrls = getImageList(iframeDoc, protocolDomain);
+        
+        // 2. 강제 스크롤을 통해 레이지 로딩 이미지 활성화
         await scrollToLoad(iframeDoc);
 
-        let imageUrls = getImageList(iframeDoc, protocolDomain);
-        LogBox.getInstance().log(`이미지 ${imageUrls.length}개 감지`, 'Parser');
+        // 3. 스크롤 후 최종 URL 수집
+        let finalUrls = getImageList(iframeDoc, protocolDomain);
+        
+        // 4. 하이브리드 병합: 스크롤 전후 URL 중 더 신뢰도 높은 것을 선택
+        // 만약 finalUrls가 placeholder(isDummy: true)라면 initialUrls를 사용
+        const mergedUrls = finalUrls.map((final, idx) => {
+            const initial = initialUrls[idx];
+            if (final.isDummy && initial && !initial.isDummy) {
+                console.log(`[Hybrid] Placeholder 우회: ${final.url.split('/').pop()} -> ${initial.url.split('/').pop()}`);
+                return initial.url;
+            }
+            return final.url;
+        }).filter(url => url !== ""); // 최종적으로 유효한 URL만 추출
+
+        logger.log(`이미지 ${mergedUrls.length}개 감지`, 'Parser');
 
         // [Fix] 시나리오 C: 0개 감지 시 1.5초 추가 대기 후 재파싱 1회
-        if (imageUrls.length === 0) {
-            LogBox.getInstance().warn('[Parser] 이미지 0개 — 1.5초 후 재파싱 시도', 'Parser');
+        if (mergedUrls.length === 0) {
+            logger.warn('[Parser] 이미지 0개 — 1.5초 후 재파싱 시도', 'Parser');
             await sleep(1500);
-            imageUrls = getImageList(iframeDoc, protocolDomain);
-            LogBox.getInstance().log(`[Parser] 재파싱 결과: ${imageUrls.length}개`, 'Parser');
+            const retryUrls = getImageList(iframeDoc, protocolDomain);
+            if (retryUrls.length > 0) mergedUrls.push(...retryUrls);
+            logger.log(`[Parser] 재파싱 결과: ${mergedUrls.length}개`, 'Parser');
         }
 
-        if (imageUrls.length === 0) {
-            LogBox.getInstance().error(`⚠️ 이미지 감지 실패: ${item.title} — 해당 챕터 건너뜀`, 'Parser');
-            return; // 빈 챕터 생성 방지
+        if (mergedUrls.length === 0) {
+            logger.error(`⚠️ 이미지 감지 실패: ${item.title} — 해당 챕터 건너점`, 'Parser');
+            return;
         }
 
         // Fetch Images Parallel
-        const images = await fetchImages(imageUrls);
+        let images = await fetchImages(mergedUrls);
         
+        // [v1.7.3] Deep Fallback: 기준 하향 (70KB -> 30KB) 및 누락 확인
+        const suspiciousCount = images.filter(img => img.blob.size < 30000 || img.isMissing).length;
+        if (suspiciousCount > mergedUrls.length / 2) {
+            logger.warn(`[Deep Fallback] 다수의 저용량 이미지 감지 (${suspiciousCount}/${mergedUrls.length}). 2초 후 강제 재스크롤 재시도...`, 'System');
+            await sleep(2000); // v1.7.2: 5s -> 2s
+            await scrollToLoad(iframeDoc, 12000); // 더 길게 대기
+            const finalRetryUrls = getImageList(iframeDoc, protocolDomain);
+            images = await fetchImages(finalRetryUrls);
+        }
+
         // Add chapter to builder
-        // Clean the title if seriesTitle exists
         let chapterTitleOnly = item.title;
         if (seriesTitle && chapterTitleOnly.startsWith(seriesTitle)) {
             chapterTitleOnly = chapterTitleOnly.replace(seriesTitle, '').trim();
         }
 
-        // Extract chapter number from title (e.g. "12화" → "12")
         const chapterMatch = chapterTitleOnly.match(/(\d+)화/);
         const chapterNum = chapterMatch ? chapterMatch[1].padStart(4, '0') : item.num;
-        
-        // Construct clean folder name: "0012 12화" (using actual chapter number)
         const cleanChapterTitle = `${chapterNum} ${chapterTitleOnly}`;
         builder.addChapter(cleanChapterTitle, images);
     }
@@ -98,11 +124,11 @@ export function parseRangeSpec(spec) {
     return nums.size > 0 ? nums : null;
 }
 
-export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs') {
+export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = false) {
     const logger = LogBox.getInstance();
     logger.init();
     logger.show();
-    logger.log(`다운로드 시작 (정책: ${policy})...`);
+    logger.log(`다운로드 시작 (정책: ${policy}, 강제 덮어쓰기: ${forceOverwrite})...`);
 
     // Auto-start Anti-Sleep mode
     try {
@@ -287,16 +313,20 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs') {
 
         if (destination === 'drive') {
             try {
-                logger.log('☁️ 드라이브 업로드 기록 확인 중...');
-                const history = await fetchHistory(rootFolder, category);
-                // Normalize: accept padded ("0001") and plain ("1") forms
-                history.forEach(id => {
-                    const plain = parseInt(id).toString();
-                    uploadedHistorySet.add(id.toString());   // e.g. "0001"
-                    uploadedHistorySet.add(plain);           // e.g. "1"
-                });
-                if (uploadedHistorySet.size > 0) {
-                    logger.log(`⏭️ 이미 업로드된 에피소드 ${history.length}개 감지 — 건너뜁니다.`);
+                if (forceOverwrite) {
+                    logger.log('⚠️ 강제 재다운로드 옵션 활성화: 기존 업로드 기록 무시 (전체 덮어쓰기)');
+                } else {
+                    logger.log('☁️ 드라이브 업로드 기록 및 용량 확인 중 (Smart Skip)...');
+                    const history = await fetchHistoryDirect(rootFolder, category);
+                    // Normalize: accept padded ("0001") and plain ("1") forms
+                    history.forEach(id => {
+                        const plain = parseInt(id).toString();
+                        uploadedHistorySet.add(id.toString());   // e.g. "0001"
+                        uploadedHistorySet.add(plain);           // e.g. "1"
+                    });
+                    if (uploadedHistorySet.size > 0) {
+                        logger.log(`⏭️ 조건 만족(기존 정상 업로드) 에피소드 ${history.length}개 감지 — 건너뜁니다.`);
+                    }
                 }
             } catch (histErr) {
                 // Non-fatal: if history check fails, proceed without skipping
@@ -370,9 +400,16 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs') {
         }
 
         // Create IFrame
+        // 목록 페이지 최하단에 배치 + opacity 0.1
+        // IntersectionObserver가 정상 동작하며, 브라우저가 일반 문서 흐름으로 렌더링
         const iframe = document.createElement('iframe');
-        iframe.width = 600; iframe.height = 600;
-        iframe.style.position = 'fixed'; iframe.style.top = '-9999px'; // Hide it
+        iframe.style.display = 'block';
+        iframe.style.width = '100%';
+        iframe.style.height = '600px';
+        iframe.style.opacity = '0.1';
+        iframe.style.pointerEvents = 'none';
+        iframe.style.border = 'none';
+        iframe.style.marginTop = '40px';
         document.body.appendChild(iframe);
 
         // --- Processing Loop ---
@@ -505,6 +542,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs') {
                                         method: "POST", url: getConfig().gasUrl,
                                         data: JSON.stringify({ 
                                             type: "upload", uploadUrl: updateUrl, chunkData: chunkBase64, 
+                                            folderId: getConfig().folderId,
                                             start: start, end: end, total: totalSize, apiKey: getConfig().apiKey
                                         }),
                                         headers: { "Content-Type": "text/plain" },
@@ -638,23 +676,38 @@ async function fetchImages(imageUrls) {
                 lastBlob = blob;
                 lastExt = ext;
 
-                // [v1.7.1] 레이지 더미 이미지(주로 50kb GIF) 방어 로직
-                // 100KB 이하일 경우 Dummy일 확률이 높음. 단, 마지막 시도(retries === 1)에서는 통과시킴
+                // [v1.7.3] Hybrid Dummy Detection: Size + Resolution
+                // 100KB 이하일 경우 Dummy일 확률이 있으나, 해상도가 높으면 정상으로 수용
                 if (blob.size < 100 * 1024 && retries > 1) {
-                    throw new Error(`저용량 의심 (Blob size: ${(blob.size/1024).toFixed(1)}KB) - Lazy 더미 이미지일 수 있으므로 재시도`);
+                    // 1. 확실한 더미 패턴 URL이면 재시도 없이 즉시 실패 처리
+                    const isDummyUrl = (u) => u && (u.includes('blank.gif') || u.includes('loading.gif') || u.includes('pixel.gif'));
+                    if (isDummyUrl(src)) {
+                        retries = 1; 
+                        throw new Error(`더미 이미지 URL 확인됨 (Skip retry)`);
+                    }
+
+                    // 2. 해상도 체크 (가로 또는 세로가 300px 이상이면 정상 이미지로 간주)
+                    const { getImageDimensions } = await import('./utils.js');
+                    const { width, height } = await getImageDimensions(blob);
+                    
+                    if (width > 300 || height > 300) {
+                        // 규격이 정상인 경우 용량에 상관없이 수용
+                        return { src, blob, ext };
+                    }
+
+                    throw new Error(`저용량 및 저해상도 의심 (${(blob.size/1024).toFixed(1)}KB, ${width}x${height}) - Lazy 더미 이미지일 수 있으므로 재시도`);
                 }
 
                 return { src, blob, ext };
             } catch (e) {
                 retries--;
                 const retryCount = 3 - retries;
-                logger.warn(`이미지 다운로드 재시도 (${retryCount}/3): ${e.message}`, 'Network:Image');
-                console.warn(`이미지 다운로드 재시도 중... (${retryCount}/3) [사유: ${e.message}] - ${src}`);
+                if (retries > 0) logger.warn(`이미지 다운로드 재시도 (${retryCount}/3): ${e.message}`, 'Network:Image');
                 
                 if (retries === 0) {
-                    // 3회 모두 실패했으나 lastBlob이 존재한다면 (100KB 이하 정규 컷일 가능성) -> 수용
-                    if (lastBlob && lastBlob.size > 0) {
-                        logger.log(`⚠️ 용량이 작습니다 (${(lastBlob.size/1024).toFixed(1)}KB): 정규 파일로 간주해 저장 승인.`, 'Network:Image');
+                    // 3회 모두 실패했고 lastBlob이 존재하지만, 여전히 dummy 성격이면 거절
+                    if (lastBlob && lastBlob.size > 10000) { // 10KB 이상일 때만 보수적 수용
+                        logger.log(`⚠️ 용량이 작지만 수용 (${(lastBlob.size/1024).toFixed(1)}KB): ${src.split('/').pop()}`, 'Network:Image');
                         return { src, blob: lastBlob, ext: lastExt };
                     }
                     
@@ -662,14 +715,14 @@ async function fetchImages(imageUrls) {
                     logger.error(`⚠️ 이미지 누락: ${src.split('/').pop()} (3회 재시도 실패)`, 'Network:Image');
                     
                     // [Fix] 다운로드 실패 시 null 반환 대신 안내 페이지 삽입
-                    const placeholderText = `[PAGE_MISSING]\n\n해당 웹툰 페이지를 다운로드할 수 없었습니다.\n원인: 서버 제한 또는 404\n\nURL: ${src}`;
+                    const placeholderText = `[PAGE_MISSING]\n\n해당 웹툰 페이지를 다운로드할 수 없었습니다.\n원인: 서버 제한 또는 백그라운드 스로틀링 (Lazy Load 실패)\n\nURL: ${src}`;
                     const placeholderBlob = new Blob([placeholderText], { type: 'text/plain' });
                     
                     return { src, blob: placeholderBlob, ext: '.txt', isMissing: true };
                 }
                 
-                // 재시도 대기 (1.5초)
-                await new Promise((resolve) => setTimeout(resolve, 1500));
+                // 재시도 대기 (v1.7.2: 1.5초 -> 0.5초)
+                await new Promise((resolve) => setTimeout(resolve, 500));
             }
         }
     });

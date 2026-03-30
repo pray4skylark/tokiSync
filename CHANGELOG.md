@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.7.0] - 2026-03-30
+
+### ✨ Smart Skip 엔진 고도화 및 강제 재다운로드 UI
+
+- **용량 기반 결함 파일 필터링**: 기존의 단순 파일명 탐색을 넘어, Google Drive API를 직접 호출(Direct Fetch)하여 파일의 메타데이터(용량: size)를 수집합니다.
+- **Max 기반 휴리스틱 검증**: 다운로드 중 캡처 미스로 발생한 더미 파일(예: 1~2MB)을 걸러내기 위해, 해당 폴더 내 최고 용량(Max) 에피소드를 기준으로 삼아 N% 미만의 용량을 가진 파일은 손상된 것으로 간주하고 재다운로드 대상에 포함합니다.
+- **민감도 조절 UI**: 환경 설정(⚙️) 메뉴에 `Smart Skip 민감도 (최고 용량 기준)` 옵션을 추가하여, 사용자가 직접 손상 판별 기준(90%, 80%, 70%, 50%)을 세밀하게 조절할 수 있도록 개선했습니다.
+- **강제 덮어쓰기 (Force Overwrite)**: Smart Skip(기존 기록 기반 건너뛰기) 로직을 무시하고 강제로 전체 데이터를 다시 받아 기존 파일을 덮어쓰는 `⚠️ 강제 재다운로드 (기존 파일 덮어쓰기)` 옵션을 다운로드 모달에 추가했습니다.
+
+### 🐛 Fast Path (덮어쓰기) 안정화
+
+- **Missing folderId 에러 수정**: GAS 서버 구조 개편으로 인해 모든 요청에 `folderId`가 필수로 요구됨에 따라, Fast Path 캐시 조회(`getBooksByCacheId`), 빠른 덮어쓰기 세션 초기화(`init_update`), 청크 데이터 업로드(`upload`) 페이로드에 누락되었던 `folderId`를 추가하여 덮어쓰기 시 발생하는 500 에러를 완벽히 해결했습니다.
+
+### ✨ 고성능 뷰어 엔진 및 하이브리드 동기화 시스템
+
+- **Virtual Scroll Stabilization**: `pendingElements` 큐 도입으로 렌더링 누락을 방지하고, `aspect-ratio` 캐싱을 통해 이미지가 DOM에서 해제되어도 스크롤 위치와 레이아웃 높이를 1px 단위까지 완벽하게 보존합니다.
+- **Merge-First Cloud Sync Policy**: 여러 기기/브라우저 사용 시 발생하는 이력 덮어쓰기(Conflict) 문제를 해결하기 위해, 업로드 전 항상 서버 데이터를 먼저 가져와 병합(Pull & Merge)하는 정책을 아키텍처 레벨에서 강제합니다.
+- **Real-time Cross-Tab Sync**: 다른 탭에서 발생한 이력을 감지하기 위해 `visibilitychange` 이벤트를 리스닝하며, 탭 복귀 시 페이지 새로고침 없이 최신 열람 상태를 즉시 UI에 반영합니다.
+- **Scroll Mode Optimization**: 웹툰의 상하 연결성을 보존하기 위해 스크롤 모드(`viewerData.mode === 'scroll'`)에서는 Auto-Crop(`clip-path`) 기능을 자동으로 제외하도록 레이아웃 로직을 분기 처리했습니다.
+- **Manual Sync Support**: 뷰어 에피소드 목록 좌측 하단에 [동기화 (Sync)] 버튼을 추가하여, 언제든 수동으로 클라우드 최신 상태를 당겨올 수 있도록 지원합니다.
+
+#### 🛠 Technical Details (v1.7.0)
+- **Engine**: `useVirtualScroll.js` 내 `IntersectionObserver` 마진 최적화(3000px) 및 `aspectRatioMap` 구현.
+- **Sync**: `useStore.js` 내 `pushHistoryToDrive` 리팩토링 (무조건 `syncHistoryFromDrive` 선행).
+- **Bridge**: `src/core/main.js` 내 `visibilitychange` 리스너 및 `TOKI_HISTORY_DIRTY` (GM_setValue) 플래그 시스템 구축.
+- **UI**: `EpisodesView.vue` 내 동기화 버튼 UI 및 로딩 스피너 연동.
+- **Smart Double Spread**: 지능형 2쪽 보기 알고리즘 (`useSpread.js`) 및 RTL/CoverFirst 옵션 완벽 지원.
+- **Auto-Crop Engine**: OffscreenCanvas 분석 기반 여백 제거 및 IndexedDB(`imageMeta`) 캐싱 연동.
+
+---
+
 ## [v1.6.0] - 2026-03-15
 
 ### ✨ Kavita 호환성 강화 및 배치 다운로드 시스템
@@ -9,6 +40,15 @@ All notable changes to this project will be documented in this file.
 - **CBZ 구조 표준화**: 이미지를 루트 폴더에 직접 배치하고 `ComicInfo.xml` 메타데이터를 자동 생성하여 Kavita 등 외부 뷰어 호환성 극대화.
 - **5개 단위 배치(Batching) 다운로드**: 대량 다운로드 시 브라우저 메모리 부족으로 인한 크래시를 방지하기 위해 `zipOfCbzs` 사용 시 5화마다 ZIP 파일을 생성하여 저장하도록 로직 개선.
 - **정책 정비**: `folderInCbz` 정책 폐기 (사용 시 자동으로 `zipOfCbzs` 배치 모드로 전환).
+
+#### 🛠 Technical Details (v1.6.0)
+- **File ID Tracking (Fast Path)**: 드라이브 내 동일 이름 파일 검색 시간을 단축하여 업로드 속도 5배 이상 향상. `cacheFileId` 필드를 `index.json`에 저장하여 PUT 청크 업로드 수행.
+- **Background Merge Automation (`SweepMergeIndex`)**: 업로드 직후 생성된 `_MergeIndex` 파편을 크론 트리거(`TimeDriven_SweepMergeIndex`)를 통해 자동 병합.
+- **갈무리 안정화 (DOM 폴링)**: `waitForContent` (최대 8초) 및 `scrollToLoad` (800px 스텝) 도입으로 Lazy-render 대응 강화.
+- **네트워크 Anti-Hang**: `GM_xmlhttpRequest`에 업로드 시 5분 타임아웃 및 에러 핸들링 도입.
+- **커스텀 범위 선택**: 드래그 슬라이더 대신 텍스트 입력(`1,2,4-10`) 방식의 `parseRangeSpec` 구현.
+- **GAS Script ID 전환**: 배포 URL 대신 Script ID만 관리하도록 개선 및 자동 마이그레이션 도입.
+- **LogBox 2.0**: 3단계 심각도(INFO/WARN/CRITICAL) 정밀 로깅 및 원클릭 버그 리포트 생성기 도입.
 
 ## [v1.5.6] - 2026-03-05
 
@@ -63,6 +103,12 @@ All notable changes to this project will be documented in this file.
 - 스크롤 모드: 콘텐츠 하단 인라인 안내 섹션(다음 화 썸네일 + 제목 + 이동 버튼).
 - 페이지 모드: `showNextEpisodeGuide` 전체화면 fade 전환, `prev()` 시 마지막 페이지 복귀.
 - 이미지/소설 양쪽 모드 모두 적용.
+
+#### 🛠 Technical Details (v1.5.5)
+- **EpisodesView 2패널 레이아웃**: `rounded-[32px]` 카드, `aspect-[1/1.45]` 세로형 썸네일, `ring-8` 후광 효과 적용.
+- **전역 테마 시스템**: `html[data-theme]` 속성 및 `--t-*` CSS 변수 체계 구축. `useStore.js` 싱글톤에서 상태 관리.
+- **통합 입력 컨트롤러 (`useViewerInput.js`)**: 마우스/터치/키보드 이벤트를 단일 지점에서 처리. `getZone()` 기반 구역 판별 및 Ghost Click(500ms) 방지.
+- **모바일 최적화**: iOS 스크롤 저하 해결을 위한 동적 `passive` 옵션 교체 및 Blob URL 메모리 누수 방지(`cleanupBlobUrls`).
 
 ### 🗑️ Deprecated
 

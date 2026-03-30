@@ -25,7 +25,7 @@ const { downloadProgress, isDownloading, fetchAndUnzip, cleanupBlobUrls, formatS
 const currentView = ref('library');
 const showSettings = ref(false);
 const showViewerControls = ref(false);
-const isAddModalOpen = ref(false);
+
 const showEpisodeModal = ref(false);
 const isInitialLoading = ref(true);
 const isSyncing = ref(false);
@@ -90,7 +90,6 @@ const currentEpisode = ref(null);
 const currentPage = ref(1);
 const scrollProgress = ref(0);
 const isScrollSyncing = ref(false);
-const newItem = reactive({ title: '', type: 'webtoon', fileId: '' });
 
 // Episode list (fetched from GAS)
 const episodes = ref([]);
@@ -314,12 +313,15 @@ async function syncHistoryFromDrive() {
   }
 }
 
-/** Dexie 이력 전체를 Drive에 push */
+/** 
+ * Dexie 이력 전체를 Drive에 push하기 전,
+ * 다른 기기/브라우저에서의 변경사항을 덮어쓰는 동기화 소실을 막고자
+ * 항상 서버 상태를 먼저 Pull & Merge 한 뒤 업로드합니다.
+ */
 async function pushHistoryToDrive() {
   if (!isConfigured()) return;
-  const all = await db.readHistory.toArray();
-  await saveReadHistory(all);
-  console.log(`[History] Drive push 완료: ${all.length}개`);
+  // 기존의 맹목적인 로컬 전체 덮어쓰기를 선 병합(Merge) 루틴으로 리다이렉트
+  await syncHistoryFromDrive();
 }
 
 const initApp = async () => {
@@ -438,6 +440,12 @@ const openSeries = async (item, bypassCache = false) => {
     // 2. GAS에서 불러오기 + Dexie에 저장 (GAS가 이미 정렬해서 줌)
     const books = await getBooks(item.id, bypassCache);
     const now = Date.now();
+    
+    // v1.7.6: 새로고침(bypassCache) 시 기존 로컬 캐시를 먼저 삭제하여 삭제된 파일이 남지 않게 함
+    if (bypassCache) {
+      await db.episodeCache.where('seriesId').equals(item.id).delete();
+    }
+    
     await db.episodeCache.bulkPut(
       (books || []).map(b => ({ ...b, seriesId: item.id, cachedAt: now }))
     );
@@ -456,8 +464,22 @@ const openSeries = async (item, bypassCache = false) => {
   }
 };
 
-const refreshEpisodes = () => {
-  if (selectedItem.value) openSeries(selectedItem.value, true);
+const refreshEpisodes = async () => {
+  if (selectedItem.value) {
+    isSyncing.value = true;
+    try {
+      // 1. 구글 드라이브(GAS) 저장소에서 최신 읽음 이력 가져와 로컬 캐시(Dexie)와 병합
+      await syncHistoryFromDrive();
+      // 2. 병합된 이력을 바탕으로 에피소드 목록 다시 계산하여 그리기 (bypassCache = true)
+      await openSeries(selectedItem.value, true);
+      notify('✅ 동기화 완료: 이력 및 목록이 갱신되었습니다.');
+    } catch (e) {
+      console.warn('[History] Manual sync failed:', e);
+      notify('❌ 동기화 중 오류가 발생했습니다.');
+    } finally {
+      isSyncing.value = false;
+    }
+  }
 };
 
 const startReading = async (ep) => {
@@ -666,10 +688,6 @@ const handlePrev = () => {
   prev();
 };
 
-const addNewItem = () => {
-  isAddModalOpen.value = false;
-  notify('Deployment to Cloud Successful');
-};
 
 const deleteItem = () => {
   currentView.value = 'library';
@@ -680,7 +698,7 @@ const reloadApp = () => window.location.reload();
 
 // Rebuild page slots when spread/coverFirst settings change
 watch(
-  () => [viewerDefaults.spread, viewerDefaults.coverFirst],
+  () => [viewerDefaults.spread, viewerDefaults.coverFirst, viewerDefaults.rtl],
   () => {
     if (viewerContent.value?.type === 'images') {
       buildPageSlots();
@@ -702,7 +720,7 @@ watch(currentPage, (newPage) => {
 export function useStore() {
   return {
     // UI State
-    currentView, showSettings, showViewerControls, isAddModalOpen, showEpisodeModal,
+    currentView, showSettings, showViewerControls, showEpisodeModal,
     isInitialLoading, isSyncing, notification,
 
     // Config & Settings
@@ -715,7 +733,7 @@ export function useStore() {
     searchQuery, currentTab, tabs,
     libraryItems, filteredLibrary, selectedItem,
     episodes, currentEpisode, currentEpisodeIndex,
-    currentPage, scrollProgress, totalPages, newItem,
+    currentPage, scrollProgress, totalPages,
     lastReadEpisode,
 
     // Viewer Content
@@ -751,6 +769,6 @@ export function useStore() {
     goToNextEpisode, goToPrevEpisode,
     toggleViewerUI, setViewerMode,
     handleWheel, handleNext, handlePrev, onScrollUpdate,
-    addNewItem, deleteItem, reloadApp,
+    deleteItem, reloadApp,
   };
 }

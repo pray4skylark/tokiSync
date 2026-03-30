@@ -13,7 +13,6 @@
 
     <!-- Global Modals -->
     <EpisodeListModal />
-    <AddModal />
     <NotificationToast />
   </div>
 </template>
@@ -26,7 +25,6 @@ import { useStore } from './composables/useStore';
 import NavHeader from './components/NavHeader.vue';
 import SettingsPanel from './components/SettingsPanel.vue';
 import EpisodeListModal from './components/EpisodeListModal.vue';
-import AddModal from './components/AddModal.vue';
 import NotificationToast from './components/NotificationToast.vue';
 
 // Views

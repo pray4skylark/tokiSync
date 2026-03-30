@@ -275,21 +275,45 @@ async function extractImages(zip, files) {
   downloadProgress.value = '이미지 추출 중...';
   const imageUrls = [];
   const dimensions = [];
+  
+  let skipDir = 0, skipHidden = 0, skipNonImg = 0;
 
   for (const filename of files) {
+    const file = zip.files[filename];
+    
+    // v1.7.3: 디렉토리는 제외
+    if (file.dir) {
+      skipDir++;
+      continue;
+    }
+    
+    // v1.7.3: 숨겨진 시스템 파일 및 메타데이터 폴더 제외 (._ 로 시작하거나 __MACOSX 포함)
+    const isHidden = filename.split('/').some(part => part.startsWith('.') || part === '__MACOSX');
+    if (isHidden) {
+      console.log(`[Parser:Skip] Hidden file ignored: ${filename}`);
+      skipHidden++;
+      continue;
+    }
+
     if (filename.match(/\.(jpg|jpeg|png|webp|gif)$/i)) {
-      const blob = await zip.files[filename].async('blob');
+      const blob = await file.async('blob');
       const blobUrl = URL.createObjectURL(blob);
       activeBlobUrls.push(blobUrl);
       imageUrls.push(blobUrl);
+      console.debug(`[Parser:OK] Extracted image: ${filename}`);
+    } else {
+      console.log(`[Parser:Skip] Non-image file ignored: ${filename}`);
+      skipNonImg++;
     }
   }
+
+  console.log(`[Parser:Summary] Total: ${files.length}, Extracted: ${imageUrls.length}, Skipped: (Dir: ${skipDir}, Hidden: ${skipHidden}, Meta/Other: ${skipNonImg})`);
 
   if (imageUrls.length === 0) {
     throw new Error('이미지를 찾을 수 없습니다.');
   }
 
-  // Detect dimensions for spread detection
+  // Detect dimensions for spread detection & validation
   downloadProgress.value = '레이아웃 분석 중...';
   const dimPromises = imageUrls.map((url) => new Promise((resolve) => {
     const img = new Image();
@@ -297,9 +321,33 @@ async function extractImages(zip, files) {
     img.onerror = () => resolve({ w: 0, h: 0 });
     img.src = url;
   }));
-  const dims = await Promise.all(dimPromises);
+  const allDims = await Promise.all(dimPromises);
+  
+  // v1.7.5: 최종 필터링 - 유효한 이미지만 남김 (차원이 0인 가짜 파일 제외)
+  const finalImages = [];
+  const finalDims = [];
+  let invalidCount = 0;
 
-  return { type: 'images', images: imageUrls, dimensions: dims };
+  for (let idx = 0; idx < imageUrls.length; idx++) {
+      if (allDims[idx].w > 0 && allDims[idx].h > 0) {
+          finalImages.push(imageUrls[idx]);
+          finalDims.push(allDims[idx]);
+      } else {
+          invalidCount++;
+          // 불필요한 URL 즉시 해제
+          URL.revokeObjectURL(imageUrls[idx]);
+      }
+  }
+
+  if (invalidCount > 0) {
+      console.log(`[Parser:Validation] ${invalidCount} hidden/invalid files removed via dimension check.`);
+  }
+
+  if (finalImages.length === 0) {
+    throw new Error('이미지를 찾을 수 없습니다.');
+  }
+
+  return { type: 'images', images: finalImages, dimensions: finalDims };
 }
 
 /**

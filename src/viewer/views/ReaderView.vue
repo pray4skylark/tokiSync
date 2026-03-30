@@ -61,18 +61,18 @@
         <!-- Scroll Mode -->
         <div v-if="viewerData.mode === 'scroll'" class="max-w-4xl w-full">
           <div v-for="(src, i) in viewerContent.images" :key="i" 
-               class="w-full relative min-h-[400px]"
+               class="w-full relative"
+               :style="{ aspectRatio: aspectRatioMap[i] || 'auto', minHeight: aspectRatioMap[i] ? 'auto' : '800px' }"
                :ref="el => { if (el && viewerDefaults.virtualScroll) observeElement(el); }"
                :data-index="i">
             
             <!-- Render if Virtual Scroll is OFF OR if current image is visible -->
             <img v-if="!viewerDefaults.virtualScroll || isVisible(i)" :src="src"
-                 @load="viewerDefaults.autoCrop ? loadBounds(i, src) : null"
-                 class="w-full h-auto block select-none shadow-2xl transition-opacity duration-300"
-                 :style="(viewerDefaults.autoCrop && imageBoundsMap[i]) ? { clipPath: `inset(${imageBoundsMap[i].top}% ${imageBoundsMap[i].right}% ${imageBoundsMap[i].bottom}% ${imageBoundsMap[i].left}%)` } : {}">
+                 @load="onImageLoaded(i, src, $event)"
+                 class="w-full h-auto block select-none shadow-2xl transition-opacity duration-300">
             
             <!-- Placeholder for virtual scroll -->
-            <div v-else-if="viewerDefaults.virtualScroll" class="w-full h-[800px] flex items-center justify-center bg-zinc-900/10">
+            <div v-else-if="viewerDefaults.virtualScroll" class="absolute inset-0 flex items-center justify-center bg-zinc-900/10">
               <div class="w-8 h-8 border-2 border-zinc-800 border-t-zinc-600 rounded-full animate-spin"></div>
             </div>
           </div>
@@ -116,7 +116,7 @@
           </transition>
           <!-- 일반 페이지 렌더링 -->
           <template v-if="!showNextEpisodeGuide">
-          <div class="spread-layout" :dir="viewerDefaults.rtl ? 'rtl' : 'ltr'">
+          <div class="spread-layout">
             <template v-if="viewerDefaults.spread && currentSlotData">
               <!-- Slot-based: single (cover etc.) → 1 image -->
               <template v-if="currentSlotData.type === 'single'">
@@ -256,7 +256,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
+import { ref, reactive, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
 import { useStore } from '../composables/useStore';
 import { useViewerInput } from '../composables/useViewerInput';
 import { useKeyboard } from '../composables/useKeyboard';
@@ -284,12 +284,26 @@ const { getBounds } = useAutoCrop();
 
 // Cache for image bounds [index] -> { top, right, bottom, left }
 const imageBoundsMap = reactive({});
+// Cache for image aspect ratio to prevent virtual scroll jumping
+const aspectRatioMap = reactive({});
 const imageRefs = ref([]);
 
 async function loadBounds(index, url) {
   if (imageBoundsMap[index]) return;
   const bounds = await getBounds(selectedItem.value.id, currentEpisode.value.id, index, url);
   if (bounds) imageBoundsMap[index] = bounds;
+}
+
+function onImageLoaded(index, url, event) {
+  // Capture aspect ratio on actual load
+  const img = event.target;
+  if (img && img.naturalWidth && img.naturalHeight) {
+    aspectRatioMap[index] = `${img.naturalWidth}/${img.naturalHeight}`;
+  }
+  // Optional AutoCrop logic (스크롤 모드에서는 상하 연결 레이아웃 유지 목적으로 작동 안 함)
+  if (viewerDefaults.autoCrop && viewerData.mode !== 'scroll') {
+    loadBounds(index, url);
+  }
 }
 
 const isNovelMode = computed(() => viewerContent.value?.type === 'text');
@@ -305,7 +319,7 @@ const currentSlotData = computed(() => {
   const slot = pageSlots.value[currentSlotIndex.value];
   if (!slot) return null;
   const images = slot.pages.map(idx => viewerContent.value?.images[idx]).filter(Boolean);
-  return { type: slot.type, images };
+  return { type: slot.type, images, pages: slot.pages };
 });
 
 // --- Novel Column Pagination ---
@@ -355,6 +369,16 @@ watch(() => viewerContent.value, () => {
   if (viewerData.mode === 'scroll' && viewerDefaults.virtualScroll) {
     cleanupVirtual();
     nextTick(() => initObserver());
+  }
+});
+
+// Watch for mode or virtual scroll setting toggle to prevent memory leak
+watch(() => [viewerData.mode, viewerDefaults.virtualScroll], ([newMode, newVirtualScroll]) => {
+  if (newMode === 'scroll' && newVirtualScroll) {
+    cleanupVirtual();
+    nextTick(() => initObserver());
+  } else {
+    cleanupVirtual();
   }
 });
 
