@@ -9,7 +9,7 @@ import { getOAuthToken } from './network.js';
 import { getCommonPrefix, blobToArrayBuffer, saveFile } from './utils.js';
 
 export function main() {
-    console.log("🚀 TokiDownloader Loaded (New Core v1.7.0)");
+    console.log("🚀 TokiDownloader Loaded (New Core v1.7.1)");
     
     const logger = LogBox.getInstance();
 

@@ -515,6 +515,13 @@ export class MenuModal {
                     </select>
                 </div>
                 <div class="toki-control-group">
+                    <label class="toki-label">소설 패키징 방식</label>
+                    <select id="toki-sel-novel-mode" class="toki-select">
+                         <option value="perChapter">개별 회차 저장 (1회차 = 1파일)</option>
+                         <option value="singleVolume">단행본 합본 저장 (선택 범위 = 1파일)</option>
+                    </select>
+                </div>
+                <div class="toki-control-group">
                     <button class="toki-btn-action toki-btn-secondary" id="toki-btn-advanced" style="font-size: 13px;">
                         🛠️ 고급 설정 (경로, API키)
                     </button>
@@ -601,12 +608,14 @@ export class MenuModal {
         // Settings
         const selPolicy = document.getElementById('toki-sel-policy');
         const selSpeed = document.getElementById('toki-sel-speed');
+        const selNovelTerm = document.getElementById('toki-sel-novel-mode');
 
         // Load Initial Values (Need to fetch via handler or GM)
         if (this.handlers.getConfig) {
             const cfg = this.handlers.getConfig();
-            if (cfg.policy) selPolicy.value = cfg.policy;
-            if (cfg.sleepMode) selSpeed.value = cfg.sleepMode;
+            if (cfg.policy && selPolicy) selPolicy.value = cfg.policy;
+            if (cfg.sleepMode && selSpeed) selSpeed.value = cfg.sleepMode;
+            if (cfg.novelMode && selNovelTerm) selNovelTerm.value = cfg.novelMode;
         }
 
         selPolicy.onchange = () => { 
@@ -639,7 +648,8 @@ export class MenuModal {
             };
         }
 
-        selSpeed.onchange = () => { if(this.handlers.setConfig) this.handlers.setConfig('TOKI_SLEEP_MODE', selSpeed.value); };
+        if (selSpeed) selSpeed.onchange = () => { if(this.handlers.setConfig) this.handlers.setConfig('TOKI_SLEEP_MODE', selSpeed.value); };
+        if (selNovelTerm) selNovelTerm.onchange = () => { if(this.handlers.setConfig) this.handlers.setConfig('TOKI_NOVEL_MODE', selNovelTerm.value); };
 
         document.getElementById('toki-btn-advanced').onclick = () => {
             if(this.handlers.openSettings) this.handlers.openSettings();

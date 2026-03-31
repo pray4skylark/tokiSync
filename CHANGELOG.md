@@ -2,7 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
-## [v1.7.0] - 2026-03-30
+## [v1.7.1] - 2026-03-31
+
+### ✨ 소설 단행본(Single Volume) 합본 기능 고도화
+
+- **화수 범위 네이밍**: 기존 `(합본)` 표기 대신 `(시작화-끝화화)` 형식으로 자동 명명되도록 개선하여 회차 범위를 직관적으로 표시합니다.
+- **NaN 방어 로직**: 에피소드 번호가 숫자가 아닌 경우(공지, 특별편 등)에도 파일명이 깨지지 않도록 예외 처리 코드를 추가했습니다.
+- **강제 빌드 보장**: 합본 모드에서는 Smart Skip을 무시하고 전체 회차가 포함된 완전한 파일을 생성하도록 로직을 강화했습니다.
+
+### 🐛 UI 및 안정성 핫픽스
+
+- **상세 설정 모달 TypeError 수정**: 특정 상황에서 DOM 요소를 찾지 못해 발생하던 `Cannot set properties of null` 오류를 해결하고 방어 코드를 적용했습니다.
+- **뷰어 타이틀 정리**: 브라우저 탭에 표시되는 구형 버전 정보를 제거하고 `TokiSync Viewer`로 일관성을 맞췄습니다.
+- **GAS 호환성**: 서버 코드에 클라이언트 v1.7.1+ 대응을 위한 하위 호환성 메모를 추가했습니다.
+
+### 🔒 보안 정밀 점검
+
+- **ID/Key 노출 검증**: 전 커밋 히스토리 및 소스 코드를 대상으로 GAS 배포 ID와 API_KEY 유출 여부를 정밀 조사하여 안전함을 확인했습니다.
+- **내부 문서 보호**: 분석 보고서 및 기밀 문서들이 Git에 추적되지 않도록 `.gitignore`를 업데이트했습니다.
+
+## [v1.7.0] - 2026-03-31
+
+### ✨ AI Agent 운영 및 검증 프로토콜 도입
+
+- **자체 논리 감사(Self-Audit) 의무화**: 모든 코드 수정 전후로 논리적 결함, 아키텍처 정합성, 에지 케이스를 자가 진단하도록 `AI_AGENT_CONTEXT.md` 및 `.geminirules`에 프로토콜을 명시했습니다.
+- **실시간 기록 원칙 (Immediate Record)**: 정보 누락을 방지하기 위해 모든 기술적 변경 사항을 수정 즉시 `CHANGELOG.md`에 반영하는 규칙을 도입했습니다.
+- **검증 보고(Reporting) 강화**: 작업 완료 후 `walkthrough.md` 등을 통해 검증 내용과 예상 결과를 사용자에게 명확히 보고하도록 프로세스를 표준화했습니다.
 
 ### ✨ Smart Skip 엔진 고도화 및 강제 재다운로드 UI
 
@@ -24,6 +49,7 @@ All notable changes to this project will be documented in this file.
 - **Manual Sync Support**: 뷰어 에피소드 목록 좌측 하단에 [동기화 (Sync)] 버튼을 추가하여, 언제든 수동으로 클라우드 최신 상태를 당겨올 수 있도록 지원합니다.
 
 #### 🛠 Technical Details (v1.7.0)
+
 - **Engine**: `useVirtualScroll.js` 내 `IntersectionObserver` 마진 최적화(3000px) 및 `aspectRatioMap` 구현.
 - **Sync**: `useStore.js` 내 `pushHistoryToDrive` 리팩토링 (무조건 `syncHistoryFromDrive` 선행).
 - **Bridge**: `src/core/main.js` 내 `visibilitychange` 리스너 및 `TOKI_HISTORY_DIRTY` (GM_setValue) 플래그 시스템 구축.
@@ -42,6 +68,7 @@ All notable changes to this project will be documented in this file.
 - **정책 정비**: `folderInCbz` 정책 폐기 (사용 시 자동으로 `zipOfCbzs` 배치 모드로 전환).
 
 #### 🛠 Technical Details (v1.6.0)
+
 - **File ID Tracking (Fast Path)**: 드라이브 내 동일 이름 파일 검색 시간을 단축하여 업로드 속도 5배 이상 향상. `cacheFileId` 필드를 `index.json`에 저장하여 PUT 청크 업로드 수행.
 - **Background Merge Automation (`SweepMergeIndex`)**: 업로드 직후 생성된 `_MergeIndex` 파편을 크론 트리거(`TimeDriven_SweepMergeIndex`)를 통해 자동 병합.
 - **갈무리 안정화 (DOM 폴링)**: `waitForContent` (최대 8초) 및 `scrollToLoad` (800px 스텝) 도입으로 Lazy-render 대응 강화.
@@ -105,10 +132,12 @@ All notable changes to this project will be documented in this file.
 - 이미지/소설 양쪽 모드 모두 적용.
 
 #### 🛠 Technical Details (v1.5.5)
+
 - **EpisodesView 2패널 레이아웃**: `rounded-[32px]` 카드, `aspect-[1/1.45]` 세로형 썸네일, `ring-8` 후광 효과 적용.
 - **전역 테마 시스템**: `html[data-theme]` 속성 및 `--t-*` CSS 변수 체계 구축. `useStore.js` 싱글톤에서 상태 관리.
 - **통합 입력 컨트롤러 (`useViewerInput.js`)**: 마우스/터치/키보드 이벤트를 단일 지점에서 처리. `getZone()` 기반 구역 판별 및 Ghost Click(500ms) 방지.
 - **모바일 최적화**: iOS 스크롤 저하 해결을 위한 동적 `passive` 옵션 교체 및 Blob URL 메모리 누수 방지(`cleanupBlobUrls`).
+- **이어보기 위치 정합성**: `startReading()` 및 `openSeries()` 시점에 이력을 강제 리프레시하여 '마지막 읽은 곳' 추적 정밀화.
 
 ### 🗑️ Deprecated
 

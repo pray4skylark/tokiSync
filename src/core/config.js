@@ -5,6 +5,7 @@ export const CFG_POLICY_KEY = "TOKI_DOWNLOAD_POLICY";
 export const CFG_API_KEY = "TOKI_API_KEY";
 export const CFG_SLEEP_MODE = "TOKI_SLEEP_MODE";
 export const CFG_SMART_SKIP_RATIO = "TOKI_SMART_SKIP_RATIO";
+export const CFG_NOVEL_MODE = "TOKI_NOVEL_MODE";
 
 /**
  * Get current configuration
@@ -37,7 +38,8 @@ export function getConfig() {
         policy: GM_getValue(CFG_POLICY_KEY, "folderInCbz"),
         apiKey: GM_getValue(CFG_API_KEY, ""),
         sleepMode: GM_getValue(CFG_SLEEP_MODE, "agile"), // default: agile
-        smartSkipRatio: parseInt(GM_getValue(CFG_SMART_SKIP_RATIO, "50"), 10) // default 50% of Max
+        smartSkipRatio: parseInt(GM_getValue(CFG_SMART_SKIP_RATIO, "50"), 10), // default 50% of Max
+        novelMode: GM_getValue(CFG_NOVEL_MODE, "perChapter") // default: chapter-by-chapter
     };
 }
 
@@ -173,6 +175,14 @@ export function showConfigModal() {
                     <option value="50">50% (기본: 최고 용량 대비 반토막 난 파일만 감지)</option>
                 </select>
             </div>
+            
+            <div class="toki-input-group">
+                <label class="toki-label">소설 패키징 방식 (Novel EPUB)</label>
+                <select id="toki-cfg-novel-mode" class="toki-select">
+                    <option value="perChapter">개별 회차 저장 (1회차 = 1파일)</option>
+                    <option value="singleVolume">단행본 합본 저장 (선택 범위 = 1파일)</option>
+                </select>
+            </div>
 
             <div class="toki-modal-footer">
                 <button id="toki-btn-cancel" class="toki-btn toki-btn-cancel">취소</button>
@@ -193,6 +203,9 @@ export function showConfigModal() {
     const smartSkipSelect = document.getElementById('toki-cfg-smartskip');
     if(smartSkipSelect) smartSkipSelect.value = config.smartSkipRatio;
 
+    const novelModeSelect = document.getElementById('toki-cfg-novel-mode');
+    if(novelModeSelect) novelModeSelect.value = config.novelMode;
+
     document.getElementById('toki-btn-cancel').onclick = () => overlay.remove();
     
     document.getElementById('toki-btn-save').onclick = () => {
@@ -202,6 +215,7 @@ export function showConfigModal() {
         const newPolicy = document.getElementById('toki-cfg-policy').value;
         const newSleepMode = document.getElementById('toki-cfg-sleepmode').value;
         const newSmartSkip = document.getElementById('toki-cfg-smartskip').value;
+        const newNovelMode = document.getElementById('toki-cfg-novel-mode').value;
 
         // URL 입력 시 ID 추출 로직 병합 (사용자 편의성)
         let finalGasId = newGasId;
@@ -214,6 +228,7 @@ export function showConfigModal() {
         setConfig(CFG_POLICY_KEY, newPolicy);
         setConfig(CFG_SLEEP_MODE, newSleepMode);
         setConfig(CFG_SMART_SKIP_RATIO, newSmartSkip);
+        setConfig(CFG_NOVEL_MODE, newNovelMode);
 
         alert('설정이 저장되었습니다.');
         overlay.remove();

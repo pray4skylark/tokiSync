@@ -412,6 +412,15 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
         iframe.style.marginTop = '40px';
         document.body.appendChild(iframe);
 
+        // [v1.7.1] Novel Single Volume Mode Init
+        const novelMode = getConfig().novelMode;
+        const isSingleVolume = isNovel && novelMode === 'singleVolume';
+        let masterEpubBuilder = null;
+        if (isSingleVolume) {
+            masterEpubBuilder = new EpubBuilder();
+            logger.log('📙 소설 단행본 합본 모드 활성화 (마지막에 한 번에 저장됩니다)');
+        }
+
         // --- Processing Loop ---
         for (let i = 0; i < list.length; i++) {
             const item = parseListItem(list[i].element || list[i]); 
@@ -419,7 +428,8 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
             logger.log(`[${i + 1}/${list.length}] 처리 중: ${item.title}`);
 
             // [v1.5.0 Smart Skip] Skip already-uploaded episodes (Drive policy only)
-            if (destination === 'drive' && uploadedHistorySet.size > 0) {
+            // [v1.7.1] Bypass skipping in Single Volume mode (we need all chapters)
+            if (!isSingleVolume && destination === 'drive' && uploadedHistorySet.size > 0) {
                 const numStr = item.num ? item.num.toString() : '';
                 const numPlain = parseInt(numStr).toString();
                 if (uploadedHistorySet.has(numStr) || uploadedHistorySet.has(numPlain)) {
@@ -432,13 +442,20 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
             let currentBuilder = null;
 
             // [v1.6.0] Strategy: Always use a FRESH builder per item for Kavita compatibility
-            // This ensures each CBZ has its own ComicInfo.xml and root-level images
-            if (isNovel) currentBuilder = new EpubBuilder();
-            else currentBuilder = new CbzBuilder();
+            // [v1.7.1] Except for Novel Single Volume Mode
+            if (isSingleVolume) {
+                currentBuilder = masterEpubBuilder;
+            } else {
+                if (isNovel) currentBuilder = new EpubBuilder();
+                else currentBuilder = new CbzBuilder();
+            }
 
             // Process Item
             try {
                 await processItem(item, currentBuilder, siteInfo, iframe, seriesTitle);
+                if (isSingleVolume) {
+                    logger.log(`📥 챕터 추가 완료: ${item.title} (현재 ${masterEpubBuilder.chapters.length}개)`, 'Downloader');
+                }
             } catch (err) {
                 console.error(err);
                 logger.error(`항목 처리 실패 (${item.title}): ${err.message}`, 'Downloader');
@@ -446,7 +463,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
             }
 
             // Post-Process for Non-Default Policies
-            if (buildingPolicy !== 'folderInCbz') {
+            if (buildingPolicy !== 'folderInCbz' && !isSingleVolume) {
                 // Build the individual chapter file
              
                 // Clean Filename Logic
@@ -606,6 +623,49 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
             }
         }
 
+
+        // [v1.7.1] Finalize Single Volume EPUB
+        if (isSingleVolume && masterEpubBuilder) {
+            if (masterEpubBuilder.chapters.length > 0) {
+                try {
+                    // [v1.7.1 Update] Use Chapter Range for Filename instead of "(합본)"
+                    // [v1.7.1 Update] Use Chapter Range for Filename instead of "(합본)" - Safe Parsing
+                    const startRaw = last.num;
+                    const endRaw = first.num;
+                    const startNum = parseInt(startRaw);
+                    const endNum = parseInt(endRaw);
+
+                    let rangeLabel = "";
+                    if (isNaN(startNum) || isNaN(endNum)) {
+                        // Fallback to original labels if either is not numeric (e.g., "공지")
+                        rangeLabel = (startRaw === endRaw) ? `${startRaw}` : `${startRaw}-${endRaw}`;
+                    } else {
+                        rangeLabel = (startNum === endNum) ? `${startNum}화` : `${Math.min(startNum, endNum)}-${Math.max(startNum, endNum)}화`;
+                    }
+                    const finalFilename = `${seriesTitle || rootFolder} (${rangeLabel})`;
+                    
+                    logger.log(`📚 단행본 조립 및 저장 중... (${finalFilename})`);
+                    
+                    const finalZip = await masterEpubBuilder.build({
+                        series: seriesTitle || rootFolder,
+                        title: seriesTitle || rootFolder,
+                        writer: site
+                    });
+                    const finalBlob = await finalZip.generateAsync({ type: "blob" });
+                    
+                    await saveFile(finalBlob, finalFilename, destination, 'epub', {
+                        folderName: rootFolder,
+                        category: category
+                    });
+                    
+                    logger.success(`✅ 단행본 합본 저장 완료: ${finalFilename}`);
+                } catch (epubErr) {
+                    logger.error(`단행본 빌드 실패: ${epubErr.message}`);
+                }
+            } else {
+                logger.warn('⚠️ 유효한 챕터가 없어 단행본 빌드를 취소합니다.', 'Downloader');
+            }
+        }
 
         // Cleanup
         iframe.remove();

@@ -12,7 +12,7 @@
           <div class="px-8 py-6 border-b border-white/5 flex justify-between items-center bg-black/20">
             <div class="flex items-center space-x-3">
               <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-sm">⚙️</div>
-              <h2 class="text-xl font-black tracking-tight text-theme-text uppercase italic">Settings <span class="text-blue-500 font-normal not-italic ml-2 opacity-50 text-sm tracking-widest uppercase">v1.7.0</span></h2>
+              <h2 class="text-xl font-black tracking-tight text-theme-text uppercase italic">Settings <span class="text-blue-500 font-normal not-italic ml-2 opacity-50 text-sm tracking-widest uppercase">v1.7.1</span></h2>
             </div>
             <button @click="showSettings = false" class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 text-theme-muted transition-colors">
               <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path></svg>

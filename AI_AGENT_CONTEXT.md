@@ -82,4 +82,15 @@ This document is the **single source of truth (SSOT)** for the project's static 
   - ❌ WRONG: `bg-black/95`, `text-white`, `text-zinc-400`
   - ✅ CORRECT: `text-theme-text`, `text-theme-sub`, `text-theme-muted`, `hover:bg-theme-surface-hover`
 - **Glass UI elements** (e.g., `.glass-controls`) must use `--t-glass-bg` and `--t-glass-border` CSS variables for both dark and light themes.
-- **Global theme state** is managed via `appTheme` (ref) and `toggleTheme` in `useStore.js`. Applied via `data-theme` attribute on `document.documentElement`. Do NOT create per-component theme states.
+86:
+87: ---
+88:
+89: ## 5. Development & Verification Protocol
+90:
+91: - **Logical Self-Audit**: Every code change must be preceded and followed by a self-audit.
+92:   - Check for logical contradictions with existing project principles (Stateless GAS, etc.).
+93:   - Identify potential edge cases (e.g., empty Drive folders, timeout scenarios).
+94:   - Ensure cross-browser and mobile compatibility of UI changes.
+95: - **Verification Reporting**: The agent must report the outcome of its self-audit.
+96:   - Include a summary of "What was verified" and "Potential risks" in the `walkthrough.md` or final summary.
+97: - **Atomic Changelog Protocol**: All technical changes MUST be recorded in `CHANGELOG.md` immediately upon completion of the sub-task, ensuring no history is lost.

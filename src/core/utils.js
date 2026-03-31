@@ -411,7 +411,11 @@ export async function saveFile(data, filename, type = 'local', extension = 'zip'
                 },
                 onerror: (err) => {
                     const errMsg = err ? (err.error || err.reason || "알 수 없는 오류") : "알 수 없는 오류";
-                    logger.error(`[Native] 다운로드 실패: ${errMsg}`);
+                    if (err && err.error === 'not_whitelisted') {
+                        logger.critical(`[Native 방어] 다운로드 차단됨: 지원하지 않는 확장자입니다.\n👉 템퍼몽키 [설정] -> [고급] -> [Whitelisted File Extensions]에 '${extension}' 확장자(cbz/epub)를 추가해주세요.`);
+                    } else {
+                        logger.error(`[Native] 다운로드 실패: ${errMsg}`);
+                    }
                     console.error("[Native Error]", err);
                     reject(new Error(errMsg));
                 }

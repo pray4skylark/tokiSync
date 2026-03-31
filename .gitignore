@@ -19,6 +19,11 @@ docs/js/backup/*
 docs_old/
 src/old_core/
 
+# Local Analysis Documents (Private)
+doc_refactoring_report.md
+gas_v3_refactoring_analysis.md
+walkthrough.md
+
 # Temporary build artifacts
 dist/
 docs/
