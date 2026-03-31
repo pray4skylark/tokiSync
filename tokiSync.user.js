@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.7.0
+// @version      1.7.1
 // @description  Toki series sites -> Google Drive syncing tool (Bundled)
 // @author       pray4skylark
 // @updateURL    https://pray4skylark.github.io/tokiSync/tokiSync.user.js
@@ -1166,7 +1166,7 @@ async function getMergeIndexFragment(sourceId) {
 /* harmony export */   Vh: () => (/* binding */ showConfigModal),
 /* harmony export */   zj: () => (/* binding */ getConfig)
 /* harmony export */ });
-/* unused harmony exports CFG_URL_KEY, CFG_ID_KEY, CFG_FOLDER_ID, CFG_POLICY_KEY, CFG_API_KEY, CFG_SLEEP_MODE, CFG_SMART_SKIP_RATIO */
+/* unused harmony exports CFG_URL_KEY, CFG_ID_KEY, CFG_FOLDER_ID, CFG_POLICY_KEY, CFG_API_KEY, CFG_SLEEP_MODE, CFG_SMART_SKIP_RATIO, CFG_NOVEL_MODE */
 const CFG_URL_KEY = "TOKI_GAS_URL"; // legacy
 const CFG_ID_KEY = "TOKI_GAS_ID";
 const CFG_FOLDER_ID = "TOKI_FOLDER_ID";
@@ -1174,6 +1174,7 @@ const CFG_POLICY_KEY = "TOKI_DOWNLOAD_POLICY";
 const CFG_API_KEY = "TOKI_API_KEY";
 const CFG_SLEEP_MODE = "TOKI_SLEEP_MODE";
 const CFG_SMART_SKIP_RATIO = "TOKI_SMART_SKIP_RATIO";
+const CFG_NOVEL_MODE = "TOKI_NOVEL_MODE";
 
 /**
  * Get current configuration
@@ -1206,7 +1207,8 @@ function getConfig() {
         policy: GM_getValue(CFG_POLICY_KEY, "folderInCbz"),
         apiKey: GM_getValue(CFG_API_KEY, ""),
         sleepMode: GM_getValue(CFG_SLEEP_MODE, "agile"), // default: agile
-        smartSkipRatio: parseInt(GM_getValue(CFG_SMART_SKIP_RATIO, "50"), 10) // default 50% of Max
+        smartSkipRatio: parseInt(GM_getValue(CFG_SMART_SKIP_RATIO, "50"), 10), // default 50% of Max
+        novelMode: GM_getValue(CFG_NOVEL_MODE, "perChapter") // default: chapter-by-chapter
     };
 }
 
@@ -1342,6 +1344,14 @@ function showConfigModal() {
                     <option value="50">50% (기본: 최고 용량 대비 반토막 난 파일만 감지)</option>
                 </select>
             </div>
+            
+            <div class="toki-input-group">
+                <label class="toki-label">소설 패키징 방식 (Novel EPUB)</label>
+                <select id="toki-cfg-novel-mode" class="toki-select">
+                    <option value="perChapter">개별 회차 저장 (1회차 = 1파일)</option>
+                    <option value="singleVolume">단행본 합본 저장 (선택 범위 = 1파일)</option>
+                </select>
+            </div>
 
             <div class="toki-modal-footer">
                 <button id="toki-btn-cancel" class="toki-btn toki-btn-cancel">취소</button>
@@ -1362,6 +1372,9 @@ function showConfigModal() {
     const smartSkipSelect = document.getElementById('toki-cfg-smartskip');
     if(smartSkipSelect) smartSkipSelect.value = config.smartSkipRatio;
 
+    const novelModeSelect = document.getElementById('toki-cfg-novel-mode');
+    if(novelModeSelect) novelModeSelect.value = config.novelMode;
+
     document.getElementById('toki-btn-cancel').onclick = () => overlay.remove();
     
     document.getElementById('toki-btn-save').onclick = () => {
@@ -1371,6 +1384,7 @@ function showConfigModal() {
         const newPolicy = document.getElementById('toki-cfg-policy').value;
         const newSleepMode = document.getElementById('toki-cfg-sleepmode').value;
         const newSmartSkip = document.getElementById('toki-cfg-smartskip').value;
+        const newNovelMode = document.getElementById('toki-cfg-novel-mode').value;
 
         // URL 입력 시 ID 추출 로직 병합 (사용자 편의성)
         let finalGasId = newGasId;
@@ -1383,6 +1397,7 @@ function showConfigModal() {
         setConfig(CFG_POLICY_KEY, newPolicy);
         setConfig(CFG_SLEEP_MODE, newSleepMode);
         setConfig(CFG_SMART_SKIP_RATIO, newSmartSkip);
+        setConfig(CFG_NOVEL_MODE, newNovelMode);
 
         alert('설정이 저장되었습니다.');
         overlay.remove();
@@ -1832,7 +1847,11 @@ async function saveFile(data, filename, type = 'local', extension = 'zip', metad
                 },
                 onerror: (err) => {
                     const errMsg = err ? (err.error || err.reason || "알 수 없는 오류") : "알 수 없는 오류";
-                    logger.error(`[Native] 다운로드 실패: ${errMsg}`);
+                    if (err && err.error === 'not_whitelisted') {
+                        logger.critical(`[Native 방어] 다운로드 차단됨: 지원하지 않는 확장자입니다.\n👉 템퍼몽키 [설정] -> [고급] -> [Whitelisted File Extensions]에 '${extension}' 확장자(cbz/epub)를 추가해주세요.`);
+                    } else {
+                        logger.error(`[Native] 다운로드 실패: ${errMsg}`);
+                    }
                     console.error("[Native Error]", err);
                     reject(new Error(errMsg));
                 }
@@ -2406,6 +2425,13 @@ class MenuModal {
                     </select>
                 </div>
                 <div class="toki-control-group">
+                    <label class="toki-label">소설 패키징 방식</label>
+                    <select id="toki-sel-novel-mode" class="toki-select">
+                         <option value="perChapter">개별 회차 저장 (1회차 = 1파일)</option>
+                         <option value="singleVolume">단행본 합본 저장 (선택 범위 = 1파일)</option>
+                    </select>
+                </div>
+                <div class="toki-control-group">
                     <button class="toki-btn-action toki-btn-secondary" id="toki-btn-advanced" style="font-size: 13px;">
                         🛠️ 고급 설정 (경로, API키)
                     </button>
@@ -2492,12 +2518,14 @@ class MenuModal {
         // Settings
         const selPolicy = document.getElementById('toki-sel-policy');
         const selSpeed = document.getElementById('toki-sel-speed');
+        const selNovelTerm = document.getElementById('toki-sel-novel-mode');
 
         // Load Initial Values (Need to fetch via handler or GM)
         if (this.handlers.getConfig) {
             const cfg = this.handlers.getConfig();
-            if (cfg.policy) selPolicy.value = cfg.policy;
-            if (cfg.sleepMode) selSpeed.value = cfg.sleepMode;
+            if (cfg.policy && selPolicy) selPolicy.value = cfg.policy;
+            if (cfg.sleepMode && selSpeed) selSpeed.value = cfg.sleepMode;
+            if (cfg.novelMode && selNovelTerm) selNovelTerm.value = cfg.novelMode;
         }
 
         selPolicy.onchange = () => { 
@@ -2530,7 +2558,8 @@ class MenuModal {
             };
         }
 
-        selSpeed.onchange = () => { if(this.handlers.setConfig) this.handlers.setConfig('TOKI_SLEEP_MODE', selSpeed.value); };
+        if (selSpeed) selSpeed.onchange = () => { if(this.handlers.setConfig) this.handlers.setConfig('TOKI_SLEEP_MODE', selSpeed.value); };
+        if (selNovelTerm) selNovelTerm.onchange = () => { if(this.handlers.setConfig) this.handlers.setConfig('TOKI_NOVEL_MODE', selNovelTerm.value); };
 
         document.getElementById('toki-btn-advanced').onclick = () => {
             if(this.handlers.openSettings) this.handlers.openSettings();
@@ -3584,6 +3613,15 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
         iframe.style.marginTop = '40px';
         document.body.appendChild(iframe);
 
+        // [v1.7.1] Novel Single Volume Mode Init
+        const novelMode = (0,core_config/* getConfig */.zj)().novelMode;
+        const isSingleVolume = isNovel && novelMode === 'singleVolume';
+        let masterEpubBuilder = null;
+        if (isSingleVolume) {
+            masterEpubBuilder = new EpubBuilder();
+            logger.log('📙 소설 단행본 합본 모드 활성화 (마지막에 한 번에 저장됩니다)');
+        }
+
         // --- Processing Loop ---
         for (let i = 0; i < list.length; i++) {
             const item = parseListItem(list[i].element || list[i]); 
@@ -3591,7 +3629,8 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
             logger.log(`[${i + 1}/${list.length}] 처리 중: ${item.title}`);
 
             // [v1.5.0 Smart Skip] Skip already-uploaded episodes (Drive policy only)
-            if (destination === 'drive' && uploadedHistorySet.size > 0) {
+            // [v1.7.1] Bypass skipping in Single Volume mode (we need all chapters)
+            if (!isSingleVolume && destination === 'drive' && uploadedHistorySet.size > 0) {
                 const numStr = item.num ? item.num.toString() : '';
                 const numPlain = parseInt(numStr).toString();
                 if (uploadedHistorySet.has(numStr) || uploadedHistorySet.has(numPlain)) {
@@ -3604,13 +3643,20 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
             let currentBuilder = null;
 
             // [v1.6.0] Strategy: Always use a FRESH builder per item for Kavita compatibility
-            // This ensures each CBZ has its own ComicInfo.xml and root-level images
-            if (isNovel) currentBuilder = new EpubBuilder();
-            else currentBuilder = new CbzBuilder();
+            // [v1.7.1] Except for Novel Single Volume Mode
+            if (isSingleVolume) {
+                currentBuilder = masterEpubBuilder;
+            } else {
+                if (isNovel) currentBuilder = new EpubBuilder();
+                else currentBuilder = new CbzBuilder();
+            }
 
             // Process Item
             try {
                 await processItem(item, currentBuilder, siteInfo, iframe, seriesTitle);
+                if (isSingleVolume) {
+                    logger.log(`📥 챕터 추가 완료: ${item.title} (현재 ${masterEpubBuilder.chapters.length}개)`, 'Downloader');
+                }
             } catch (err) {
                 console.error(err);
                 logger.error(`항목 처리 실패 (${item.title}): ${err.message}`, 'Downloader');
@@ -3618,7 +3664,7 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
             }
 
             // Post-Process for Non-Default Policies
-            if (buildingPolicy !== 'folderInCbz') {
+            if (buildingPolicy !== 'folderInCbz' && !isSingleVolume) {
                 // Build the individual chapter file
              
                 // Clean Filename Logic
@@ -3779,6 +3825,49 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
         }
 
 
+        // [v1.7.1] Finalize Single Volume EPUB
+        if (isSingleVolume && masterEpubBuilder) {
+            if (masterEpubBuilder.chapters.length > 0) {
+                try {
+                    // [v1.7.1 Update] Use Chapter Range for Filename instead of "(합본)"
+                    // [v1.7.1 Update] Use Chapter Range for Filename instead of "(합본)" - Safe Parsing
+                    const startRaw = last.num;
+                    const endRaw = first.num;
+                    const startNum = parseInt(startRaw);
+                    const endNum = parseInt(endRaw);
+
+                    let rangeLabel = "";
+                    if (isNaN(startNum) || isNaN(endNum)) {
+                        // Fallback to original labels if either is not numeric (e.g., "공지")
+                        rangeLabel = (startRaw === endRaw) ? `${startRaw}` : `${startRaw}-${endRaw}`;
+                    } else {
+                        rangeLabel = (startNum === endNum) ? `${startNum}화` : `${Math.min(startNum, endNum)}-${Math.max(startNum, endNum)}화`;
+                    }
+                    const finalFilename = `${seriesTitle || rootFolder} (${rangeLabel})`;
+                    
+                    logger.log(`📚 단행본 조립 및 저장 중... (${finalFilename})`);
+                    
+                    const finalZip = await masterEpubBuilder.build({
+                        series: seriesTitle || rootFolder,
+                        title: seriesTitle || rootFolder,
+                        writer: site
+                    });
+                    const finalBlob = await finalZip.generateAsync({ type: "blob" });
+                    
+                    await (0,utils/* saveFile */.OJ)(finalBlob, finalFilename, destination, 'epub', {
+                        folderName: rootFolder,
+                        category: category
+                    });
+                    
+                    logger.success(`✅ 단행본 합본 저장 완료: ${finalFilename}`);
+                } catch (epubErr) {
+                    logger.error(`단행본 빌드 실패: ${epubErr.message}`);
+                }
+            } else {
+                logger.warn('⚠️ 유효한 챕터가 없어 단행본 빌드를 취소합니다.', 'Downloader');
+            }
+        }
+
         // Cleanup
         iframe.remove();
 
@@ -3914,7 +4003,7 @@ async function fetchImages(imageUrls) {
 
 
 function main() {
-    console.log("🚀 TokiDownloader Loaded (New Core v1.7.0)");
+    console.log("🚀 TokiDownloader Loaded (New Core v1.7.1)");
     
     const logger = ui.LogBox.getInstance();
 
