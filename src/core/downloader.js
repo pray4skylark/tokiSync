@@ -1,5 +1,5 @@
 import { sleep, waitIframeLoad, saveFile, getCommonPrefix, scrollToLoad } from './utils.js';
-import { getListItems, parseListItem, getNovelContent, getImageList, getThumbnailUrl, getSeriesTitle, getSeriesMetadata } from './parser.js';
+import { ParserFactory } from './parsers/ParserFactory.js';
 import { detectSite } from './detector.js';
 import { EpubBuilder } from './epub.js';
 import { CbzBuilder } from './cbz.js';
@@ -17,8 +17,8 @@ const SLEEP_POLICIES = {
 };
 
 // Processing Loop에 해당되는 로직을 분리 한다.
-export async function processItem(item, builder, siteInfo, iframe, seriesTitle = "") {
-    const { site, protocolDomain } = siteInfo;
+export async function processItem(item, builder, siteInfo, iframe, parser, seriesTitle = "") {
+    const { site } = siteInfo;
     const isNovel = (site === "북토끼");
 
     await waitIframeLoad(iframe, item.src);
@@ -31,7 +31,7 @@ export async function processItem(item, builder, siteInfo, iframe, seriesTitle =
     const iframeDoc = iframe.contentWindow.document;
 
     if (isNovel) {
-        const text = getNovelContent(iframeDoc);        // Add chapter to existing builder instance
+        const text = parser.getNovelContent(iframeDoc);        // Add chapter to existing builder instance
         builder.addChapter(item.title, text);
     } 
     else {
@@ -39,13 +39,13 @@ export async function processItem(item, builder, siteInfo, iframe, seriesTitle =
         const logger = LogBox.getInstance();
         
         // 1. 스크롤 전 URL 선점 수집 (프로토타입 방식의 장점: data-original 등에 숨은 진짜 URL 확보)
-        const initialUrls = getImageList(iframeDoc, protocolDomain);
+        const initialUrls = parser.getImageList(iframeDoc);
         
         // 2. 강제 스크롤을 통해 레이지 로딩 이미지 활성화
         await scrollToLoad(iframeDoc);
 
         // 3. 스크롤 후 최종 URL 수집
-        let finalUrls = getImageList(iframeDoc, protocolDomain);
+        let finalUrls = parser.getImageList(iframeDoc);
         
         // 4. 하이브리드 병합: 스크롤 전후 URL 중 더 신뢰도 높은 것을 선택
         // 만약 finalUrls가 placeholder(isDummy: true)라면 initialUrls를 사용
@@ -64,7 +64,7 @@ export async function processItem(item, builder, siteInfo, iframe, seriesTitle =
         if (mergedUrls.length === 0) {
             logger.warn('[Parser] 이미지 0개 — 1.5초 후 재파싱 시도', 'Parser');
             await sleep(1500);
-            const retryUrls = getImageList(iframeDoc, protocolDomain);
+            const retryUrls = parser.getImageList(iframeDoc);
             if (retryUrls.length > 0) mergedUrls.push(...retryUrls);
             logger.log(`[Parser] 재파싱 결과: ${mergedUrls.length}개`, 'Parser');
         }
@@ -83,7 +83,7 @@ export async function processItem(item, builder, siteInfo, iframe, seriesTitle =
             logger.warn(`[Deep Fallback] 다수의 저용량 이미지 감지 (${suspiciousCount}/${mergedUrls.length}). 2초 후 강제 재스크롤 재시도...`, 'System');
             await sleep(2000); // v1.7.2: 5s -> 2s
             await scrollToLoad(iframeDoc, 12000); // 더 길게 대기
-            const finalRetryUrls = getImageList(iframeDoc, protocolDomain);
+            const finalRetryUrls = parser.getImageList(iframeDoc);
             images = await fetchImages(finalRetryUrls);
         }
 
@@ -144,7 +144,15 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
         stopSilentAudio();
         return;
     }
-    const { site, protocolDomain, category } = siteInfo;
+
+    const parser = ParserFactory.getParser();
+    if (!parser) {
+        alert("파서를 초기화할 수 없습니다.");
+        stopSilentAudio();
+        return;
+    }
+
+    const { site, category } = siteInfo;
     const isNovel = (site === "북토끼");
 
     try {
@@ -188,13 +196,14 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
         }
 
         // Get List
-        let list = getListItems();
+        let list = parser.getListItems();
 
         // [v2.0] 커스텀 범위 필터 ("1,2,4-10" 형식)
         const rangeSet = parseRangeSpec(rangeSpec);
         if (rangeSet) {
             list = list.filter(li => {
-                const num = parseInt(li.querySelector('.wr-num').innerText);
+                const item = parser.parseListItem(li);
+                const num = parseInt(item.num);
                 return rangeSet.has(num);
             });
             logger.log(`범위 필터 적용: ${rangeSpec} → ${list.length}개 항목`);
@@ -202,9 +211,9 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
         
         // Log episode range
         if (list.length > 0) {
-            const firstTitle = list[list.length - 1].title; // usually reversed order
-            const lastTitle = list[0].title;
-            logger.log(`총 ${list.length}개 항목 처리 예정. (${firstTitle} ~ ${lastTitle})`, 'Downloader');
+            const first = parser.parseListItem(list[list.length - 1]); // usually reversed order
+            const last = parser.parseListItem(list[0]);
+            logger.log(`총 ${list.length}개 항목 처리 예정. (${first.title} ~ ${last.title})`, 'Downloader');
         } else {
             logger.log(`총 0개 항목 처리 예정.`, 'Downloader');
         }
@@ -216,8 +225,8 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
         }
 
         // Folder Name (Title) & Common Title Extraction
-        const first = parseListItem(list[0]);
-        const last = parseListItem(list[list.length - 1]);
+        const first = parser.parseListItem(list[0]);
+        const last = parser.parseListItem(list[list.length - 1]);
         
         // Extract Series ID from URL
         // https://.../webtoon/123456?page=...
@@ -225,51 +234,17 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
         const idMatch = document.URL.match(/\/(novel|webtoon|comic)\/([0-9]+)/);
         const seriesId = idMatch ? idMatch[2] : "0000";
 
-        let seriesTitle = "";
-        let rootFolder = "";
-
-        // Determine Root Folder Name
-        // [v1.4.0 Fix] Priority: Metadata Title > Common Prefix > First Item Title
-        seriesTitle = getSeriesTitle(); // Official Metadata Title
-        let listPrefixTitle = "";       // Title appearing in the list items
-
-        if (list.length > 1) {
-            listPrefixTitle = getCommonPrefix(first.title, last.title);
-        }
-
-        if (seriesTitle) {
-             rootFolder = `[${seriesId}] ${seriesTitle}`;
-             // Remove invalid characters if any
-             rootFolder = rootFolder.replace(/[<>:"/\\|?*]/g, '');
-        } else {
-             // Fallback Logic
-            if (listPrefixTitle.length > 2) {
-                seriesTitle = listPrefixTitle; // Use prefix as main title if metadata failed
-                rootFolder = `[${seriesId}] ${seriesTitle}`;
-            } else if (list.length > 1) {
-                 rootFolder = `[${seriesId}] ${first.title} ~ ${last.title}`;
-            } else {
-                 // [v1.4.0 Fix] Single Item Fallback: Try regex
-                 // "인싸 공명 19화" -> "인싸 공명"
-                 const title = first.title;
-                 // Remove " 19화", " 1화" at the end
-                 const cleanTitle = title.replace(/\s+\d+화$/, '').trim();
-                 
-                 if (cleanTitle !== title && cleanTitle.length > 0) {
-                     seriesTitle = cleanTitle; // Successfully extracted
-                     rootFolder = `[${seriesId}] ${seriesTitle}`;
-                 } else {
-                     // Last resort: Use full title
-                     rootFolder = `[${seriesId}] ${title}`;
-                 }
-            }
-        }
+        // Determine Root Folder Name & Series Title
+        const rootFolder = parser.getFormattedTitle(seriesId, first.title, last.title, getCommonPrefix);
+        // Extract raw title from rootFolder (e.g., "[1234] Title" -> "Title")
+        const seriesTitle = rootFolder.replace(/^\[[0-9]+\]\s*/, '');
+        const listPrefixTitle = (list.length > 1) ? getCommonPrefix(first.title, last.title) : "";
 
         // [v1.7.0] Collect detailed metadata for Phase 3 Persistence
         const seriesMetadata = {
-            ...getSeriesMetadata(),
+            ...parser.getSeriesMetadata(),
             title: seriesTitle || rootFolder,
-            thumbnail: getThumbnailUrl() || ""
+            thumbnail: parser.getThumbnailUrl() || ""
         };
 
         // [Fix] Append Range [Start-End] for Local Merged Files (folderInCbz / zipOfCbzs)
@@ -284,7 +259,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
         // [v1.4.0] Upload Series Thumbnail (if uploading to Drive)
         if (destination === 'drive') {
             try {
-                const thumbnailUrl = getThumbnailUrl();
+                const thumbnailUrl = parser.getThumbnailUrl();
                 if (thumbnailUrl) {
                     logger.log('📷 시리즈 썸네일 업로드 중...');
                     const thumbResponse = await fetch(thumbnailUrl);
@@ -423,7 +398,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
 
         // --- Processing Loop ---
         for (let i = 0; i < list.length; i++) {
-            const item = parseListItem(list[i].element || list[i]); 
+            const item = parser.parseListItem(list[i].element || list[i]); 
             console.clear();
             logger.log(`[${i + 1}/${list.length}] 처리 중: ${item.title}`);
 
@@ -452,7 +427,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
 
             // Process Item
             try {
-                await processItem(item, currentBuilder, siteInfo, iframe, seriesTitle);
+                await processItem(item, currentBuilder, siteInfo, iframe, parser, seriesTitle);
                 if (isSingleVolume) {
                     logger.log(`📥 챕터 추가 완료: ${item.title} (현재 ${masterEpubBuilder.chapters.length}개)`, 'Downloader');
                 }

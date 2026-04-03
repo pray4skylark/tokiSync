@@ -56,3 +56,26 @@
 # AI 에이전트는 코드 작성 후 다음을 필수 수행해야 한다:
 # 1. 자체 논리 검증: 기존 아키텍처와의 정합성, 에지 케이스, 잠재적 부작용 자체 진단.
 # 2. 결과 보고: 검증한 내용과 예상 결과를 walkthrough.md 또는 보고서에 명시.
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 🛠️ SECTION 5: TECH-STACK SPECIFIC SKILL PROVISIONING
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# AI 에이전트는 작업 특성에 맞춰 프롬프트 시작 시 아래 스킬 명시 및 로드 룰을 강제(또는 권장)한다.
+# [Vue 3 / Vite / Tailwind / Vanilla JS / GAS / Dexie / JSZip]
+# (Source: https://github.com/sickn33/antigravity-awesome-skills)
+
+# 1. 기획 및 문서 기반 작업 시:
+#    @[concise-planning] : Plan-First Policy에 따른 꼼꼼한 사전 기획 강제.
+#    @[wiki-architect] : AI_AGENT_CONTEXT.md 등 싱글 소스 문서 정합성 유지.
+
+# 2. 프론트엔드/코어 로직 수정 시 (UI, 렌더링 등):
+#    @[javascript-pro] : 모던 ES6+ Vanilla JS 패턴 적용.
+#    @[tailwind-patterns] & @[frontend-design] : 미려한 UI/UX.
+
+# 3. 성능, 대용량 처리, 버그 추적 시 (Virtual Scroll, IndexedDB):
+#    @[performance-engineer] : 브라우저 렌더링/메모리 및 DB 입출력 병목 최적화.
+#    @[systematic-debugging] : 치명적 에러 시 근본 원인 분석 후 수정안 제공.
+
+# 4. 보안 및 의존성 이슈 대응 시:
+#    @[security-auditor] & @[vibe-code-auditor] : 외부 패키지 감사 및 AI 생성 코드 결함 감지.
+    

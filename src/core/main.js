@@ -3,7 +3,7 @@ import { detectSite, getMaxEpisodes, parseEpisodeRange } from './detector.js'; /
 import { showConfigModal, getConfig, setConfig } from './config.js';
 import { LogBox, markDownloadedItems, MenuModal } from './ui.js';
 import { fetchHistory } from './gas.js';
-import { getListItems, parseListItem } from './parser.js';
+import { ParserFactory } from './parsers/ParserFactory.js';
 import { getOAuthToken } from './network.js';
 
 import { getCommonPrefix, blobToArrayBuffer, saveFile } from './utils.js';
@@ -153,10 +153,13 @@ export function main() {
         getConfig: getConfig,
         setConfig: setConfig,
         getEpisodeRange: () => {
-            const list = getListItems();
+            const parser = ParserFactory.getParser();
+            if (!parser) return { min: 1, max: 100 };
+            
+            const list = parser.getListItems();
             if (list.length > 0) {
-                const first = parseListItem(list[0]);
-                const last = parseListItem(list[list.length - 1]);
+                const first = parser.parseListItem(list[0]);
+                const last = parser.parseListItem(list[list.length - 1]);
                 const min = Math.min(parseInt(first.num), parseInt(last.num));
                 const max = Math.max(parseInt(first.num), parseInt(last.num));
                 return { min, max };
@@ -265,32 +268,23 @@ export function main() {
         if (isSyncing) return;
         isSyncing = true;
         try {
-            const list = getListItems();
+            const parser = ParserFactory.getParser();
+            if (!parser) return;
+            const list = parser.getListItems();
             console.log(`[TokiSync] Found ${list.length} list items`);
             if (list.length === 0) {
                 console.warn('[TokiSync] No list items found, skipping history sync');
                 return;
             }
 
-            const first = parseListItem(list[0]);
-            const last = parseListItem(list[list.length - 1]);
+            const first = parser.parseListItem(list[0]);
+            const last = parser.parseListItem(list[list.length - 1]);
 
             const idMatch = document.URL.match(/\/(novel|webtoon|comic)\/([0-9]+)/);
             const seriesId = idMatch ? idMatch[2] : "0000";
 
-            let seriesTitle = "";
-            let rootFolder = "";
-
-            if (list.length > 1) {
-                seriesTitle = getCommonPrefix(first.title, last.title);
-                if (seriesTitle.length > 2) {
-                    rootFolder = `[${seriesId}] ${seriesTitle}`;
-                } else {
-                    rootFolder = `[${seriesId}] ${first.title} ~ ${last.title}`;
-                }
-            } else {
-                rootFolder = `[${seriesId}] ${first.title}`;
-            }
+            // Determine Root Folder Name (Unified with Downloader)
+            const rootFolder = parser.getFormattedTitle(seriesId, first.title, last.title, getCommonPrefix);
 
             let category = 'Webtoon';
             if (siteInfo.site === '북토끼') category = 'Novel';

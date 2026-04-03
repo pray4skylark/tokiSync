@@ -5,6 +5,7 @@
 
 import { startSilentAudio, stopSilentAudio, isAudioRunning } from './anti_sleep.js';
 import { getConfig } from './config.js';
+import { ParserFactory } from './parsers/ParserFactory.js';
 
 export class LogBox {
     static instance = null;
@@ -712,77 +713,64 @@ export function markDownloadedItems(historyList) {
     // Use Set for fast lookup
     const historySet = new Set(historyList.map(id => id.toString())); // Ensure string comparison
 
-    // Target elements: This depends on the specific site structure
-    // Common pattern: li.list-item, .list-body > li
-    // We reuse logic similar to `getListItems` or target generic list structures found on these sites.
-    
-    // Attempt 1: NewToki / ManaToki style (.list-item)
-    // Attempt 2: BookToki (table rows or similar)
-    // We iterate generic selectors commonly used.
-    
-    const items = document.querySelectorAll('.list-item, .list-row, .post-item, .wr-list li');
-    
+    const parser = ParserFactory.getParser();
+    if (!parser) {
+        console.warn('[UI] 파서를 찾을 수 없어 다운로드 표시를 생략합니다.');
+        return;
+    }
+
+    const items = parser.getListItems();
     let markedCount = 0;
 
-    items.forEach(item => {
-        // Find the number logic consistent with downloader.js
-        const numElement = item.querySelector('.wr-num, .num');
-        if (numElement) {
-            // Need to map "Number" to "ID" or verify what ID means.
-            // Wait, fetchHistory returns "Episode IDs" which usually correspond to something unique?
-            // Actually, in previous steps we used "rootFolder" name for check (series title).
-            // SyncService.gs likely returns list of FILENAMES or Folder names if checking inside series folder.
-            // If the GAS script returns list of '0001', '0002' (chapter numbers), we match that.
+    items.forEach(li => {
+        try {
+            const item = parser.parseListItem(li);
+            if (!item) return; // Skip if parse failed
             
-            // Assuming historyList contains Chapter Numbers (e.g. "1", "2", "0050")
-            const numText = numElement.innerText.trim();
-            
-            // Normalize: '001' -> '1', '1' -> '1' for comparison
-            const normalizedNum = parseInt(numText).toString();
-            
-            // Check if ANY items in history set matches this number
-            // (Assuming historySet has normalized strings like "1", "50")
-            // Or if historySet has padded "0001".
-            
-            // Let's try flexible matching
-            let isDownloaded = historySet.has(numText) || historySet.has(normalizedNum);
-             
-            // Try left-pad match (toki usually uses 4 digit padding in filenames potentially?)
-            if(!isDownloaded && normalizedNum.length < 4) {
-                 const padded = normalizedNum.padStart(4, '0');
-                 isDownloaded = historySet.has(padded);
-            }
+            const { num, element } = item;
 
-            if (isDownloaded) {
-                // Visual Indicator
-                item.style.opacity = '0.6';
-                item.style.backgroundColor = 'rgba(0, 255, 0, 0.05)';
+            if (num) {
+                // Normalize: '0001' -> '1', '1' -> '1' for comparison
+                const normalizedNum = parseInt(num).toString();
                 
-                // Add Badge if not exists
-                if (!item.querySelector('.toki-badge')) {
-                    const badge = document.createElement('span');
-                    badge.className = 'toki-badge';
-                    badge.innerText = '✅';
-                    badge.style.marginLeft = '5px';
-                    badge.style.fontSize = '12px';
-                    
-                    // Priority: .item-subject > .wr-subject > .title
-                    const itemSubject = item.querySelector('.item-subject');
-                    const titleEl = item.querySelector('.wr-subject, .title');
-                    
-                    if (itemSubject) {
-                        // Insert at the beginning of .item-subject
-                        itemSubject.prepend(badge);
-                    } else if (titleEl) {
-                        titleEl.prepend(badge);
-                    } else {
-                        item.appendChild(badge);
-                    }
+                // Check if ANY items in history set matches this number
+                let isDownloaded = historySet.has(num) || historySet.has(normalizedNum);
+                
+                // Try left-pad match
+                if(!isDownloaded && normalizedNum.length < 4) {
+                    const padded = normalizedNum.padStart(4, '0');
+                    isDownloaded = historySet.has(padded);
                 }
-                markedCount++;
+
+                if (isDownloaded) {
+                    // Visual Indicator
+                    element.style.opacity = '0.6';
+                    element.style.backgroundColor = 'rgba(0, 255, 0, 0.05)';
+                    
+                    // Add Badge if not exists
+                    if (!element.querySelector('.toki-badge')) {
+                        const badge = document.createElement('span');
+                        badge.className = 'toki-badge';
+                        badge.innerText = '✅';
+                        badge.style.marginLeft = '5px';
+                        badge.style.fontSize = '12px';
+                        
+                        // Priority: Link element inside the list item
+                        const linkEl = element.querySelector('a');
+                        if (linkEl) {
+                            linkEl.prepend(badge);
+                        } else {
+                            element.prepend(badge);
+                        }
+                    }
+                    markedCount++;
+                }
             }
+        } catch (e) {
+            console.warn('[UI] 특정 항목(li) 마킹 중 오류 발생 (건너뜀):', e);
         }
     });
+
     
     console.log(`[UI] ${markedCount}개 항목에 다운로드 완료 표시 적용.`);
 }

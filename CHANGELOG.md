@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.7.2] - 2026-04-03
+
+### ✨ 파서 아키텍처 모듈화 및 하이브리드 수집 엔진 고도화
+
+- **전략 패턴(Strategy Pattern) 파서 도입**: `BaseParser`, `TokiParser`, `ParserFactory`를 통한 클래스 기반 파싱 엔진을 구축하여 사이트별 파싱 로직을 완전히 분리(Decoupling)했습니다.
+- **코드 중복 제거 및 로직 일원화**: `main.js`와 `downloader.js`에 산재해 있던 `rootFolder` 생성 및 제목 정규화 로직을 `BaseParser`로 통합하여 데이터 일관성을 확보했습니다.
+- **UI 정합성 강화**: `ui.js`의 다운로드 표시(Marking) 로직을 하드코딩된 셀렉터에서 추상화된 파서 메서드로 교체하여, 사이트 구조 변경 시에도 유연하게 대처할 수 있도록 개선했습니다.
+- **하이브리드 이미지 수집 (Hybrid Fetching)**: 렌더링 전 `data-original` 속성 선점과 스크롤 후 최종 URL을 병합하는 로직을 `downloader.js`에 안착시켜 레이지 로딩 방어력을 극대화했습니다.
+
 ## [v1.7.1] - 2026-03-31
 
 ### ✨ 소설 단행본(Single Volume) 합본 기능 고도화
