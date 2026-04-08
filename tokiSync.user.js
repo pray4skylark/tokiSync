@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.7.1
+// @version      1.7.3
 // @description  Toki series sites -> Google Drive syncing tool (Bundled)
 // @author       pray4skylark
 // @updateURL    https://pray4skylark.github.io/tokiSync/tokiSync.user.js
@@ -39,6 +39,424 @@
 /******/ (() => { // webpackBootstrap
 /******/ 	"use strict";
 /******/ 	var __webpack_modules__ = ({
+
+/***/ 84
+(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
+
+
+// EXPORTS
+__webpack_require__.d(__webpack_exports__, {
+  O: () => (/* binding */ ParserFactory)
+});
+
+;// ./src/core/parsers/BaseParser.js
+/**
+ * BaseParser (Abstract)
+ * Provides common logic and defines interface for site-specific parsers.
+ */
+class BaseParser {
+    constructor(protocolDomain) {
+        this.protocolDomain = protocolDomain;
+    }
+
+    /**
+     * Common: Dummy image detection
+     */
+    isDummyUrl(url) {
+        if (!url) return true;
+        if (url.startsWith('data:image')) return true;
+        const lower = url.toLowerCase();
+
+        // 알려진 더미 파일명 패턴
+        const dummyFilenames = [
+            'blank.gif', 'loading.gif', 'loading-image.gif',
+            'pixel.gif', 'spacer.gif', 'transparent.gif',
+            '1x1.gif', 'dot.gif',
+        ];
+        if (dummyFilenames.some(p => lower.includes(p))) return true;
+
+        // 경로 기반 패턴: /img/loading*, /img/placeholder*
+        if (/\/img\/loading/.test(lower)) return true;
+        if (/\/img\/placeholder/.test(lower)) return true;
+
+        return false;
+    }
+
+    /**
+     * Interface: Extract list elements (li or similar)
+     * @returns {HTMLElement[]}
+     */
+    getListItems() {
+        throw new Error('getListItems() must be implemented');
+    }
+
+    /**
+     * Interface: Parse single list item into normalized object
+     * @param {HTMLElement} element 
+     * @returns {Object} { num, title, src, element }
+     */
+    parseListItem(element) {
+        throw new Error('parseListItem() must be implemented');
+    }
+
+    /**
+     * Interface: Extract novel content from iframe
+     */
+    getNovelContent(iframeDocument) {
+        throw new Error('getNovelContent() must be implemented');
+    }
+
+    /**
+     * Interface: Extract image list for webtoon/manga
+     */
+    getImageList(iframeDocument) {
+        throw new Error('getImageList() must be implemented');
+    }
+
+    /**
+     * Interface: Extract thumbnail URL
+     */
+    getThumbnailUrl() {
+        throw new Error('getThumbnailUrl() must be implemented');
+    }
+
+    /**
+     * Interface: Extract series title
+     */
+    getSeriesTitle() {
+        throw new Error('getSeriesTitle() must be implemented');
+    }
+
+    /**
+     * Interface: Extract series metadata
+     */
+    getSeriesMetadata() {
+        throw new Error('getSeriesMetadata() must be implemented');
+    }
+    /**
+     * Common: Generate unified folder name / series title
+     * @param {string} seriesId - Unique ID from URL
+     * @param {string} firstTitle - Title of first episode in list
+     * @param {string} lastTitle - Title of last episode in list
+     * @param {function} getCommonPrefixFn - Callback to calculate prefix
+     * @returns {string} "[ID] Title"
+     */
+    getFormattedTitle(seriesId, firstTitle, lastTitle, getCommonPrefixFn) {
+        let seriesTitle = this.getSeriesTitle();
+        let formatted = "";
+
+        if (seriesTitle) {
+            formatted = `[${seriesId}] ${seriesTitle}`;
+        } else {
+            // Fallback Logic
+            let listPrefixTitle = "";
+            if (firstTitle && lastTitle && getCommonPrefixFn) {
+                listPrefixTitle = getCommonPrefixFn(firstTitle, lastTitle);
+            }
+
+            if (listPrefixTitle && listPrefixTitle.length > 2) {
+                formatted = `[${seriesId}] ${listPrefixTitle}`;
+            } else if (firstTitle) {
+                // Single item or distinct titles: fallback to regex or full title
+                const cleanTitle = firstTitle.replace(/\s+\d+화$/, '').trim();
+                formatted = `[${seriesId}] ${cleanTitle || firstTitle}`;
+            } else {
+                formatted = `[${seriesId}] Unknown Series`;
+            }
+        }
+
+        // Final cleanup for filesystem compatibility
+        return formatted.replace(/[<>:"/\\|?*]/g, '').trim();
+    }
+}
+
+;// ./src/core/parsers/TokiParser.js
+
+
+class TokiParser extends BaseParser {
+    constructor(protocolDomain) {
+        super(protocolDomain);
+    }
+
+    getListItems() {
+        const listBody = document.querySelector('.list-body');
+        if (!listBody) {
+            console.warn('[TokiParser] .list-body not found');
+            return [];
+        }
+        return Array.from(listBody.querySelectorAll('li')).reverse();
+    }
+
+    parseListItem(li) {
+        // Extract Number
+        const numEl = li.querySelector('.wr-num');
+        const num = numEl ? numEl.innerText.trim().padStart(4, '0') : "0000";
+
+        // Extract Title & Link
+        const linkEl = li.querySelector('a');
+        let title = "Unknown";
+        let src = "";
+        
+        if (linkEl) {
+            // Clean title: Remove spans and fix redundant patterns
+            title = linkEl.innerHTML.replace(/<span[\s\S]*?\/span>/g, '')
+                .replace(/\s+/g, ' ')               // Remove extra spaces
+                .replace(/(\d+)\s*-\s*(\1)/, '$1')  // Fix "255 - 255" -> "255"
+                .trim();
+            src = linkEl.href;
+        }
+
+        return { num, title, src, element: li };
+    }
+
+    getNovelContent(iframeDocument) {
+        const contentEl = iframeDocument.querySelector('#novel_content');
+        return contentEl ? contentEl.innerText : "";
+    }
+
+    /**
+     * [v1.7.2] 동적 LazyKey 탐지
+     * 전략 A: 스크립트 내 data_attribute 선언 추출
+     */
+    _detectLazyKeyFromScript(iframeDoc) {
+        try {
+            const scripts = iframeDoc.querySelectorAll('script');
+            for (const script of scripts) {
+                const text = script.textContent || '';
+                const match = text.match(/data_attribute\s*:\s*['"]([^'"]+)['"]/);
+                if (match) {
+                    console.log('[TokiParser] 스크립트에서 LazyKey 탐지:', match[1]);
+                    return match[1];
+                }
+            }
+        } catch (e) {
+            console.warn('[TokiParser] LazyKey 스크립트 탐지 실패:', e);
+        }
+        return null;
+    }
+
+    /**
+     * [v1.7.2] 동적 LazyKey 탐지
+     * 전략 B: img 요소 속성 역추적
+     */
+    _detectLazyKeyFromImg(img) {
+        if (!img || !img.attributes) return null;
+        for (const attr of img.attributes) {
+            if (!attr.name.startsWith('data-')) continue;
+            const val = attr.value;
+            // http로 시작하고 이미지 확장자를 가진 속성값 탐지
+            if (val && val.startsWith('http') && /\.(jpe?g|png|webp)/i.test(val)) {
+                const key = attr.name.replace('data-', '');
+                console.log('[TokiParser] 이미지 요소에서 LazyKey 탐지:', key);
+                return key;
+            }
+        }
+        return null;
+    }
+
+    getImageList(iframeDocument) {
+        // [v1.7.3] 컨테이너 선별: .view-padding이 여러 개인 경우 이미지가 가장 많은 것을 선택
+        const containers = Array.from(iframeDocument.querySelectorAll('.view-padding'));
+        let mainContainer = iframeDocument;
+        
+        if (containers.length > 0) {
+            mainContainer = containers.reduce((prev, current) => {
+                const prevCount = prev.querySelectorAll('img').length;
+                const currCount = current.querySelectorAll('img').length;
+                return (prevCount >= currCount) ? prev : current;
+            });
+            console.log(`[TokiParser] 주요 컨테이너 선택됨 (이미지 ${mainContainer.querySelectorAll('img').length}개)`);
+        }
+
+        // [v1.7.3] LazyKey 동적 탐지
+        const firstImg = mainContainer.querySelector('div img');
+        const lazyKey = this._detectLazyKeyFromScript(iframeDocument)
+                     || (firstImg && this._detectLazyKeyFromImg(firstImg))
+                     || null;
+
+        // Select images in viewer (선택된 컨테이너 내에서만 검색)
+        let imgLists = Array.from(mainContainer.querySelectorAll('div img'));
+
+        return imgLists.map(img => {
+            try {
+                let foundUrl = null;
+
+                // 1순위: 동적 탐지된 키 또는 흔히 쓰이는 속성
+                const lazyAttrs = [
+                    ...(lazyKey ? [`data-${lazyKey}`] : []),
+                    'data-src', 'data-original', 'data-lazy', 'data-url', 'data-img'
+                ];
+                
+                for (const attr of lazyAttrs) {
+                    const val = img.getAttribute(attr);
+                    if (val) {
+                        let absoluteUrl = "";
+                        if (val.startsWith('/')) absoluteUrl = `${this.protocolDomain}${val}`;
+                        else if (val.startsWith('http')) absoluteUrl = val;
+                        
+                        if (absoluteUrl && !this.isDummyUrl(absoluteUrl)) {
+                            foundUrl = absoluteUrl;
+                            break;
+                        }
+                    }
+                }
+
+                // 2순위: src가 실제 이미지 URL인 경우
+                if (!foundUrl) {
+                    const directSrc = img.src;
+                    if (directSrc && !this.isDummyUrl(directSrc)) {
+                        foundUrl = directSrc;
+                    }
+                }
+                
+                // 3순위: 전체 data-* 속성 순회
+                if (!foundUrl) {
+                    for (const attr of img.attributes) {
+                        if (attr.name.startsWith('data-')) {
+                            const val = attr.value;
+                            if (val && val.match(/\.(jpe?g|png|gif|webp)/i)) {
+                                let absoluteUrl = "";
+                                if (val.startsWith('/')) absoluteUrl = `${this.protocolDomain}${val}`;
+                                else if (val.startsWith('http')) absoluteUrl = val;
+                                
+                                if (absoluteUrl && !this.isDummyUrl(absoluteUrl)) {
+                                    foundUrl = absoluteUrl;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // 4순위(폴백): outerHTML 정규식
+                if (!foundUrl) {
+                    const match = img.outerHTML.match(/\/data[^"]+/);
+                    if (match) {
+                        const absoluteUrl = `${this.protocolDomain}${match[0]}`;
+                        if (!this.isDummyUrl(absoluteUrl)) foundUrl = absoluteUrl;
+                    }
+                }
+
+                return {
+                    url: foundUrl || img.src || "",
+                    isDummy: this.isDummyUrl(foundUrl || img.src)
+                };
+                
+            } catch (e) {
+                console.warn('[TokiParser] Image src parse failed:', e);
+                return { url: img.src || "", isDummy: true };
+            }
+        });
+    }
+
+    getThumbnailUrl() {
+        const img = document.querySelector('img[itemprop="image"]');
+        if (!img) return null;
+        return img.getAttribute('content') || img.src;
+    }
+
+    getSeriesTitle() {
+        // [Refactor] Use metadata selectors or parse HTML content
+        const subjectMeta = document.querySelector('meta[name="subject"]');
+        if (subjectMeta && subjectMeta.content) {
+            return subjectMeta.content.trim();
+        }
+
+        const metaSelectors = [
+            'meta[property="og:title"]',
+            'meta[name="title"]',
+            'meta[name="twitter:title"]'
+        ];
+
+        for (const selector of metaSelectors) {
+            const metaTag = document.querySelector(selector);
+            if (metaTag && metaTag.content) {
+                let title = metaTag.content;
+                const splitIndex = title.indexOf(' >');
+                if (splitIndex > 0) return title.substring(0, splitIndex).trim();
+                return title.trim();
+            }
+        }
+
+        const viewContent = document.querySelectorAll('.view-content');
+        for (const div of viewContent) {
+            const titleEl = div.querySelector('b, strong, h1, .view-title');
+            if (titleEl && titleEl.innerText.trim().length > 0) {
+                return titleEl.innerText.trim();
+            }
+        }
+
+        return null;
+    }
+
+    getSeriesMetadata() {
+        const meta = {
+            author: "",
+            status: "연재중",
+            summary: ""
+        };
+
+        try {
+            const viewContent = document.querySelector('.view-content');
+            if (viewContent) {
+                const text = viewContent.innerText;
+                const authorMatch = text.match(/(?:작가|저자|글작가|글)\s*:\s*([^ \n\r,·/]+)/);
+                if (authorMatch) meta.author = authorMatch[1].trim();
+
+                if (text.includes('완결')) meta.status = '완결';
+                else if (text.includes('연재')) meta.status = '연재중';
+            }
+
+            const ogDesc = document.querySelector('meta[property="og:description"]');
+            if (ogDesc && ogDesc.content) {
+                meta.summary = ogDesc.content.trim();
+            }
+        } catch (e) {
+            console.warn('[TokiParser] Metadata extraction failed:', e);
+        }
+
+        return meta;
+    }
+}
+
+// EXTERNAL MODULE: ./src/core/detector.js
+var detector = __webpack_require__(419);
+;// ./src/core/parsers/ParserFactory.js
+
+
+
+class ParserFactory {
+    static #instance = null;
+
+    /**
+     * Get the appropriate parser for the current site (Singleton)
+     * @returns {BaseParser|null}
+     */
+    static getParser() {
+        if (this.#instance) return this.#instance;
+
+        const siteInfo = (0,detector/* detectSite */.T)();
+        if (!siteInfo) {
+            console.error('[ParserFactory] Failed to detect site');
+            return null;
+        }
+
+        const { site, protocolDomain } = siteInfo;
+
+        // Currently, ManaToki, NewToki, and BookToki all use the same structure
+        if (site === '마나토끼' || site === '뉴토끼' || site === '북토끼') {
+            this.#instance = new TokiParser(protocolDomain);
+            return this.#instance;
+        }
+
+        // Future GenericParser or other site-specific parsers can be added here
+        return null;
+    }
+}
+
+
+
+/***/ },
 
 /***/ 209
 (__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
@@ -723,6 +1141,43 @@ async function fetchHistoryDirect(seriesTitle, category = 'Webtoon') {
         logger.warn(`기록 직접 조회 실패: ${err.message}`, 'Network:History');
         return []; // Fail safe: download all
     }
+}
+
+
+/***/ },
+
+/***/ 419
+(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
+
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   T: () => (/* binding */ detectSite)
+/* harmony export */ });
+function detectSite() {
+    const currentURL = document.URL;
+    let site = '뉴토끼'; // Default
+    let protocolDomain = 'https://newtoki350.com'; // Default fallback
+    let category = 'Webtoon'; // Default
+
+    if (currentURL.match(/^https:\/\/booktoki[0-9]+.com\/novel\/[0-9]+/)) {
+        site = "북토끼"; 
+        protocolDomain = currentURL.match(/^https:\/\/booktoki[0-9]+.com/)[0];
+        category = 'Novel';
+    }
+    else if (currentURL.match(/^https:\/\/newtoki[0-9]+.com\/webtoon\/[0-9]+/)) {
+        site = "뉴토끼"; 
+        protocolDomain = currentURL.match(/^https:\/\/newtoki[0-9]+.com/)[0];
+        category = 'Webtoon';
+    }
+    else if (currentURL.match(/^https:\/\/manatoki[0-9]+.net\/comic\/[0-9]+/)) {
+        site = "마나토끼"; 
+        protocolDomain = currentURL.match(/^https:\/\/manatoki[0-9]+.net/)[0];
+        category = 'Manga';
+    }
+    else {
+        return null; // Not a valid target page
+    }
+
+    return { site, protocolDomain, category };
 }
 
 
@@ -1634,7 +2089,20 @@ async function scrollToLoad(iframeDoc, stallTimeoutMs = 20000) {
         if (!src || src.trim() === '') return true;
         if (src.startsWith('data:image')) return true;
         const lower = src.toLowerCase();
-        return lower.includes('blank.gif') || lower.includes('loading.gif') || lower.includes('pixel.gif');
+        
+        // 알려진 더미 파일명 패턴
+        const dummyFilenames = [
+            'blank.gif', 'loading.gif', 'loading-image.gif',
+            'pixel.gif', 'spacer.gif', 'transparent.gif',
+            '1x1.gif', 'dot.gif',
+        ];
+        if (dummyFilenames.some(p => lower.includes(p))) return true;
+
+        // 경로 기반 패턴
+        if (/\/img\/loading/.test(lower)) return true;
+        if (/\/img\/placeholder/.test(lower)) return true;
+
+        return false;
     };
 
     let lastCount = -1;
@@ -1806,7 +2274,16 @@ async function saveFile(data, filename, type = 'local', extension = 'zip', metad
     
     let content;
     if (data.generateAsync) {
-        content = await data.generateAsync({ type: "blob" });
+        // [v1.7.3] Native 다운로드 시 확장자 변조 방지를 위해 MIME 타입 명시
+        const mimeMap = {
+            cbz: 'application/octet-stream', // content-sniffing 방지를 위해 범용 바이너리 타입 사용
+            epub: 'application/epub+zip',
+            zip: 'application/zip'
+        };
+        content = await data.generateAsync({ 
+            type: "blob",
+            mimeType: mimeMap[extension] || 'application/zip'
+        });
     } else {
         content = await data; // Unbox promise or use blob directly
     }
@@ -1908,10 +2385,12 @@ async function getImageDimensions(blob) {
 /* harmony export */ });
 /* harmony import */ var _anti_sleep_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(209);
 /* harmony import */ var _config_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(899);
+/* harmony import */ var _parsers_ParserFactory_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(84);
 /**
  * UI Module for TokiSync
  * Handles Logging Overlay and OS Notifications
  */
+
 
 
 
@@ -2622,77 +3101,64 @@ function markDownloadedItems(historyList) {
     // Use Set for fast lookup
     const historySet = new Set(historyList.map(id => id.toString())); // Ensure string comparison
 
-    // Target elements: This depends on the specific site structure
-    // Common pattern: li.list-item, .list-body > li
-    // We reuse logic similar to `getListItems` or target generic list structures found on these sites.
-    
-    // Attempt 1: NewToki / ManaToki style (.list-item)
-    // Attempt 2: BookToki (table rows or similar)
-    // We iterate generic selectors commonly used.
-    
-    const items = document.querySelectorAll('.list-item, .list-row, .post-item, .wr-list li');
-    
+    const parser = _parsers_ParserFactory_js__WEBPACK_IMPORTED_MODULE_2__/* .ParserFactory */ .O.getParser();
+    if (!parser) {
+        console.warn('[UI] 파서를 찾을 수 없어 다운로드 표시를 생략합니다.');
+        return;
+    }
+
+    const items = parser.getListItems();
     let markedCount = 0;
 
-    items.forEach(item => {
-        // Find the number logic consistent with downloader.js
-        const numElement = item.querySelector('.wr-num, .num');
-        if (numElement) {
-            // Need to map "Number" to "ID" or verify what ID means.
-            // Wait, fetchHistory returns "Episode IDs" which usually correspond to something unique?
-            // Actually, in previous steps we used "rootFolder" name for check (series title).
-            // SyncService.gs likely returns list of FILENAMES or Folder names if checking inside series folder.
-            // If the GAS script returns list of '0001', '0002' (chapter numbers), we match that.
+    items.forEach(li => {
+        try {
+            const item = parser.parseListItem(li);
+            if (!item) return; // Skip if parse failed
             
-            // Assuming historyList contains Chapter Numbers (e.g. "1", "2", "0050")
-            const numText = numElement.innerText.trim();
-            
-            // Normalize: '001' -> '1', '1' -> '1' for comparison
-            const normalizedNum = parseInt(numText).toString();
-            
-            // Check if ANY items in history set matches this number
-            // (Assuming historySet has normalized strings like "1", "50")
-            // Or if historySet has padded "0001".
-            
-            // Let's try flexible matching
-            let isDownloaded = historySet.has(numText) || historySet.has(normalizedNum);
-             
-            // Try left-pad match (toki usually uses 4 digit padding in filenames potentially?)
-            if(!isDownloaded && normalizedNum.length < 4) {
-                 const padded = normalizedNum.padStart(4, '0');
-                 isDownloaded = historySet.has(padded);
-            }
+            const { num, element } = item;
 
-            if (isDownloaded) {
-                // Visual Indicator
-                item.style.opacity = '0.6';
-                item.style.backgroundColor = 'rgba(0, 255, 0, 0.05)';
+            if (num) {
+                // Normalize: '0001' -> '1', '1' -> '1' for comparison
+                const normalizedNum = parseInt(num).toString();
                 
-                // Add Badge if not exists
-                if (!item.querySelector('.toki-badge')) {
-                    const badge = document.createElement('span');
-                    badge.className = 'toki-badge';
-                    badge.innerText = '✅';
-                    badge.style.marginLeft = '5px';
-                    badge.style.fontSize = '12px';
-                    
-                    // Priority: .item-subject > .wr-subject > .title
-                    const itemSubject = item.querySelector('.item-subject');
-                    const titleEl = item.querySelector('.wr-subject, .title');
-                    
-                    if (itemSubject) {
-                        // Insert at the beginning of .item-subject
-                        itemSubject.prepend(badge);
-                    } else if (titleEl) {
-                        titleEl.prepend(badge);
-                    } else {
-                        item.appendChild(badge);
-                    }
+                // Check if ANY items in history set matches this number
+                let isDownloaded = historySet.has(num) || historySet.has(normalizedNum);
+                
+                // Try left-pad match
+                if(!isDownloaded && normalizedNum.length < 4) {
+                    const padded = normalizedNum.padStart(4, '0');
+                    isDownloaded = historySet.has(padded);
                 }
-                markedCount++;
+
+                if (isDownloaded) {
+                    // Visual Indicator
+                    element.style.opacity = '0.6';
+                    element.style.backgroundColor = 'rgba(0, 255, 0, 0.05)';
+                    
+                    // Add Badge if not exists
+                    if (!element.querySelector('.toki-badge')) {
+                        const badge = document.createElement('span');
+                        badge.className = 'toki-badge';
+                        badge.innerText = '✅';
+                        badge.style.marginLeft = '5px';
+                        badge.style.fontSize = '12px';
+                        
+                        // Priority: Link element inside the list item
+                        const linkEl = element.querySelector('a');
+                        if (linkEl) {
+                            linkEl.prepend(badge);
+                        } else {
+                            element.prepend(badge);
+                        }
+                    }
+                    markedCount++;
+                }
             }
+        } catch (e) {
+            console.warn('[UI] 특정 항목(li) 마킹 중 오류 발생 (건너뜀):', e);
         }
     });
+
     
     console.log(`[UI] ${markedCount}개 항목에 다운로드 완료 표시 적용.`);
 }
@@ -2749,252 +3215,10 @@ var __webpack_exports__ = {};
 
 // EXTERNAL MODULE: ./src/core/utils.js
 var utils = __webpack_require__(924);
-;// ./src/core/parser.js
-function getListItems() {
-    const listBody = document.querySelector('.list-body');
-    if (!listBody) {
-        console.warn('[Parser] .list-body not found - unsupported page structure');
-        return [];
-    }
-    return Array.from(listBody.querySelectorAll('li')).reverse();
-}
-
-function parseListItem(li) {
-    // Extract Number
-    const numEl = li.querySelector('.wr-num');
-    const num = numEl ? numEl.innerText.trim().padStart(4, '0') : "0000";
-
-    // Extract Title & Link
-    const linkEl = li.querySelector('a');
-    let title = "Unknown";
-    let src = "";
-    
-    if (linkEl) {
-        // Clean title: Remove spans and fix redundant patterns
-        title = linkEl.innerHTML.replace(/<span[\s\S]*?\/span>/g, '')
-            .replace(/\s+/g, ' ')               // Remove extra spaces
-            .replace(/(\d+)\s*-\s*(\1)/, '$1')  // Fix "255 - 255" -> "255"
-            .trim();
-        src = linkEl.href;
-    }
-
-    return { num, title, src, element: li };
-}
-
-function getNovelContent(iframeDocument) {
-    const contentEl = iframeDocument.querySelector('#novel_content');
-    return contentEl ? contentEl.innerText : "";
-}
-
-function getImageList(iframeDocument, protocolDomain) {
-    // Select images in viewer
-    let imgLists = Array.from(iframeDocument.querySelectorAll('.view-padding div img'));
-
-    return imgLists.map(img => {
-        try {
-            const isDummyUrl = (url) => {
-                if (!url) return true;
-                if (url.startsWith('data:image')) return true;
-                const lower = url.toLowerCase();
-                return lower.includes('blank.gif') || lower.includes('loading.gif') || lower.includes('pixel.gif');
-            };
-
-            let foundUrl = null;
-
-            // 1순위: 흔히 쓰이는 lazy-load data 속성
-            const lazyAttrs = ['data-src', 'data-original', 'data-lazy', 'data-url', 'data-img'];
-            for (const attr of lazyAttrs) {
-                const val = img.getAttribute(attr);
-                if (val) {
-                    let absoluteUrl = "";
-                    if (val.startsWith('/')) absoluteUrl = `${protocolDomain}${val}`;
-                    else if (val.startsWith('http')) absoluteUrl = val;
-                    
-                    if (absoluteUrl && !isDummyUrl(absoluteUrl)) {
-                        foundUrl = absoluteUrl;
-                        break;
-                    }
-                }
-            }
-
-            // 2순위: src가 실제 이미지 URL인 경우
-            if (!foundUrl) {
-                const directSrc = img.src;
-                if (directSrc && !isDummyUrl(directSrc)) {
-                    foundUrl = directSrc;
-                }
-            }
-            
-            // 3순위: 전체 data-* 속성 순회
-            if (!foundUrl) {
-                for (const attr of img.attributes) {
-                    if (attr.name.startsWith('data-')) {
-                        const val = attr.value;
-                        if (val && val.match(/\.(jpe?g|png|gif|webp)/i)) {
-                            let absoluteUrl = "";
-                            if (val.startsWith('/')) absoluteUrl = `${protocolDomain}${val}`;
-                            else if (val.startsWith('http')) absoluteUrl = val;
-                            
-                            if (absoluteUrl && !isDummyUrl(absoluteUrl)) {
-                                foundUrl = absoluteUrl;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-            
-            // 4순위(폴백): outerHTML 정규식
-            if (!foundUrl) {
-                const match = img.outerHTML.match(/\/data[^"]+/);
-                if (match) {
-                    const absoluteUrl = `${protocolDomain}${match[0]}`;
-                    if (!isDummyUrl(absoluteUrl)) foundUrl = absoluteUrl;
-                }
-            }
-
-            return {
-                url: foundUrl || img.src || "",
-                isDummy: isDummyUrl(foundUrl || img.src)
-            };
-            
-        } catch (e) {
-            console.warn('Image src parse failed:', e);
-            return { url: img.src || "", isDummy: true };
-        }
-    });
-}
-
-/**
- * Extract thumbnail URL from series detail page
- * @returns {string|null} Thumbnail URL or null if not found
- */
-function getThumbnailUrl() {
-    // Target: <img itemprop="image" content="[ORIGINAL_URL]" src="[THUMB_URL]">
-    const img = document.querySelector('img[itemprop="image"]');
-    if (!img) {
-        console.warn('[Parser] Thumbnail image not found');
-        return null;
-    }
-    
-    // Prefer 'content' attribute (original quality), fallback to 'src' (thumbnail)
-    return img.getAttribute('content') || img.src;
-}
-
-/**
- * Extract Series Title from metadata
- * @returns {string|null} Series Title
- */
-function getSeriesTitle() {
-    // 1. Try 'subject' meta tag (Cleanest, No site suffix)
-    // <meta name="subject" content="파티피플 공명(인싸 공명)">
-    const subjectMeta = document.querySelector('meta[name="subject"]');
-    if (subjectMeta && subjectMeta.content) {
-        return subjectMeta.content.trim();
-    }
-
-    // 2. Try diverse meta tags (Priority: OpenGraph > Standard > Twitter)
-    const metaSelectors = [
-        'meta[property="og:title"]',
-        'meta[name="title"]',
-        'meta[name="twitter:title"]'
-    ];
-
-    for (const selector of metaSelectors) {
-        const metaTag = document.querySelector(selector);
-        if (metaTag && metaTag.content) {
-            let title = metaTag.content;
-            // Remove site suffix " > 마나토끼 ..." or similar patterns
-            const splitIndex = title.indexOf(' >');
-            if (splitIndex > 0) {
-                return title.substring(0, splitIndex).trim();
-            }
-            return title.trim();
-        }
-    }
-
-    // 3. Try parse HTML content (broader search)
-    // <div class="view-content"><span style="..."><b>Title</b></span></div>
-    // Also check h1, strong, .view-title
-    const viewContent = document.querySelectorAll('.view-content');
-    for (const div of viewContent) {
-        // Priority: b > strong > h1 > .view-title
-        const titleEl = div.querySelector('b, strong, h1, .view-title');
-        if (titleEl && titleEl.innerText.trim().length > 0) {
-            return titleEl.innerText.trim();
-        }
-    }
-
-    return null;
-}
-
-/**
- * [v1.7.0] Extract full series metadata for Phase 3 Persistence
- * @returns {Object} { author: string, status: string, summary: string }
- */
-function getSeriesMetadata() {
-    const meta = {
-        author: "",
-        status: "연재중",
-        summary: ""
-    };
-
-    try {
-        // 1. Extract Author & Status from .view-content (ManaToki/BookToki common)
-        const viewContent = document.querySelector('.view-content');
-        if (viewContent) {
-            const text = viewContent.innerText;
-            
-            // Regex for Author: "작가 : 이름", "저자 : 이름", "글작가 : 이름" 등 대응
-            const authorMatch = text.match(/(?:작가|저자|글작가|글)\s*:\s*([^ \n\r,·/]+)/);
-            if (authorMatch) meta.author = authorMatch[1].trim();
-
-            // Regex for Status: "분류 : 연재중", "분류 : 완결"
-            if (text.includes('완결')) meta.status = '완결';
-            else if (text.includes('연재')) meta.status = '연재중';
-        }
-
-        // 2. Extract Summary (og:description or specific div)
-        const ogDesc = document.querySelector('meta[property="og:description"]');
-        if (ogDesc && ogDesc.content) {
-            meta.summary = ogDesc.content.trim();
-        }
-    } catch (e) {
-        console.warn('[Parser] Metadata extraction failed:', e);
-    }
-
-    return meta;
-}
-
-;// ./src/core/detector.js
-function detectSite() {
-    const currentURL = document.URL;
-    let site = '뉴토끼'; // Default
-    let protocolDomain = 'https://newtoki350.com'; // Default fallback
-    let category = 'Webtoon'; // Default
-
-    if (currentURL.match(/^https:\/\/booktoki[0-9]+.com\/novel\/[0-9]+/)) {
-        site = "북토끼"; 
-        protocolDomain = currentURL.match(/^https:\/\/booktoki[0-9]+.com/)[0];
-        category = 'Novel';
-    }
-    else if (currentURL.match(/^https:\/\/newtoki[0-9]+.com\/webtoon\/[0-9]+/)) {
-        site = "뉴토끼"; 
-        protocolDomain = currentURL.match(/^https:\/\/newtoki[0-9]+.com/)[0];
-        category = 'Webtoon';
-    }
-    else if (currentURL.match(/^https:\/\/manatoki[0-9]+.net\/comic\/[0-9]+/)) {
-        site = "마나토끼"; 
-        protocolDomain = currentURL.match(/^https:\/\/manatoki[0-9]+.net/)[0];
-        category = 'Manga';
-    }
-    else {
-        return null; // Not a valid target page
-    }
-
-    return { site, protocolDomain, category };
-}
-
+// EXTERNAL MODULE: ./src/core/parsers/ParserFactory.js + 2 modules
+var ParserFactory = __webpack_require__(84);
+// EXTERNAL MODULE: ./src/core/detector.js
+var detector = __webpack_require__(419);
 ;// ./src/core/epub.js
 class EpubBuilder {
     constructor() {
@@ -3218,8 +3442,8 @@ const SLEEP_POLICIES = {
 };
 
 // Processing Loop에 해당되는 로직을 분리 한다.
-async function processItem(item, builder, siteInfo, iframe, seriesTitle = "") {
-    const { site, protocolDomain } = siteInfo;
+async function processItem(item, builder, siteInfo, iframe, parser, seriesTitle = "") {
+    const { site } = siteInfo;
     const isNovel = (site === "북토끼");
 
     await (0,utils/* waitIframeLoad */.eO)(iframe, item.src);
@@ -3232,7 +3456,7 @@ async function processItem(item, builder, siteInfo, iframe, seriesTitle = "") {
     const iframeDoc = iframe.contentWindow.document;
 
     if (isNovel) {
-        const text = getNovelContent(iframeDoc);        // Add chapter to existing builder instance
+        const text = parser.getNovelContent(iframeDoc);        // Add chapter to existing builder instance
         builder.addChapter(item.title, text);
     } 
     else {
@@ -3240,13 +3464,13 @@ async function processItem(item, builder, siteInfo, iframe, seriesTitle = "") {
         const logger = ui.LogBox.getInstance();
         
         // 1. 스크롤 전 URL 선점 수집 (프로토타입 방식의 장점: data-original 등에 숨은 진짜 URL 확보)
-        const initialUrls = getImageList(iframeDoc, protocolDomain);
+        const initialUrls = parser.getImageList(iframeDoc);
         
         // 2. 강제 스크롤을 통해 레이지 로딩 이미지 활성화
         await (0,utils/* scrollToLoad */.Vs)(iframeDoc);
 
         // 3. 스크롤 후 최종 URL 수집
-        let finalUrls = getImageList(iframeDoc, protocolDomain);
+        let finalUrls = parser.getImageList(iframeDoc);
         
         // 4. 하이브리드 병합: 스크롤 전후 URL 중 더 신뢰도 높은 것을 선택
         // 만약 finalUrls가 placeholder(isDummy: true)라면 initialUrls를 사용
@@ -3265,7 +3489,7 @@ async function processItem(item, builder, siteInfo, iframe, seriesTitle = "") {
         if (mergedUrls.length === 0) {
             logger.warn('[Parser] 이미지 0개 — 1.5초 후 재파싱 시도', 'Parser');
             await (0,utils/* sleep */.yy)(1500);
-            const retryUrls = getImageList(iframeDoc, protocolDomain);
+            const retryUrls = parser.getImageList(iframeDoc);
             if (retryUrls.length > 0) mergedUrls.push(...retryUrls);
             logger.log(`[Parser] 재파싱 결과: ${mergedUrls.length}개`, 'Parser');
         }
@@ -3284,7 +3508,7 @@ async function processItem(item, builder, siteInfo, iframe, seriesTitle = "") {
             logger.warn(`[Deep Fallback] 다수의 저용량 이미지 감지 (${suspiciousCount}/${mergedUrls.length}). 2초 후 강제 재스크롤 재시도...`, 'System');
             await (0,utils/* sleep */.yy)(2000); // v1.7.2: 5s -> 2s
             await (0,utils/* scrollToLoad */.Vs)(iframeDoc, 12000); // 더 길게 대기
-            const finalRetryUrls = getImageList(iframeDoc, protocolDomain);
+            const finalRetryUrls = parser.getImageList(iframeDoc);
             images = await fetchImages(finalRetryUrls);
         }
 
@@ -3339,13 +3563,21 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
         logger.log('[Anti-Sleep] 자동 시작 실패 (사용자 상호작용 필요)', 'error');
     }
 
-    const siteInfo = detectSite();
+    const siteInfo = (0,detector/* detectSite */.T)();
     if (!siteInfo) {
         alert("지원하지 않는 사이트이거나 다운로드 페이지가 아닙니다.");
         (0,anti_sleep/* stopSilentAudio */.Cv)();
         return;
     }
-    const { site, protocolDomain, category } = siteInfo;
+
+    const parser = ParserFactory/* ParserFactory */.O.getParser();
+    if (!parser) {
+        alert("파서를 초기화할 수 없습니다.");
+        (0,anti_sleep/* stopSilentAudio */.Cv)();
+        return;
+    }
+
+    const { site, category } = siteInfo;
     const isNovel = (site === "북토끼");
 
     try {
@@ -3389,13 +3621,14 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
         }
 
         // Get List
-        let list = getListItems();
+        let list = parser.getListItems();
 
         // [v2.0] 커스텀 범위 필터 ("1,2,4-10" 형식)
         const rangeSet = parseRangeSpec(rangeSpec);
         if (rangeSet) {
             list = list.filter(li => {
-                const num = parseInt(li.querySelector('.wr-num').innerText);
+                const item = parser.parseListItem(li);
+                const num = parseInt(item.num);
                 return rangeSet.has(num);
             });
             logger.log(`범위 필터 적용: ${rangeSpec} → ${list.length}개 항목`);
@@ -3403,9 +3636,9 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
         
         // Log episode range
         if (list.length > 0) {
-            const firstTitle = list[list.length - 1].title; // usually reversed order
-            const lastTitle = list[0].title;
-            logger.log(`총 ${list.length}개 항목 처리 예정. (${firstTitle} ~ ${lastTitle})`, 'Downloader');
+            const first = parser.parseListItem(list[list.length - 1]); // usually reversed order
+            const last = parser.parseListItem(list[0]);
+            logger.log(`총 ${list.length}개 항목 처리 예정. (${first.title} ~ ${last.title})`, 'Downloader');
         } else {
             logger.log(`총 0개 항목 처리 예정.`, 'Downloader');
         }
@@ -3417,8 +3650,8 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
         }
 
         // Folder Name (Title) & Common Title Extraction
-        const first = parseListItem(list[0]);
-        const last = parseListItem(list[list.length - 1]);
+        const first = parser.parseListItem(list[0]);
+        const last = parser.parseListItem(list[list.length - 1]);
         
         // Extract Series ID from URL
         // https://.../webtoon/123456?page=...
@@ -3426,51 +3659,17 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
         const idMatch = document.URL.match(/\/(novel|webtoon|comic)\/([0-9]+)/);
         const seriesId = idMatch ? idMatch[2] : "0000";
 
-        let seriesTitle = "";
-        let rootFolder = "";
-
-        // Determine Root Folder Name
-        // [v1.4.0 Fix] Priority: Metadata Title > Common Prefix > First Item Title
-        seriesTitle = getSeriesTitle(); // Official Metadata Title
-        let listPrefixTitle = "";       // Title appearing in the list items
-
-        if (list.length > 1) {
-            listPrefixTitle = (0,utils/* getCommonPrefix */.iL)(first.title, last.title);
-        }
-
-        if (seriesTitle) {
-             rootFolder = `[${seriesId}] ${seriesTitle}`;
-             // Remove invalid characters if any
-             rootFolder = rootFolder.replace(/[<>:"/\\|?*]/g, '');
-        } else {
-             // Fallback Logic
-            if (listPrefixTitle.length > 2) {
-                seriesTitle = listPrefixTitle; // Use prefix as main title if metadata failed
-                rootFolder = `[${seriesId}] ${seriesTitle}`;
-            } else if (list.length > 1) {
-                 rootFolder = `[${seriesId}] ${first.title} ~ ${last.title}`;
-            } else {
-                 // [v1.4.0 Fix] Single Item Fallback: Try regex
-                 // "인싸 공명 19화" -> "인싸 공명"
-                 const title = first.title;
-                 // Remove " 19화", " 1화" at the end
-                 const cleanTitle = title.replace(/\s+\d+화$/, '').trim();
-                 
-                 if (cleanTitle !== title && cleanTitle.length > 0) {
-                     seriesTitle = cleanTitle; // Successfully extracted
-                     rootFolder = `[${seriesId}] ${seriesTitle}`;
-                 } else {
-                     // Last resort: Use full title
-                     rootFolder = `[${seriesId}] ${title}`;
-                 }
-            }
-        }
+        // Determine Root Folder Name & Series Title
+        const rootFolder = parser.getFormattedTitle(seriesId, first.title, last.title, utils/* getCommonPrefix */.iL);
+        // Extract raw title from rootFolder (e.g., "[1234] Title" -> "Title")
+        const seriesTitle = rootFolder.replace(/^\[[0-9]+\]\s*/, '');
+        const listPrefixTitle = (list.length > 1) ? (0,utils/* getCommonPrefix */.iL)(first.title, last.title) : "";
 
         // [v1.7.0] Collect detailed metadata for Phase 3 Persistence
         const seriesMetadata = {
-            ...getSeriesMetadata(),
+            ...parser.getSeriesMetadata(),
             title: seriesTitle || rootFolder,
-            thumbnail: getThumbnailUrl() || ""
+            thumbnail: parser.getThumbnailUrl() || ""
         };
 
         // [Fix] Append Range [Start-End] for Local Merged Files (folderInCbz / zipOfCbzs)
@@ -3485,7 +3684,7 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
         // [v1.4.0] Upload Series Thumbnail (if uploading to Drive)
         if (destination === 'drive') {
             try {
-                const thumbnailUrl = getThumbnailUrl();
+                const thumbnailUrl = parser.getThumbnailUrl();
                 if (thumbnailUrl) {
                     logger.log('📷 시리즈 썸네일 업로드 중...');
                     const thumbResponse = await fetch(thumbnailUrl);
@@ -3624,7 +3823,7 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
 
         // --- Processing Loop ---
         for (let i = 0; i < list.length; i++) {
-            const item = parseListItem(list[i].element || list[i]); 
+            const item = parser.parseListItem(list[i].element || list[i]); 
             console.clear();
             logger.log(`[${i + 1}/${list.length}] 처리 중: ${item.title}`);
 
@@ -3653,7 +3852,7 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
 
             // Process Item
             try {
-                await processItem(item, currentBuilder, siteInfo, iframe, seriesTitle);
+                await processItem(item, currentBuilder, siteInfo, iframe, parser, seriesTitle);
                 if (isSingleVolume) {
                     logger.log(`📥 챕터 추가 완료: ${item.title} (현재 ${masterEpubBuilder.chapters.length}개)`, 'Downloader');
                 }
@@ -4147,10 +4346,13 @@ function main() {
         getConfig: core_config/* getConfig */.zj,
         setConfig: core_config/* setConfig */.Nk,
         getEpisodeRange: () => {
-            const list = getListItems();
+            const parser = ParserFactory/* ParserFactory */.O.getParser();
+            if (!parser) return { min: 1, max: 100 };
+            
+            const list = parser.getListItems();
             if (list.length > 0) {
-                const first = parseListItem(list[0]);
-                const last = parseListItem(list[list.length - 1]);
+                const first = parser.parseListItem(list[0]);
+                const last = parser.parseListItem(list[list.length - 1]);
                 const min = Math.min(parseInt(first.num), parseInt(last.num));
                 const max = Math.max(parseInt(first.num), parseInt(last.num));
                 return { min, max };
@@ -4248,7 +4450,7 @@ function main() {
         }
     });
 
-    const siteInfo = detectSite();
+    const siteInfo = (0,detector/* detectSite */.T)();
     if(!siteInfo) return; 
 
     // -- 4. History Sync (Async) & Cross-Tab Auto Refresh --
@@ -4259,32 +4461,23 @@ function main() {
         if (isSyncing) return;
         isSyncing = true;
         try {
-            const list = getListItems();
+            const parser = ParserFactory/* ParserFactory */.O.getParser();
+            if (!parser) return;
+            const list = parser.getListItems();
             console.log(`[TokiSync] Found ${list.length} list items`);
             if (list.length === 0) {
                 console.warn('[TokiSync] No list items found, skipping history sync');
                 return;
             }
 
-            const first = parseListItem(list[0]);
-            const last = parseListItem(list[list.length - 1]);
+            const first = parser.parseListItem(list[0]);
+            const last = parser.parseListItem(list[list.length - 1]);
 
             const idMatch = document.URL.match(/\/(novel|webtoon|comic)\/([0-9]+)/);
             const seriesId = idMatch ? idMatch[2] : "0000";
 
-            let seriesTitle = "";
-            let rootFolder = "";
-
-            if (list.length > 1) {
-                seriesTitle = (0,utils/* getCommonPrefix */.iL)(first.title, last.title);
-                if (seriesTitle.length > 2) {
-                    rootFolder = `[${seriesId}] ${seriesTitle}`;
-                } else {
-                    rootFolder = `[${seriesId}] ${first.title} ~ ${last.title}`;
-                }
-            } else {
-                rootFolder = `[${seriesId}] ${first.title}`;
-            }
+            // Determine Root Folder Name (Unified with Downloader)
+            const rootFolder = parser.getFormattedTitle(seriesId, first.title, last.title, utils/* getCommonPrefix */.iL);
 
             let category = 'Webtoon';
             if (siteInfo.site === '북토끼') category = 'Novel';
