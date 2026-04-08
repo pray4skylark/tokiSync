@@ -14,7 +14,20 @@ export class BaseParser {
         if (!url) return true;
         if (url.startsWith('data:image')) return true;
         const lower = url.toLowerCase();
-        return lower.includes('blank.gif') || lower.includes('loading.gif') || lower.includes('pixel.gif');
+
+        // 알려진 더미 파일명 패턴
+        const dummyFilenames = [
+            'blank.gif', 'loading.gif', 'loading-image.gif',
+            'pixel.gif', 'spacer.gif', 'transparent.gif',
+            '1x1.gif', 'dot.gif',
+        ];
+        if (dummyFilenames.some(p => lower.includes(p))) return true;
+
+        // 경로 기반 패턴: /img/loading*, /img/placeholder*
+        if (/\/img\/loading/.test(lower)) return true;
+        if (/\/img\/placeholder/.test(lower)) return true;
+
+        return false;
     }
 
     /**

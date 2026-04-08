@@ -41,16 +41,79 @@ export class TokiParser extends BaseParser {
         return contentEl ? contentEl.innerText : "";
     }
 
+    /**
+     * [v1.7.2] 동적 LazyKey 탐지
+     * 전략 A: 스크립트 내 data_attribute 선언 추출
+     */
+    _detectLazyKeyFromScript(iframeDoc) {
+        try {
+            const scripts = iframeDoc.querySelectorAll('script');
+            for (const script of scripts) {
+                const text = script.textContent || '';
+                const match = text.match(/data_attribute\s*:\s*['"]([^'"]+)['"]/);
+                if (match) {
+                    console.log('[TokiParser] 스크립트에서 LazyKey 탐지:', match[1]);
+                    return match[1];
+                }
+            }
+        } catch (e) {
+            console.warn('[TokiParser] LazyKey 스크립트 탐지 실패:', e);
+        }
+        return null;
+    }
+
+    /**
+     * [v1.7.2] 동적 LazyKey 탐지
+     * 전략 B: img 요소 속성 역추적
+     */
+    _detectLazyKeyFromImg(img) {
+        if (!img || !img.attributes) return null;
+        for (const attr of img.attributes) {
+            if (!attr.name.startsWith('data-')) continue;
+            const val = attr.value;
+            // http로 시작하고 이미지 확장자를 가진 속성값 탐지
+            if (val && val.startsWith('http') && /\.(jpe?g|png|webp)/i.test(val)) {
+                const key = attr.name.replace('data-', '');
+                console.log('[TokiParser] 이미지 요소에서 LazyKey 탐지:', key);
+                return key;
+            }
+        }
+        return null;
+    }
+
     getImageList(iframeDocument) {
-        // Select images in viewer
-        let imgLists = Array.from(iframeDocument.querySelectorAll('.view-padding div img'));
+        // [v1.7.3] 컨테이너 선별: .view-padding이 여러 개인 경우 이미지가 가장 많은 것을 선택
+        const containers = Array.from(iframeDocument.querySelectorAll('.view-padding'));
+        let mainContainer = iframeDocument;
+        
+        if (containers.length > 0) {
+            mainContainer = containers.reduce((prev, current) => {
+                const prevCount = prev.querySelectorAll('img').length;
+                const currCount = current.querySelectorAll('img').length;
+                return (prevCount >= currCount) ? prev : current;
+            });
+            console.log(`[TokiParser] 주요 컨테이너 선택됨 (이미지 ${mainContainer.querySelectorAll('img').length}개)`);
+        }
+
+        // [v1.7.3] LazyKey 동적 탐지
+        const firstImg = mainContainer.querySelector('div img');
+        const lazyKey = this._detectLazyKeyFromScript(iframeDocument)
+                     || (firstImg && this._detectLazyKeyFromImg(firstImg))
+                     || null;
+
+        // Select images in viewer (선택된 컨테이너 내에서만 검색)
+        let imgLists = Array.from(mainContainer.querySelectorAll('div img'));
 
         return imgLists.map(img => {
             try {
                 let foundUrl = null;
 
-                // 1순위: 흔히 쓰이는 lazy-load data 속성
-                const lazyAttrs = ['data-src', 'data-original', 'data-lazy', 'data-url', 'data-img'];
+                // 1순위: 동적 탐지된 키 또는 흔히 쓰이는 속성
+                const lazyAttrs = [
+                    ...(lazyKey ? [`data-${lazyKey}`] : []),
+                    'data-src', 'data-original', 'data-lazy', 'data-url', 'data-img'
+                ];
+                
                 for (const attr of lazyAttrs) {
                     const val = img.getAttribute(attr);
                     if (val) {

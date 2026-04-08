@@ -198,7 +198,20 @@ export async function scrollToLoad(iframeDoc, stallTimeoutMs = 20000) {
         if (!src || src.trim() === '') return true;
         if (src.startsWith('data:image')) return true;
         const lower = src.toLowerCase();
-        return lower.includes('blank.gif') || lower.includes('loading.gif') || lower.includes('pixel.gif');
+        
+        // 알려진 더미 파일명 패턴
+        const dummyFilenames = [
+            'blank.gif', 'loading.gif', 'loading-image.gif',
+            'pixel.gif', 'spacer.gif', 'transparent.gif',
+            '1x1.gif', 'dot.gif',
+        ];
+        if (dummyFilenames.some(p => lower.includes(p))) return true;
+
+        // 경로 기반 패턴
+        if (/\/img\/loading/.test(lower)) return true;
+        if (/\/img\/placeholder/.test(lower)) return true;
+
+        return false;
     };
 
     let lastCount = -1;
@@ -370,7 +383,16 @@ export async function saveFile(data, filename, type = 'local', extension = 'zip'
     
     let content;
     if (data.generateAsync) {
-        content = await data.generateAsync({ type: "blob" });
+        // [v1.7.3] Native 다운로드 시 확장자 변조 방지를 위해 MIME 타입 명시
+        const mimeMap = {
+            cbz: 'application/octet-stream', // content-sniffing 방지를 위해 범용 바이너리 타입 사용
+            epub: 'application/epub+zip',
+            zip: 'application/zip'
+        };
+        content = await data.generateAsync({ 
+            type: "blob",
+            mimeType: mimeMap[extension] || 'application/zip'
+        });
     } else {
         content = await data; // Unbox promise or use blob directly
     }

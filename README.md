@@ -1,18 +1,21 @@
-# ⚡️ TokiSync (토끼싱크) v1.6.0
+# ⚡️ TokiSync (토끼싱크) v1.7.3
 
 **북토끼, 뉴토끼, 마나토끼**의 콘텐츠를 **구글 드라이브로 직접 업로드**하고, **전용 웹 뷰어**를 통해 편리하게 관리/열람할 수 있는 올인원 솔루션입니다.
 
-> **🚀 v1.6.0 업데이트:**
-> **Kavita 호환성 및 배치 다운로드**: CBZ 구조 표준화(ComicInfo.xml), 5개 단위 배치 다운로드 기능 도입. 상세 내용은 **[KAVITA_GUIDE.md](./KAVITA_GUIDE.md)**를 참고하세요.
+> **🚀 v1.7.3 업데이트:**
+> **보안 및 안정화**: 랜덤 속성명 동적 탐지(LazyKey), 하이브리드 컨테이너 선별, **Native 다운로드 확장자 변조 방지**, 가상 스크롤(Virtual Scroll) 안정화 버전.
 
 ---
 
 ## ✨ 주요 기능
 
-### 📥 수집기 (UserScript) - v1.6.0
+### 📥 수집기 (UserScript) - v1.7.3
 
-- **📱 통합 메뉴 모달 (New)**: `Ctrl+Shift+T` 또는 우측 하단 버튼으로 모든 기능을 한 곳에서 제어.
+- **📱 통합 메뉴 모달**: `Ctrl+Shift+T` 또는 우측 하단 버튼으로 모든 기능을 한 곳에서 제어.
 - **🚀 Direct Drive Access**: GAS 서버의 병목 없이 **구글 드라이브 API로 직접 데이터를 전송**합니다.
+- **🛡️ 안티 스크래핑 보안 (New)**: 
+  - **Dynamic LazyKey**: 랜덤하게 변하는 이미지 속성명을 실시간 탐지.
+  - **Heuristic Container**: 미끼 광고 영역을 피하고 진짜 본문만 선별 추출.
 - **🛡️ 차단 방지 시스템**:
   - **Anti-Sleep**: 백그라운드에서도 멈춤 없이 다운로드가 지속됩니다.
   - **Captcha 감지**: Cloudflare/캡차 발생 시 자동으로 일시정지하고 알림을 보냅니다.
@@ -29,11 +32,12 @@
 - **🔒 API Key 보안**: 전체 API 인증 강제.
 - **📦 대용량 Resumable Upload**: 5GB+ 파일 지원.
 
-### 📊 뷰어 2.0 (Cinematic Update) - v1.6.0
+### 📊 뷰어 2.0 (Cinematic & Performance) - v1.7.3
 
 - **🎥 Cinematic Experience**: 글래스모피즘 UI와 몰입형 에피소드 상세 페이지 제공.
-- **🚀 Tech Stack**: **Vue 3 + Tailwind CSS** 기반의 SPA 구조.
-- **📱 오프라인 강화 (New)**: IndexedDB(Dexie.js)를 활용한 라이브러리/에피소드 캐싱 및 열람 이력 기록.
+- **🚀 High-Performance Engine**: **Virtual Scroll** 도입으로 수백 장의 고해상도 이미지도 끊김 없이 렌더링.
+- **✂️ Auto-Crop**: 지능형 여백 제거 및 2쪽 보기(Double Spread) 지원.
+- **📱 오프라인 강화**: IndexedDB(Dexie.js)를 활용한 라이브러리/에피소드 캐싱 및 열람 이력 기록.
 
 ---
 

@@ -131,5 +131,34 @@ GitHub 공식 릴리즈 발행 시, 자동 생성되는 소스 코드 외에 다
 
 - **Decoupling First**: 사이트별 DOM 구조 의존적인 모든 로직(목록 추출, 제목 파싱, 이미지 리스트 수집 등)은 반드시 `src/core/parsers/` 내의 파서 클래스에서 처리한다.
 - **Inheritance Pattern**: 모든 파서는 `BaseParser`를 상속받아 인터페이스 일관성을 유지하며, 공통 로직(더미 이미지 필터, 제목 정규화 등)은 부모 클래스의 메서드를 재사용한다.
+- **Dynamic LazyKey Tracking (v1.7.3)**: 사이트가 이미지 URL 속성명을 랜덤하게 변경하는 경우(안티 스크래핑), 파서는 소스 스크립트 정규식 매칭 및 이미지 속성 역추적(Backtracking)을 통해 실시간으로 키를 탐지해야 한다.
+- **Heuristic Container Selection (v1.7.3)**: 본문 영역이 복수의 후보(`.view-padding` 등)로 파편화된 경우, 이미지 밀도(Density)가 가장 높은 요소를 주 컨테이너로 자동 선택하여 가짜/광고 영역 유입을 차단한다.
 - **Singleton Factory**: 파서 인스턴스는 직접 생성하지 않고 `ParserFactory.getParser()`를 통해서만 호출하며, 이는 메모리 효율과 상태 일관성을 위해 싱글톤으로 관리한다.
-- **Unified Title Source**: 시리즈 제목 및 폴더명 생성 로직은 `BaseParser.getFormattedTitle()`이 단일 진실 소스(SSOT)가 되며, `downloader.js`와 `main.js`는 이를 호출하여 사용한다.
+
+
+---
+
+## 8. Hybrid Multi-Agent Orchestration Protocol
+
+프로젝트의 복잡성을 관리하고 코드 품질을 극대화하기 위해, 아래와 같은 멀티-모델 협업 체계를 기본 운영 원칙으로 채택한다.
+
+### 8.1. Roles & Models
+
+- **Main Agent (Planner)**: **Claude / Gemini Pro (High Effort)**
+  - 고차원적 전략 수립, `task.md` 작성, 예외 상황에 대한 **재기획(Re-planning)** 담당.
+- **Worker Agent (Coder)**: **Gemini Flash**
+  - 메인 에이전트의 플랜에 따른 초고속 코드 구현 및 반복 작업 담당.
+- **Auditor Agent (Validator)**: **Gemini 3 Pro (Low Effort)**
+  - 독립적 코드 리뷰, 에지 케이스 분석, 보안 감사 및 **PASS/FAIL** 판정 담당.
+
+### 8.2. Operational Loop
+
+1. **Planning**: Main이 작업을 분석하고 상세 구현 계획(`task.md`)을 수립한다.
+2. **Execution**: Worker가 계획에 따라 원자적 단위(Atomic Task)로 코드를 구현한다.
+3. **Verification**: Auditor가 구현된 코드를 검토하고 리포트를 작성한다.
+4. **Correction**: `FAIL` 발생 시, Worker가 직접 수정하지 않고 **Main이 재기획**한 후 업데이트된 지침에 따라 Worker가 재수정한다.
+
+### 8.3. Continuity (Checkpointing)
+
+- 모델 간 전환(Handoff) 및 세션 단절 시, 워크스페이스 내 **`.agent_checkpoint.md`**를 최우선 진실 소스로 활용하여 컨텍스트 무결성을 유지한다.
+- 모든 에이전트는 작업 시작 전 반드시 해당 체크포인트와 `AI_AGENT_CONTEXT.md`를 필독해야 한다.
