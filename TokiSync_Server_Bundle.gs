@@ -1,4 +1,4 @@
-/* ⚙️ TokiSync Server Code Bundle v1.0.0 (Generated: 2026-04-08T17:59:18.577Z) */
+/* ⚙️ TokiSync Server Code Bundle v1.0.0 (Generated: 2026-04-09T05:51:21.138Z) */
 
 /* ========================================================================== */
 /* FILE: Main.gs */
@@ -780,6 +780,16 @@ function initUpdateResumableUpload(data) {
   
   if (!fileId) {
       return createRes("error", "Missing fileId for update operation");
+  }
+
+  // [v1.7.3-hotfix] Check if file exists and is NOT in trash
+  try {
+    const file = DriveApp.getFileById(fileId);
+    if (file.isTrashed()) {
+        return createRes("error", "File is in trash. Use fresh upload instead.");
+    }
+  } catch (e) {
+    return createRes("error", "File not found or access denied: " + fileId);
   }
 
   const url = `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=resumable`;
