@@ -3,10 +3,12 @@ import { uploadDirect } from './network.js';
 import { LogBox } from './ui.js';
 
 function arrayBufferToBase64(buffer) {
-    let binary = '';
     const bytes = new Uint8Array(buffer);
-    const len = bytes.byteLength;
-    for (let i = 0; i < len; i++) binary += String.fromCharCode(bytes[i]);
+    let binary = "";
+    const chunk_size = 0x8000; // 32KB
+    for (let i = 0; i < bytes.length; i += chunk_size) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk_size));
+    }
     return window.btoa(binary);
 }
 
@@ -277,7 +279,6 @@ export async function getBooksByCacheId(cacheFileId) {
             data: JSON.stringify({
                 type: "view_get_books_by_cache",
                 cacheFileId: cacheFileId,
-                folderId: config.folderId,
                 apiKey: config.apiKey
             }),
             headers: { "Content-Type": "text/plain" },
@@ -327,7 +328,6 @@ export async function initUpdateUploadViaGASRelay(fileId, fileName) {
                 type: "init_update", 
                 fileId: fileId,
                 fileName: fileName,
-                folderId: config.folderId,
                 apiKey: config.apiKey
             }),
             headers: { "Content-Type": "text/plain" },

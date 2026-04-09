@@ -17,6 +17,7 @@ This document is the **single source of truth (SSOT)** for the project's static 
 - **Stateless GAS**: The Google Apps Script backend must remain stateless.
   Do NOT use `PropertiesService` for user settings; everything must be payload-driven.
 - **Direct Drive Access**: Use `GM_xmlhttpRequest` (via Tampermonkey) to bypass GAS 6-minute execution limits and CORS restrictions.
+  - **Resumable Upload (v1.7.3+)**: Use Google Drive's Resumable Upload protocol (5MB chunks) for all direct uploads to prevent memory/size limits.
 - **Single Controller Rule**: All viewer input (mouse, touch, keyboard, wheel) MUST be handled through a single composable: `useViewerInput.js`.
   - DO NOT split input handling across component event handlers and composables.
   - Mouse clicks: Use `@mousedown.left` attached directly to `viewer-container`.

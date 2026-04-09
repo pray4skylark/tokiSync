@@ -322,20 +322,68 @@ async function getOrCreateThumbnailFolder(token, parentId) {
 }
 
 /**
- * Uploads file directly to Google Drive
- * v1.4.0: Centralized Thumbnail Support
+ * Sends data in chunks to a Google Drive Resumable Upload session
+ */
+async function sendResumableChunks(uploadUrl, blob, token, fileName) {
+    const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB (Minimum for Drive is 256KB, 5MB is standard)
+    const totalSize = blob.size;
+    let start = 0;
+    const logger = LogBox.getInstance();
+
+    while (start < totalSize) {
+        const end = Math.min(start + CHUNK_SIZE, totalSize);
+        const chunk = blob.slice(start, end);
+        const contentRange = `bytes ${start}-${end - 1}/${totalSize}`;
+        
+        await new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method: 'PUT',
+                url: uploadUrl,
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Range': contentRange,
+                    'Content-Type': blob.type || 'application/octet-stream'
+                },
+                data: chunk,
+                binary: true,
+                timeout: 300000, // 5 minutes per chunk
+                onload: (res) => {
+                    if (res.status === 308) {
+                        // Resume Incomplete (Standard Response for chunks)
+                        resolve();
+                    } else if (res.status >= 200 && res.status < 300) {
+                        // Done (Final chunk)
+                        resolve();
+                    } else {
+                        reject(new Error(`Chunk upload failed: ${res.status} ${res.responseText}`));
+                    }
+                },
+                onerror: reject,
+                ontimeout: () => reject(new Error(`Chunk upload timed out: ${contentRange}`))
+            });
+        });
+        
+        start = end;
+        const progress = Math.min(100, Math.floor((start / totalSize) * 100));
+        console.log(`[DirectUpload] ${fileName} -> ${progress}% (${start}/${totalSize})`);
+    }
+}
+
+/**
+ * Uploads file directly to Google Drive using Resumable Upload (5MB Chunks)
  */
 export async function uploadDirect(blob, folderName, fileName, metadata = {}) {
     try {
-        console.log(`[DirectUpload] Starting upload: ${fileName} (${blob.size} bytes)`);
+        console.log(`[DirectUpload] Preparing: ${fileName} (${blob.size} bytes)`);
         
         const config = getConfig();
         const token = await getToken();
+        const logger = LogBox.getInstance();
         
         // Determine category
         const category = metadata.category || (fileName.endsWith('.epub') ? 'Novel' : 'Webtoon');
         
-        // 1. Get Series Folder ID (Always needed for info.json and content)
+        // 1. Get Series Folder ID
         const seriesFolderId = await getOrCreateFolder(folderName, config.folderId, token, category);
         
         let targetFolderId = seriesFolderId;
@@ -343,118 +391,96 @@ export async function uploadDirect(blob, folderName, fileName, metadata = {}) {
 
         // 2. [v1.4.0] Centralized Thumbnail Logic
         if (fileName === 'cover.jpg' || fileName === 'Cover.jpg') {
-            console.log('[DirectUpload] 🖼️ Detected Cover Image -> Redirecting to _Thumbnails');
-            
-            // Extract Series ID: "[12345] Title" -> "12345"
             const idMatch = folderName.match(/^\[(\d+)\]/);
             if (idMatch) {
                 const seriesId = idMatch[1];
                 finalFileName = `${seriesId}.jpg`;
                 targetFolderId = await getOrCreateThumbnailFolder(token, config.folderId);
-                console.log(`[DirectUpload] Target: _Thumbnails/${finalFileName}`);
-                
-                // Check for existing file and delete to prevent duplicates
-                try {
-                    const searchUrl = `https://www.googleapis.com/drive/v3/files?` +
-                        `q=name='${finalFileName}' and '${targetFolderId}' in parents and trashed=false` +
-                        `&fields=files(id,name)`;
-                    
-                    const searchResult = await new Promise((resolve, reject) => {
-                        GM_xmlhttpRequest({
-                            method: 'GET',
-                            url: searchUrl,
-                            headers: { 'Authorization': `Bearer ${token}` },
-                            timeout: 30000,
-                            onload: (res) => resolve(JSON.parse(res.responseText)),
-                            onerror: reject,
-                            ontimeout: () => reject(new Error('[DirectUpload] 기존 파일 검색 타임아웃 (30초)'))
-                        });
-                    });
-                    
-                    // Delete existing files (there might be duplicates)
-                    if (searchResult.files && searchResult.files.length > 0) {
-                        console.log(`[DirectUpload] Found ${searchResult.files.length} existing file(s), deleting...`);
-                        for (const file of searchResult.files) {
-                            await new Promise((resolve, reject) => {
-                                GM_xmlhttpRequest({
-                                    method: 'DELETE',
-                                    url: `https://www.googleapis.com/drive/v3/files/${file.id}`,
-                                    headers: { 'Authorization': `Bearer ${token}` },
-                                    timeout: 15000,
-                                    onload: () => {
-                                        console.log(`[DirectUpload] Deleted old file: ${file.id}`);
-                                        resolve();
-                                    },
-                                    onerror: reject,
-                                    ontimeout: () => reject(new Error('[DirectUpload] 파일 삭제 타임아웃 (15초)'))
-                                });
-                            });
-                        }
-                    }
-                } catch (deleteError) {
-                    console.warn('[DirectUpload] Failed to check/delete existing file:', deleteError);
-                    // Continue anyway - upload will create duplicate but system still works
-                }
-            } else {
-                console.warn('[DirectUpload] Could not extract Series ID, uploading to series folder as fallback.');
             }
         }
 
-        // 3. Upload File
-        const boundary = '-------314159265358979323846';
-        const delimiter = `\r\n--${boundary}\r\n`;
-        const closeDelim = `\r\n--${boundary}--`;
-        
-        const fileMetadata = {
+        // 3. Search for existing file to decide POST (New) or PATCH (Update)
+        let existingFileId = null;
+        try {
+            const searchUrl = `https://www.googleapis.com/drive/v3/files?` +
+                `q=name='${finalFileName}' and '${targetFolderId}' in parents and trashed=false` +
+                `&fields=files(id,name)`;
+            
+            const searchRes = await new Promise((res, rej) => {
+                GM_xmlhttpRequest({
+                    method: 'GET', url: searchUrl,
+                    headers: { 'Authorization': `Bearer ${token}` },
+                    timeout: 30000,
+                    onload: (r) => res(JSON.parse(r.responseText)),
+                    onerror: rej
+                });
+            });
+            
+            if (searchRes.files && searchRes.files.length > 0) {
+                existingFileId = searchRes.files[0].id;
+                console.log(`[DirectUpload] Existing file found: ${existingFileId} (Mode: UPDATE)`);
+            }
+        } catch (searchErr) {
+            console.warn('[DirectUpload] Existing file check failed:', searchErr);
+        }
+
+        // 4. Initialize Resumable Session
+        let uploadUrl = "";
+        const sessionMetadata = {
             name: finalFileName,
-            parents: [targetFolderId]
+            parents: existingFileId ? undefined : [targetFolderId]
         };
-        
-        const metadataPart = new Blob([
-            delimiter,
-            'Content-Type: application/json\r\n\r\n',
-            JSON.stringify(fileMetadata),
-            delimiter,
-            'Content-Type: application/octet-stream\r\n\r\n'
-        ], { type: 'text/plain' });
-        
-        const closePart = new Blob([closeDelim], { type: 'text/plain' });
-        const multipartBody = new Blob([metadataPart, blob, closePart]);
-        
-        return new Promise((resolve, reject) => {
+
+        const sessionUrl = existingFileId 
+            ? `https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=resumable`
+            : `https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable`;
+
+        uploadUrl = await new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
-                method: 'POST',
-                url: 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+                method: existingFileId ? 'PATCH' : 'POST',
+                url: sessionUrl,
+                anonymous: true, // Bypass CORS Origin header to ensure Location header is visible
                 headers: {
                     'Authorization': `Bearer ${token}`,
-                    'Content-Type': `multipart/related; boundary=${boundary}`
+                    'Content-Type': 'application/json; charset=UTF-8',
+                    'X-Upload-Content-Type': blob.type || 'application/octet-stream',
+                    'X-Upload-Content-Length': blob.size.toString()
                 },
-                data: multipartBody,
-                binary: true,
-                timeout: 300000,
-                onload: (response) => {
-                    if (response.status >= 200 && response.status < 300) {
-                        console.log(`[DirectUpload] ✅ Upload successful: ${finalFileName}`);
-                        resolve();
+                data: JSON.stringify(sessionMetadata),
+                timeout: 30000,
+                onload: (res) => {
+                    if (res.status >= 200 && res.status < 300) {
+                        const locationMatch = res.responseHeaders.match(/location:\s*([^\r\n]+)/i);
+                        const uploadIdMatch = res.responseHeaders.match(/x-guploader-uploadid:\s*([^\r\n]+)/i);
+                        
+                        if (locationMatch && locationMatch[1]) {
+                            resolve(locationMatch[1].trim());
+                        } else if (uploadIdMatch && uploadIdMatch[1]) {
+                            // Fallback: Manually build URI if Location is stripped by CORS
+                            const sessionUri = new URL(sessionUrl);
+                            sessionUri.searchParams.set('upload_id', uploadIdMatch[1].trim());
+                            resolve(sessionUri.toString());
+                        } else {
+                            console.error('[DirectUpload] Response Headers:', res.responseHeaders);
+                            console.error('[DirectUpload] Response Body:', res.responseText);
+                            reject(new Error(`Failed to extract session URL. Headers: ${res.responseHeaders}`));
+                        }
                     } else {
-                        LogBox.getInstance().error(`Upload failed: ${response.status} - ${finalFileName}`, 'Network:Upload');
-                        reject(new Error(`Upload failed: ${response.status}`));
+                        reject(new Error(`Session init failed with status: ${res.status}`));
                     }
                 },
-                onerror: (e) => {
-                    LogBox.getInstance().error(`Upload block network error: ${finalFileName}`, 'Network:Upload');
-                    reject(e);
-                },
-                ontimeout: () => {
-                    LogBox.getInstance().error(`Upload request timed out (5m): ${finalFileName}`, 'Network:Upload');
-                    reject(new Error(`[DirectUpload] 파일 업로드 타임아웃 (5분): ${finalFileName}`));
-                }
+                onerror: reject
             });
         });
-        
+
+        // 5. Send chunks
+        await sendResumableChunks(uploadUrl, blob, token, finalFileName);
+        console.log(`[DirectUpload] ✅ Upload successful: ${finalFileName}`);
+        return;
+
     } catch (error) {
         console.error(`[DirectUpload] Error:`, error);
-        LogBox.getInstance().error(`[DirectUpload] Error: ${error.message}`, 'Network:UploadException');
+        LogBox.getInstance().error(`[DirectUpload] ${error.message}`, 'Network:Upload');
         throw error;
     }
 }
@@ -481,7 +507,6 @@ export async function fetchHistoryDirect(seriesTitle, category = 'Webtoon') {
         const token = await getToken();
         
         // Find the Series Folder ID
-        // (If the folder doesn't exist, getOrCreateFolder might create it, which is fine, it will just be empty)
         const seriesFolderId = await getOrCreateFolder(seriesTitle, config.folderId, token, category);
         
         if (!seriesFolderId) {
@@ -489,12 +514,10 @@ export async function fetchHistoryDirect(seriesTitle, category = 'Webtoon') {
             return [];
         }
 
-        // Query files inside the folder (getting name and size)
-        // Note: Google Drive API sizes are returned as strings
         const searchUrl = `https://www.googleapis.com/drive/v3/files?` +
             `q='${seriesFolderId}' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'` +
             `&fields=files(id,name,size)` +
-            `&pageSize=1000`; // Assuming max 1000 chapters per series
+            `&pageSize=1000`;
             
         const result = await new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
@@ -516,17 +539,15 @@ export async function fetchHistoryDirect(seriesTitle, category = 'Webtoon') {
             return [];
         }
 
-        // 1. Parse and collect sizes
         const fileInfos = [];
         let maxSize = 0;
         let minSize = Infinity;
 
         result.files.forEach(file => {
             const match = file.name.match(/^(\d+)/);
-            if (!match) return; // Skip non-episode files like info.json, cover.jpg
+            if (!match) return; 
             
             const episodeNum = match[1];
-            // If size is missing (like Google Docs), default to 0. CBZ/EPUB should always have size.
             const sizeBytes = parseInt(file.size || "0", 10); 
             
             if (sizeBytes > 0) {
@@ -543,8 +564,6 @@ export async function fetchHistoryDirect(seriesTitle, category = 'Webtoon') {
 
         if (fileInfos.length === 0) return [];
 
-        // 2. Heuristic Logic: Max * Ratio
-        // Ignore minimum size completely, as partially downloaded data might pull down the midpoint
         let threshold = 0;
         if (maxSize > 0 && fileInfos.length > 1) {
             const ratio = (config.smartSkipRatio !== undefined ? config.smartSkipRatio : 50) / 100;
@@ -552,7 +571,6 @@ export async function fetchHistoryDirect(seriesTitle, category = 'Webtoon') {
             logger.log(`[SmartSkip] 용량 분석 완료 - Max: ${(maxSize/1024/1024).toFixed(1)}MB, 통과 기준: ${config.smartSkipRatio || 50}% (${(threshold/1024/1024).toFixed(1)}MB 이상)`);
         }
 
-        // 3. Filter valid files
         const validEpisodes = [];
         const ignoredEpisodes = [];
 
@@ -574,6 +592,7 @@ export async function fetchHistoryDirect(seriesTitle, category = 'Webtoon') {
     } catch (err) {
         console.error(`[DirectHistory] Failed:`, err);
         logger.warn(`기록 직접 조회 실패: ${err.message}`, 'Network:History');
-        return []; // Fail safe: download all
+        return [];
     }
 }
+

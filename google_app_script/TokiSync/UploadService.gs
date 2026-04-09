@@ -104,6 +104,16 @@ function initUpdateResumableUpload(data) {
       return createRes("error", "Missing fileId for update operation");
   }
 
+  // [v1.7.3-hotfix] Check if file exists and is NOT in trash
+  try {
+    const file = DriveApp.getFileById(fileId);
+    if (file.isTrashed()) {
+        return createRes("error", "File is in trash. Use fresh upload instead.");
+    }
+  } catch (e) {
+    return createRes("error", "File not found or access denied: " + fileId);
+  }
+
   const url = `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=resumable`;
   
   const params = {

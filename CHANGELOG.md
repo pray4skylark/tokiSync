@@ -2,9 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
-## [v1.7.3] - 2026-04-08
+## [v1.7.3-hotfix] - 2026-04-09
 
-### 🔒 GIF 더미 탐지 및 안티 스크래핑 보안 강화
+### 🚀 Direct Drive 업로드 안정화 및 자가 회복 로직 도입
+
+- **Resumable Upload (5MB Chunk)**: `uploadDirect` 함수를 멀티파트 방식에서 Google Drive 공식 분할 전송 방식으로 전면 개편했습니다. 대용량 파일(33MB+) 처리 시 브라우저 메모리 제한 및 서버 응답 크기 제한 에러를 완벽히 해결했습니다.
+- **자가 회복 로직 (Self-Healing)**: Fast Path(직행 덮어쓰기) 시도 중 구글 드라이브에서 'Trash' 또는 'Not Found' 에러가 발생할 경우, 유저스크립트 내 `episodeCacheMap`을 즉시 정리하고 일반 업로드 분기로 자동 전환하는 지능형 복구 시스템을 구축했습니다.
+- **고성능 Base64 엔진 전면 적용**: `gas.js` 및 `downloader.js` 내부의 저효율 Base64 변환 루프를 청크 기반 고속 알고리즘으로 교체하여, 대용량 파일 전송 시의 CPU 부하를 줄이고 처리 속도를 극대화했습니다.
+
+## [v1.7.3] - 2026-04-08
 
 - **동적 LazyKey 탐지 시스템**: 마나토끼 등에서 매 화차마다 랜덤하게 생성하는 `data-*` 속성명을 자동으로 추적하는 엔진을 도입했습니다. (스크립트 파싱 및 요소 역추적 하이브리드 방식)
 - **더미 플레이스홀더 차단 강화**: `loading-image.gif` 등 최신 안티 봇용 플레이스홀더 패턴을 `isDummyUrl` 필터에 추가하여 초기 로드 시의 오탐지를 완벽히 제거했습니다.

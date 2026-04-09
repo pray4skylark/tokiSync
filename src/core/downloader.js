@@ -523,10 +523,12 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                                 const end = Math.min(start + CHUNK_SIZE, totalSize);
                                 const chunkBuffer = buffer.slice(start, end);
                                 
-                                // Base64 encode
-                                let binary = '';
-                                const bytes = new Uint8Array(chunkBuffer);
-                                for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+                                // High-speed Base64 encode
+                                let binary = "";
+                                const chunk_size = 0x8000; // 32KB
+                                for (let j = 0; j < bytes.length; j += chunk_size) {
+                                    binary += String.fromCharCode.apply(null, bytes.subarray(j, j + chunk_size));
+                                }
                                 const chunkBase64 = window.btoa(binary);
 
                                 await new Promise((res, rej) => {
@@ -554,7 +556,16 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                             logger.success(`⚡ [Fast Path] ${fullFilename} 업데이트(PUT) 완료!`, 'FastPath');
                             success = true;
                         } catch (fastPathErr) {
-                            logger.log(`⚠️ Fast Path 업로드 중 에러 발생 (${fastPathErr.message}), Fallback 시작...`, 'warn', 'FastPath');
+                            const errMsg = fastPathErr.message || "";
+                            logger.log(`⚠️ Fast Path 업로드 중 에러 발생 (${errMsg}), Fallback 시작...`, 'warn', 'FastPath');
+                            
+                            // [v1.7.3] 자가 회복 로직: 휴지통 또는 파일 부재 시 캐시 삭제
+                            const lowerMsg = errMsg.toLowerCase();
+                            if (lowerMsg.includes('trash') || lowerMsg.includes('not found')) {
+                                logger.warn(`🗑️ [Fast Path] 휴지통/부재 감지 → 캐시에서 해당 항목 삭제 및 일반 업로드 전환: ${fullFilename}`);
+                                episodeCacheMap.delete(fullFilename);
+                            }
+                            
                             success = false; // Fallback
                         }
                     }
