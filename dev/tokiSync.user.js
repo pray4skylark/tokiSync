@@ -36,17 +36,17 @@
 // @license      MIT
 // ==/UserScript==
 
-/******/ (() => { // webpackBootstrap
+/******/ (function() { // webpackBootstrap
 /******/ 	"use strict";
 /******/ 	var __webpack_modules__ = ({
 
-/***/ 84
-(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
+/***/ 84:
+/***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
 
 
 // EXPORTS
 __webpack_require__.d(__webpack_exports__, {
-  O: () => (/* binding */ ParserFactory)
+  O: function() { return /* binding */ ParserFactory; }
 });
 
 ;// ./src/core/parsers/BaseParser.js
@@ -456,15 +456,15 @@ class ParserFactory {
 
 
 
-/***/ },
+/***/ }),
 
-/***/ 209
-(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
+/***/ 209:
+/***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
 
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
-/* harmony export */   Cv: () => (/* binding */ stopSilentAudio),
-/* harmony export */   S2: () => (/* binding */ isAudioRunning),
-/* harmony export */   yS: () => (/* binding */ startSilentAudio)
+/* harmony export */   Cv: function() { return /* binding */ stopSilentAudio; },
+/* harmony export */   S2: function() { return /* binding */ isAudioRunning; },
+/* harmony export */   yS: function() { return /* binding */ startSilentAudio; }
 /* harmony export */ });
 /**
  * Anti-Sleep Module
@@ -551,15 +551,15 @@ function isAudioRunning() {
 }
 
 
-/***/ },
+/***/ }),
 
-/***/ 391
-(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
+/***/ 391:
+/***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
 
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
-/* harmony export */   GA: () => (/* binding */ fetchHistoryDirect),
-/* harmony export */   Py: () => (/* binding */ getOAuthToken),
-/* harmony export */   r9: () => (/* binding */ uploadDirect)
+/* harmony export */   GA: function() { return /* binding */ fetchHistoryDirect; },
+/* harmony export */   Py: function() { return /* binding */ getOAuthToken; },
+/* harmony export */   r9: function() { return /* binding */ uploadDirect; }
 /* harmony export */ });
 /* harmony import */ var _config_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(899);
 /* harmony import */ var _ui_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(963);
@@ -887,20 +887,68 @@ async function getOrCreateThumbnailFolder(token, parentId) {
 }
 
 /**
- * Uploads file directly to Google Drive
- * v1.4.0: Centralized Thumbnail Support
+ * Sends data in chunks to a Google Drive Resumable Upload session
+ */
+async function sendResumableChunks(uploadUrl, blob, token, fileName) {
+    const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB (Minimum for Drive is 256KB, 5MB is standard)
+    const totalSize = blob.size;
+    let start = 0;
+    const logger = _ui_js__WEBPACK_IMPORTED_MODULE_1__.LogBox.getInstance();
+
+    while (start < totalSize) {
+        const end = Math.min(start + CHUNK_SIZE, totalSize);
+        const chunk = blob.slice(start, end);
+        const contentRange = `bytes ${start}-${end - 1}/${totalSize}`;
+        
+        await new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method: 'PUT',
+                url: uploadUrl,
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Range': contentRange,
+                    'Content-Type': blob.type || 'application/octet-stream'
+                },
+                data: chunk,
+                binary: true,
+                timeout: 300000, // 5 minutes per chunk
+                onload: (res) => {
+                    if (res.status === 308) {
+                        // Resume Incomplete (Standard Response for chunks)
+                        resolve();
+                    } else if (res.status >= 200 && res.status < 300) {
+                        // Done (Final chunk)
+                        resolve();
+                    } else {
+                        reject(new Error(`Chunk upload failed: ${res.status} ${res.responseText}`));
+                    }
+                },
+                onerror: reject,
+                ontimeout: () => reject(new Error(`Chunk upload timed out: ${contentRange}`))
+            });
+        });
+        
+        start = end;
+        const progress = Math.min(100, Math.floor((start / totalSize) * 100));
+        console.log(`[DirectUpload] ${fileName} -> ${progress}% (${start}/${totalSize})`);
+    }
+}
+
+/**
+ * Uploads file directly to Google Drive using Resumable Upload (5MB Chunks)
  */
 async function uploadDirect(blob, folderName, fileName, metadata = {}) {
     try {
-        console.log(`[DirectUpload] Starting upload: ${fileName} (${blob.size} bytes)`);
+        console.log(`[DirectUpload] Preparing: ${fileName} (${blob.size} bytes)`);
         
         const config = (0,_config_js__WEBPACK_IMPORTED_MODULE_0__/* .getConfig */ .zj)();
         const token = await getToken();
+        const logger = _ui_js__WEBPACK_IMPORTED_MODULE_1__.LogBox.getInstance();
         
         // Determine category
         const category = metadata.category || (fileName.endsWith('.epub') ? 'Novel' : 'Webtoon');
         
-        // 1. Get Series Folder ID (Always needed for info.json and content)
+        // 1. Get Series Folder ID
         const seriesFolderId = await getOrCreateFolder(folderName, config.folderId, token, category);
         
         let targetFolderId = seriesFolderId;
@@ -908,118 +956,96 @@ async function uploadDirect(blob, folderName, fileName, metadata = {}) {
 
         // 2. [v1.4.0] Centralized Thumbnail Logic
         if (fileName === 'cover.jpg' || fileName === 'Cover.jpg') {
-            console.log('[DirectUpload] 🖼️ Detected Cover Image -> Redirecting to _Thumbnails');
-            
-            // Extract Series ID: "[12345] Title" -> "12345"
             const idMatch = folderName.match(/^\[(\d+)\]/);
             if (idMatch) {
                 const seriesId = idMatch[1];
                 finalFileName = `${seriesId}.jpg`;
                 targetFolderId = await getOrCreateThumbnailFolder(token, config.folderId);
-                console.log(`[DirectUpload] Target: _Thumbnails/${finalFileName}`);
-                
-                // Check for existing file and delete to prevent duplicates
-                try {
-                    const searchUrl = `https://www.googleapis.com/drive/v3/files?` +
-                        `q=name='${finalFileName}' and '${targetFolderId}' in parents and trashed=false` +
-                        `&fields=files(id,name)`;
-                    
-                    const searchResult = await new Promise((resolve, reject) => {
-                        GM_xmlhttpRequest({
-                            method: 'GET',
-                            url: searchUrl,
-                            headers: { 'Authorization': `Bearer ${token}` },
-                            timeout: 30000,
-                            onload: (res) => resolve(JSON.parse(res.responseText)),
-                            onerror: reject,
-                            ontimeout: () => reject(new Error('[DirectUpload] 기존 파일 검색 타임아웃 (30초)'))
-                        });
-                    });
-                    
-                    // Delete existing files (there might be duplicates)
-                    if (searchResult.files && searchResult.files.length > 0) {
-                        console.log(`[DirectUpload] Found ${searchResult.files.length} existing file(s), deleting...`);
-                        for (const file of searchResult.files) {
-                            await new Promise((resolve, reject) => {
-                                GM_xmlhttpRequest({
-                                    method: 'DELETE',
-                                    url: `https://www.googleapis.com/drive/v3/files/${file.id}`,
-                                    headers: { 'Authorization': `Bearer ${token}` },
-                                    timeout: 15000,
-                                    onload: () => {
-                                        console.log(`[DirectUpload] Deleted old file: ${file.id}`);
-                                        resolve();
-                                    },
-                                    onerror: reject,
-                                    ontimeout: () => reject(new Error('[DirectUpload] 파일 삭제 타임아웃 (15초)'))
-                                });
-                            });
-                        }
-                    }
-                } catch (deleteError) {
-                    console.warn('[DirectUpload] Failed to check/delete existing file:', deleteError);
-                    // Continue anyway - upload will create duplicate but system still works
-                }
-            } else {
-                console.warn('[DirectUpload] Could not extract Series ID, uploading to series folder as fallback.');
             }
         }
 
-        // 3. Upload File
-        const boundary = '-------314159265358979323846';
-        const delimiter = `\r\n--${boundary}\r\n`;
-        const closeDelim = `\r\n--${boundary}--`;
-        
-        const fileMetadata = {
+        // 3. Search for existing file to decide POST (New) or PATCH (Update)
+        let existingFileId = null;
+        try {
+            const searchUrl = `https://www.googleapis.com/drive/v3/files?` +
+                `q=name='${finalFileName}' and '${targetFolderId}' in parents and trashed=false` +
+                `&fields=files(id,name)`;
+            
+            const searchRes = await new Promise((res, rej) => {
+                GM_xmlhttpRequest({
+                    method: 'GET', url: searchUrl,
+                    headers: { 'Authorization': `Bearer ${token}` },
+                    timeout: 30000,
+                    onload: (r) => res(JSON.parse(r.responseText)),
+                    onerror: rej
+                });
+            });
+            
+            if (searchRes.files && searchRes.files.length > 0) {
+                existingFileId = searchRes.files[0].id;
+                console.log(`[DirectUpload] Existing file found: ${existingFileId} (Mode: UPDATE)`);
+            }
+        } catch (searchErr) {
+            console.warn('[DirectUpload] Existing file check failed:', searchErr);
+        }
+
+        // 4. Initialize Resumable Session
+        let uploadUrl = "";
+        const sessionMetadata = {
             name: finalFileName,
-            parents: [targetFolderId]
+            parents: existingFileId ? undefined : [targetFolderId]
         };
-        
-        const metadataPart = new Blob([
-            delimiter,
-            'Content-Type: application/json\r\n\r\n',
-            JSON.stringify(fileMetadata),
-            delimiter,
-            'Content-Type: application/octet-stream\r\n\r\n'
-        ], { type: 'text/plain' });
-        
-        const closePart = new Blob([closeDelim], { type: 'text/plain' });
-        const multipartBody = new Blob([metadataPart, blob, closePart]);
-        
-        return new Promise((resolve, reject) => {
+
+        const sessionUrl = existingFileId 
+            ? `https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=resumable`
+            : `https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable`;
+
+        uploadUrl = await new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
-                method: 'POST',
-                url: 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+                method: existingFileId ? 'PATCH' : 'POST',
+                url: sessionUrl,
+                anonymous: true, // Bypass CORS Origin header to ensure Location header is visible
                 headers: {
                     'Authorization': `Bearer ${token}`,
-                    'Content-Type': `multipart/related; boundary=${boundary}`
+                    'Content-Type': 'application/json; charset=UTF-8',
+                    'X-Upload-Content-Type': blob.type || 'application/octet-stream',
+                    'X-Upload-Content-Length': blob.size.toString()
                 },
-                data: multipartBody,
-                binary: true,
-                timeout: 300000,
-                onload: (response) => {
-                    if (response.status >= 200 && response.status < 300) {
-                        console.log(`[DirectUpload] ✅ Upload successful: ${finalFileName}`);
-                        resolve();
+                data: JSON.stringify(sessionMetadata),
+                timeout: 30000,
+                onload: (res) => {
+                    if (res.status >= 200 && res.status < 300) {
+                        const locationMatch = res.responseHeaders.match(/location:\s*([^\r\n]+)/i);
+                        const uploadIdMatch = res.responseHeaders.match(/x-guploader-uploadid:\s*([^\r\n]+)/i);
+                        
+                        if (locationMatch && locationMatch[1]) {
+                            resolve(locationMatch[1].trim());
+                        } else if (uploadIdMatch && uploadIdMatch[1]) {
+                            // Fallback: Manually build URI if Location is stripped by CORS
+                            const sessionUri = new URL(sessionUrl);
+                            sessionUri.searchParams.set('upload_id', uploadIdMatch[1].trim());
+                            resolve(sessionUri.toString());
+                        } else {
+                            console.error('[DirectUpload] Response Headers:', res.responseHeaders);
+                            console.error('[DirectUpload] Response Body:', res.responseText);
+                            reject(new Error(`Failed to extract session URL. Headers: ${res.responseHeaders}`));
+                        }
                     } else {
-                        _ui_js__WEBPACK_IMPORTED_MODULE_1__.LogBox.getInstance().error(`Upload failed: ${response.status} - ${finalFileName}`, 'Network:Upload');
-                        reject(new Error(`Upload failed: ${response.status}`));
+                        reject(new Error(`Session init failed with status: ${res.status}`));
                     }
                 },
-                onerror: (e) => {
-                    _ui_js__WEBPACK_IMPORTED_MODULE_1__.LogBox.getInstance().error(`Upload block network error: ${finalFileName}`, 'Network:Upload');
-                    reject(e);
-                },
-                ontimeout: () => {
-                    _ui_js__WEBPACK_IMPORTED_MODULE_1__.LogBox.getInstance().error(`Upload request timed out (5m): ${finalFileName}`, 'Network:Upload');
-                    reject(new Error(`[DirectUpload] 파일 업로드 타임아웃 (5분): ${finalFileName}`));
-                }
+                onerror: reject
             });
         });
-        
+
+        // 5. Send chunks
+        await sendResumableChunks(uploadUrl, blob, token, finalFileName);
+        console.log(`[DirectUpload] ✅ Upload successful: ${finalFileName}`);
+        return;
+
     } catch (error) {
         console.error(`[DirectUpload] Error:`, error);
-        _ui_js__WEBPACK_IMPORTED_MODULE_1__.LogBox.getInstance().error(`[DirectUpload] Error: ${error.message}`, 'Network:UploadException');
+        _ui_js__WEBPACK_IMPORTED_MODULE_1__.LogBox.getInstance().error(`[DirectUpload] ${error.message}`, 'Network:Upload');
         throw error;
     }
 }
@@ -1046,7 +1072,6 @@ async function fetchHistoryDirect(seriesTitle, category = 'Webtoon') {
         const token = await getToken();
         
         // Find the Series Folder ID
-        // (If the folder doesn't exist, getOrCreateFolder might create it, which is fine, it will just be empty)
         const seriesFolderId = await getOrCreateFolder(seriesTitle, config.folderId, token, category);
         
         if (!seriesFolderId) {
@@ -1054,12 +1079,10 @@ async function fetchHistoryDirect(seriesTitle, category = 'Webtoon') {
             return [];
         }
 
-        // Query files inside the folder (getting name and size)
-        // Note: Google Drive API sizes are returned as strings
         const searchUrl = `https://www.googleapis.com/drive/v3/files?` +
             `q='${seriesFolderId}' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'` +
             `&fields=files(id,name,size)` +
-            `&pageSize=1000`; // Assuming max 1000 chapters per series
+            `&pageSize=1000`;
             
         const result = await new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
@@ -1081,17 +1104,15 @@ async function fetchHistoryDirect(seriesTitle, category = 'Webtoon') {
             return [];
         }
 
-        // 1. Parse and collect sizes
         const fileInfos = [];
         let maxSize = 0;
         let minSize = Infinity;
 
         result.files.forEach(file => {
             const match = file.name.match(/^(\d+)/);
-            if (!match) return; // Skip non-episode files like info.json, cover.jpg
+            if (!match) return; 
             
             const episodeNum = match[1];
-            // If size is missing (like Google Docs), default to 0. CBZ/EPUB should always have size.
             const sizeBytes = parseInt(file.size || "0", 10); 
             
             if (sizeBytes > 0) {
@@ -1108,8 +1129,6 @@ async function fetchHistoryDirect(seriesTitle, category = 'Webtoon') {
 
         if (fileInfos.length === 0) return [];
 
-        // 2. Heuristic Logic: Max * Ratio
-        // Ignore minimum size completely, as partially downloaded data might pull down the midpoint
         let threshold = 0;
         if (maxSize > 0 && fileInfos.length > 1) {
             const ratio = (config.smartSkipRatio !== undefined ? config.smartSkipRatio : 50) / 100;
@@ -1117,7 +1136,6 @@ async function fetchHistoryDirect(seriesTitle, category = 'Webtoon') {
             logger.log(`[SmartSkip] 용량 분석 완료 - Max: ${(maxSize/1024/1024).toFixed(1)}MB, 통과 기준: ${config.smartSkipRatio || 50}% (${(threshold/1024/1024).toFixed(1)}MB 이상)`);
         }
 
-        // 3. Filter valid files
         const validEpisodes = [];
         const ignoredEpisodes = [];
 
@@ -1139,18 +1157,19 @@ async function fetchHistoryDirect(seriesTitle, category = 'Webtoon') {
     } catch (err) {
         console.error(`[DirectHistory] Failed:`, err);
         logger.warn(`기록 직접 조회 실패: ${err.message}`, 'Network:History');
-        return []; // Fail safe: download all
+        return [];
     }
 }
 
 
-/***/ },
 
-/***/ 419
-(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
+/***/ }),
+
+/***/ 419:
+/***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
 
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
-/* harmony export */   T: () => (/* binding */ detectSite)
+/* harmony export */   T: function() { return /* binding */ detectSite; }
 /* harmony export */ });
 function detectSite() {
     const currentURL = document.URL;
@@ -1181,18 +1200,18 @@ function detectSite() {
 }
 
 
-/***/ },
+/***/ }),
 
-/***/ 488
-(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
+/***/ 488:
+/***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
 
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
-/* harmony export */   B0: () => (/* binding */ getBooksByCacheId),
-/* harmony export */   Jb: () => (/* binding */ getMergeIndexFragment),
-/* harmony export */   Ny: () => (/* binding */ fetchHistory),
-/* harmony export */   fA: () => (/* binding */ initUpdateUploadViaGASRelay),
-/* harmony export */   jz: () => (/* binding */ refreshCacheAfterUpload),
-/* harmony export */   yv: () => (/* binding */ uploadToGAS)
+/* harmony export */   B0: function() { return /* binding */ getBooksByCacheId; },
+/* harmony export */   Jb: function() { return /* binding */ getMergeIndexFragment; },
+/* harmony export */   Ny: function() { return /* binding */ fetchHistory; },
+/* harmony export */   fA: function() { return /* binding */ initUpdateUploadViaGASRelay; },
+/* harmony export */   jz: function() { return /* binding */ refreshCacheAfterUpload; },
+/* harmony export */   yv: function() { return /* binding */ uploadToGAS; }
 /* harmony export */ });
 /* harmony import */ var _config_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(899);
 /* harmony import */ var _network_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(391);
@@ -1202,10 +1221,12 @@ function detectSite() {
 
 
 function arrayBufferToBase64(buffer) {
-    let binary = '';
     const bytes = new Uint8Array(buffer);
-    const len = bytes.byteLength;
-    for (let i = 0; i < len; i++) binary += String.fromCharCode(bytes[i]);
+    let binary = "";
+    const chunk_size = 0x8000; // 32KB
+    for (let i = 0; i < bytes.length; i += chunk_size) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk_size));
+    }
     return window.btoa(binary);
 }
 
@@ -1476,7 +1497,6 @@ async function getBooksByCacheId(cacheFileId) {
             data: JSON.stringify({
                 type: "view_get_books_by_cache",
                 cacheFileId: cacheFileId,
-                folderId: config.folderId,
                 apiKey: config.apiKey
             }),
             headers: { "Content-Type": "text/plain" },
@@ -1526,7 +1546,6 @@ async function initUpdateUploadViaGASRelay(fileId, fileName) {
                 type: "init_update", 
                 fileId: fileId,
                 fileName: fileName,
-                folderId: config.folderId,
                 apiKey: config.apiKey
             }),
             headers: { "Content-Type": "text/plain" },
@@ -1610,16 +1629,16 @@ async function getMergeIndexFragment(sourceId) {
 
 
 
-/***/ },
+/***/ }),
 
-/***/ 899
-(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
+/***/ 899:
+/***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
 
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
-/* harmony export */   Jb: () => (/* binding */ isConfigValid),
-/* harmony export */   Nk: () => (/* binding */ setConfig),
-/* harmony export */   Vh: () => (/* binding */ showConfigModal),
-/* harmony export */   zj: () => (/* binding */ getConfig)
+/* harmony export */   Jb: function() { return /* binding */ isConfigValid; },
+/* harmony export */   Nk: function() { return /* binding */ setConfig; },
+/* harmony export */   Vh: function() { return /* binding */ showConfigModal; },
+/* harmony export */   zj: function() { return /* binding */ getConfig; }
 /* harmony export */ });
 /* unused harmony exports CFG_URL_KEY, CFG_ID_KEY, CFG_FOLDER_ID, CFG_POLICY_KEY, CFG_API_KEY, CFG_SLEEP_MODE, CFG_SMART_SKIP_RATIO, CFG_NOVEL_MODE */
 const CFG_URL_KEY = "TOKI_GAS_URL"; // legacy
@@ -1873,19 +1892,19 @@ function isConfigValid() {
     return (config.gasId || config.gasUrl) && config.folderId;
 }
 
-/***/ },
+/***/ }),
 
-/***/ 924
-(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
+/***/ 924:
+/***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
 
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
-/* harmony export */   OJ: () => (/* binding */ saveFile),
-/* harmony export */   Vs: () => (/* binding */ scrollToLoad),
-/* harmony export */   _L: () => (/* binding */ blobToArrayBuffer),
-/* harmony export */   eO: () => (/* binding */ waitIframeLoad),
-/* harmony export */   getImageDimensions: () => (/* binding */ getImageDimensions),
-/* harmony export */   iL: () => (/* binding */ getCommonPrefix),
-/* harmony export */   yy: () => (/* binding */ sleep)
+/* harmony export */   OJ: function() { return /* binding */ saveFile; },
+/* harmony export */   Vs: function() { return /* binding */ scrollToLoad; },
+/* harmony export */   _L: function() { return /* binding */ blobToArrayBuffer; },
+/* harmony export */   eO: function() { return /* binding */ waitIframeLoad; },
+/* harmony export */   getImageDimensions: function() { return /* binding */ getImageDimensions; },
+/* harmony export */   iL: function() { return /* binding */ getCommonPrefix; },
+/* harmony export */   yy: function() { return /* binding */ sleep; }
 /* harmony export */ });
 /* harmony import */ var _gas_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(488);
 /* harmony import */ var _ui_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(963);
@@ -2372,16 +2391,16 @@ async function getImageDimensions(blob) {
 }
 
 
-/***/ },
+/***/ }),
 
-/***/ 963
-(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
+/***/ 963:
+/***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
 
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
-/* harmony export */   LogBox: () => (/* binding */ LogBox),
-/* harmony export */   fo: () => (/* binding */ MenuModal),
-/* harmony export */   hV: () => (/* binding */ markDownloadedItems),
-/* harmony export */   ze: () => (/* binding */ Notifier)
+/* harmony export */   LogBox: function() { return /* binding */ LogBox; },
+/* harmony export */   fo: function() { return /* binding */ MenuModal; },
+/* harmony export */   hV: function() { return /* binding */ markDownloadedItems; },
+/* harmony export */   ze: function() { return /* binding */ Notifier; }
 /* harmony export */ });
 /* harmony import */ var _anti_sleep_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(209);
 /* harmony import */ var _config_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(899);
@@ -3164,7 +3183,7 @@ function markDownloadedItems(historyList) {
 }
 
 
-/***/ }
+/***/ })
 
 /******/ 	});
 /************************************************************************/
@@ -3194,21 +3213,21 @@ function markDownloadedItems(historyList) {
 /******/ 	
 /************************************************************************/
 /******/ 	/* webpack/runtime/define property getters */
-/******/ 	(() => {
+/******/ 	!function() {
 /******/ 		// define getter functions for harmony exports
-/******/ 		__webpack_require__.d = (exports, definition) => {
+/******/ 		__webpack_require__.d = function(exports, definition) {
 /******/ 			for(var key in definition) {
 /******/ 				if(__webpack_require__.o(definition, key) && !__webpack_require__.o(exports, key)) {
 /******/ 					Object.defineProperty(exports, key, { enumerable: true, get: definition[key] });
 /******/ 				}
 /******/ 			}
 /******/ 		};
-/******/ 	})();
+/******/ 	}();
 /******/ 	
 /******/ 	/* webpack/runtime/hasOwnProperty shorthand */
-/******/ 	(() => {
-/******/ 		__webpack_require__.o = (obj, prop) => (Object.prototype.hasOwnProperty.call(obj, prop))
-/******/ 	})();
+/******/ 	!function() {
+/******/ 		__webpack_require__.o = function(obj, prop) { return Object.prototype.hasOwnProperty.call(obj, prop); }
+/******/ 	}();
 /******/ 	
 /************************************************************************/
 var __webpack_exports__ = {};
@@ -3948,10 +3967,12 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                                 const end = Math.min(start + CHUNK_SIZE, totalSize);
                                 const chunkBuffer = buffer.slice(start, end);
                                 
-                                // Base64 encode
-                                let binary = '';
-                                const bytes = new Uint8Array(chunkBuffer);
-                                for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+                                // High-speed Base64 encode
+                                let binary = "";
+                                const chunk_size = 0x8000; // 32KB
+                                for (let j = 0; j < bytes.length; j += chunk_size) {
+                                    binary += String.fromCharCode.apply(null, bytes.subarray(j, j + chunk_size));
+                                }
                                 const chunkBase64 = window.btoa(binary);
 
                                 await new Promise((res, rej) => {
@@ -3979,7 +4000,16 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                             logger.success(`⚡ [Fast Path] ${fullFilename} 업데이트(PUT) 완료!`, 'FastPath');
                             success = true;
                         } catch (fastPathErr) {
-                            logger.log(`⚠️ Fast Path 업로드 중 에러 발생 (${fastPathErr.message}), Fallback 시작...`, 'warn', 'FastPath');
+                            const errMsg = fastPathErr.message || "";
+                            logger.log(`⚠️ Fast Path 업로드 중 에러 발생 (${errMsg}), Fallback 시작...`, 'warn', 'FastPath');
+                            
+                            // [v1.7.3] 자가 회복 로직: 휴지통 또는 파일 부재 시 캐시 삭제
+                            const lowerMsg = errMsg.toLowerCase();
+                            if (lowerMsg.includes('trash') || lowerMsg.includes('not found')) {
+                                logger.warn(`🗑️ [Fast Path] 휴지통/부재 감지 → 캐시에서 해당 항목 삭제 및 일반 업로드 전환: ${fullFilename}`);
+                                episodeCacheMap.delete(fullFilename);
+                            }
+                            
                             success = false; // Fallback
                         }
                     }
