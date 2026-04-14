@@ -167,7 +167,8 @@ const filteredLibrary = computed(() => libraryItems.value.filter(item => {
   const cat = item.category || (item.metadata ? item.metadata.category : 'Unknown');
   const matchTab = currentTab.value === 'all' || cat.toLowerCase() === currentTab.value;
   const name = item.name || item.title || '';
-  return matchTab && name.toLowerCase().includes(searchQuery.value.toLowerCase());
+  // [v1.7.4] Filter out system folders starting with '_' (e.g., _MERGEINDEX)
+  return matchTab && !name.startsWith('_') && name.toLowerCase().includes(searchQuery.value.toLowerCase());
 }));
 
 const totalPages = computed(() => {
