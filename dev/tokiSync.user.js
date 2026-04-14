@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.7.3
+// @version      1.7.4
 // @description  Toki series sites -> Google Drive syncing tool (Bundled)
 // @author       pray4skylark
 // @updateURL    https://pray4skylark.github.io/tokiSync/tokiSync.user.js
@@ -350,7 +350,7 @@ class TokiParser extends BaseParser {
     }
 
     getThumbnailUrl() {
-        const img = document.querySelector('img[itemprop="image"]');
+        const img = document.querySelector('img[itemprop="image"]') || document.querySelector('.view-img img');
         if (!img) return null;
         return img.getAttribute('content') || img.src;
     }
@@ -558,6 +558,7 @@ function isAudioRunning() {
 
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
 /* harmony export */   GA: function() { return /* binding */ fetchHistoryDirect; },
+/* harmony export */   OS: function() { return /* binding */ checkSingleHistoryDirect; },
 /* harmony export */   Py: function() { return /* binding */ getOAuthToken; },
 /* harmony export */   r9: function() { return /* binding */ uploadDirect; }
 /* harmony export */ });
@@ -1054,33 +1055,35 @@ async function uploadDirect(blob, folderName, fileName, metadata = {}) {
 const getOAuthToken = getToken;
 
 /**
- * [v1.8.0] Direct History Fetch with Size Heuristic
+ * [v1.7.4] Direct History Fetch with Size Heuristic
  * Bypasses GAS relay and directly queries the Google Drive API for the series folder.
  * Automatically filters out corrupted/incomplete files using the `(Max + Min) / 2 * 0.5` heuristic.
  * 
  * @param {string} seriesTitle 
  * @param {string} category 
- * @returns {Promise<string[]>} Array of valid episode IDs (e.g. "0001", "0002")
+ * @returns {Promise<{success: boolean, folderId: string|null, data: string[]}>} Object with valid episode IDs
  */
 async function fetchHistoryDirect(seriesTitle, category = 'Webtoon') {
     const logger = _ui_js__WEBPACK_IMPORTED_MODULE_1__.LogBox.getInstance();
     const config = (0,_config_js__WEBPACK_IMPORTED_MODULE_0__/* .getConfig */ .zj)();
-    if (!config.folderId) return [];
+    if (!config.folderId) return { success: false, folderId: null, data: [] };
+
+    let currentSeriesFolderId = null;
 
     try {
         console.log(`[DirectHistory] Fetching history for: ${seriesTitle} (${category})`);
         const token = await getToken();
         
         // Find the Series Folder ID
-        const seriesFolderId = await getOrCreateFolder(seriesTitle, config.folderId, token, category);
+        currentSeriesFolderId = await getOrCreateFolder(seriesTitle, config.folderId, token, category);
         
-        if (!seriesFolderId) {
+        if (!currentSeriesFolderId) {
             console.log(`[DirectHistory] Series folder not found or created.`);
-            return [];
+            return { success: true, folderId: null, data: [] };
         }
 
         const searchUrl = `https://www.googleapis.com/drive/v3/files?` +
-            `q='${seriesFolderId}' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'` +
+            `q='${currentSeriesFolderId}' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'` +
             `&fields=files(id,name,size)` +
             `&pageSize=1000`;
             
@@ -1101,7 +1104,7 @@ async function fetchHistoryDirect(seriesTitle, category = 'Webtoon') {
 
         if (!result.files || result.files.length === 0) {
             console.log(`[DirectHistory] No files found in folder.`);
-            return [];
+            return { success: true, folderId: currentSeriesFolderId, data: [] };
         }
 
         const fileInfos = [];
@@ -1127,7 +1130,7 @@ async function fetchHistoryDirect(seriesTitle, category = 'Webtoon') {
             });
         });
 
-        if (fileInfos.length === 0) return [];
+        if (fileInfos.length === 0) return { success: true, folderId: currentSeriesFolderId, data: [] };
 
         let threshold = 0;
         if (maxSize > 0 && fileInfos.length > 1) {
@@ -1152,13 +1155,71 @@ async function fetchHistoryDirect(seriesTitle, category = 'Webtoon') {
         }
 
         console.log(`[DirectHistory] Final valid episodes: ${validEpisodes.length}`);
-        return [...new Set(validEpisodes)].sort((a,b) => parseInt(a) - parseInt(b));
+        return { 
+            success: true, 
+            folderId: currentSeriesFolderId, 
+            data: [...new Set(validEpisodes)].sort((a,b) => parseInt(a) - parseInt(b))
+        };
 
     } catch (err) {
         console.error(`[DirectHistory] Failed:`, err);
-        logger.warn(`기록 직접 조회 실패: ${err.message}`, 'Network:History');
-        return [];
+        logger.warn(`기록 전체 조회 실패(플래그 활성화됨): ${err.message}`, 'Network:History');
+        return { success: false, folderId: currentSeriesFolderId, data: [] };
     }
+}
+
+/**
+ * [v1.7.4] Targeted Single Episode Check
+ * Used as a fallback when fetchHistoryDirect fails (e.g. timeout on huge folders).
+ * 
+ * @param {string} folderId 
+ * @param {string} episodeNumStr 
+ * @returns {Promise<boolean>} True if the episode file already exists
+ */
+async function checkSingleHistoryDirect(folderId, episodeNumStr) {
+    if (!folderId) return false;
+    
+    try {
+        const token = await getToken();
+        // Since we don't know the full exact title, we query for the number.
+        // Google Drive API tokenizes queries, so querying for the number works.
+        const query = `name contains '${episodeNumStr}'`;
+        
+        const searchUrl = `https://www.googleapis.com/drive/v3/files?` +
+            `q=${encodeURIComponent(query)} and '${folderId}' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'` +
+            `&fields=files(id,size,name)` +
+            `&pageSize=10`; // Safe margin if multiple files contain the number
+            
+        const result = await new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url: searchUrl,
+                headers: { 'Authorization': `Bearer ${token}` },
+                timeout: 5000,
+                onload: (res) => {
+                    try { resolve(JSON.parse(res.responseText)); } 
+                    catch (e) { reject(e); }
+                },
+                onerror: reject,
+                ontimeout: () => reject(new Error('Timeout'))
+            });
+        });
+
+        if (result.files && result.files.length > 0) {
+            // Strict filter clientside: filename must start with the exact episode number.
+            // Because 'name contains 1' might also match '10', '11' or other text.
+            const file = result.files.find(f => {
+                const match = f.name.match(/^(\d+)/);
+                return match && parseInt(match[1], 10) === parseInt(episodeNumStr, 10);
+            });
+            if (file && parseInt(file.size || "0", 10) > 1000) { // arbitrary small size check (1KB)
+                return true;
+            }
+        }
+    } catch (e) {
+        console.warn(`[SingleCheck] Error checking ${episodeNumStr}:`, e);
+    }
+    return false;
 }
 
 
@@ -2017,12 +2078,17 @@ async function waitIframeLoad(iframe, url) {
                 console.warn('[Captcha] 감지됨! 사용자 조치 필요');
                 const logger = _ui_js__WEBPACK_IMPORTED_MODULE_1__.LogBox.getInstance();
                 logger.error('[Captcha] 캡차가 감지되었습니다. 해결 후 "재개" 버튼을 눌러주세요.');
-                await pauseForCaptcha(iframe);
+                await pauseForCaptcha(url);
+                logger.log('[Captcha] 해결 확인됨! 원본 주소로 다운로드 프레임 재개 중...', 'System');
+                
+                // 기존 다운로드용 iframe은 그대로 두고, 
+                // 원본 주소(url)를 다시 로드하여 처음부터 캡차 검사 단계를 정상적으로 통과하도록 재귀호출
+                await waitIframeLoad(iframe, url);
+                resolve();
             } else {
                 console.log('[Captcha Debug] No captcha detected');
+                resolve();
             }
-            
-            resolve();
         };
         iframe.addEventListener('load', handler);
         iframe.src = url;
@@ -2071,7 +2137,6 @@ async function waitForContent(iframe, maxWaitMs = 8000) {
  * @param {number} stallTimeoutMs 진행 없을 때 포기하는 시간 (ms), 기본 20000
  */
 async function scrollToLoad(iframeDoc, stallTimeoutMs = 20000) {
-    const scrollStep = 800;
     const POLL_INTERVAL = 300;
 
     const win = iframeDoc.defaultView || iframeDoc.parentWindow;
@@ -2079,29 +2144,47 @@ async function scrollToLoad(iframeDoc, stallTimeoutMs = 20000) {
 
     const isHidden = document.visibilityState === 'hidden';
     const behavior = isHidden ? 'auto' : 'smooth';
-    const scrollInterval = isHidden ? 400 : 200;
+    const scrollInterval = isHidden ? 200 : 100;
 
     const logger = _ui_js__WEBPACK_IMPORTED_MODULE_1__.LogBox.getInstance();
 
-    // ── Phase 1: 페이지 끝까지 스크롤 (위치 기반, 횟수 제한 없음) ──
-    logger.log(`[ScrollToLoad] Phase 1: 스크롤 시작 (${behavior} 모드)`, 'DOM:Scroll');
+    // ── Phase 1: 요소 추적 하이브리드 점프 (EBHJ) ────────────────
+    logger.log(`[ScrollToLoad] Phase 1: 고속 점프 시작 (${behavior} 모드)`, 'DOM:Scroll');
 
-    let currentScroll = 0;
-    let maxScroll = iframeDoc.documentElement.scrollHeight - iframeDoc.documentElement.clientHeight;
+    // 범용적인 이미지 컨테이너 탐지 (마나토끼 등 다양한 사이트 구조 대응)
+    const targetSelectors = '.view-padding div img, .viewer-main img, #v_content img, .img-tag';
+    const allImages = Array.from(iframeDoc.querySelectorAll(targetSelectors));
+    
+    if (allImages.length > 0) {
+        // 4개 단위로 샘플링하여 징검다리 점프 수행 (IntersectionObserver rootMargin 활용)
+        const SAMPLE_STEP = 4;
+        const jumpTargets = allImages.filter((_, idx) => idx % SAMPLE_STEP === 0);
+        
+        // 마지막 이미지는 무조건 포함
+        if (allImages.length % SAMPLE_STEP !== 1) {
+            jumpTargets.push(allImages[allImages.length - 1]);
+        }
 
-    while (currentScroll < maxScroll) {
-        currentScroll += scrollStep;
-        win.scrollTo({ top: currentScroll, behavior });
-        await sleep(scrollInterval);
-
-        // 동적으로 늘어나는 페이지 높이 반영
-        maxScroll = iframeDoc.documentElement.scrollHeight - iframeDoc.documentElement.clientHeight;
-
-        // 백그라운드 탭: scroll 이벤트 강제 발화
-        if (isHidden) win.dispatchEvent(new Event('scroll'));
+        for (let i = 0; i < jumpTargets.length; i++) {
+            const target = jumpTargets[i];
+            target.scrollIntoView({ behavior, block: 'center' });
+            
+            // 전역 스크롤 이벤트 발화 (일부 사이트용)
+            if (isHidden) win.dispatchEvent(new Event('scroll'));
+            
+            logger.log(`[EBHJ] 점프 중... (${i + 1}/${jumpTargets.length})`, 'DOM:Jump');
+            await sleep(scrollInterval);
+        }
+    } else {
+        logger.warn('[EBHJ] 화면 내 이미지 요소를 찾을 수 없어 물리 스크롤 모드로 전환합니다.', 'DOM:Scroll');
     }
 
-    logger.log('[ScrollToLoad] Phase 1 완료 (페이지 끝 도달). Phase 2: 이미지 활성화 대기...', 'DOM:Scroll');
+    // Hybrid Fallback: 마지막에 문서를 바닥으로 내려꽂아 무한 스크롤 및 지연 로직 강제 기상
+    win.scrollTo({ top: iframeDoc.documentElement.scrollHeight, behavior });
+    if (isHidden) win.dispatchEvent(new Event('scroll'));
+    await sleep(scrollInterval * 2);
+
+    logger.log('[ScrollToLoad] Phase 1 완료 (요소 점프 및 바닥 도달). Phase 2: 이미지 활성화 대기...', 'DOM:Scroll');
 
     // ── Phase 2: lazy 이미지가 모두 실제 URL로 바뀔 때까지 폴링 ────
     const isDummySrc = (src) => {
@@ -2184,7 +2267,7 @@ async function scrollToLoad(iframeDoc, stallTimeoutMs = 20000) {
 }
 
 // Pause execution until user resolves captcha
-function pauseForCaptcha(iframe) {
+function pauseForCaptcha(targetUrl) {
     return new Promise((resumeCallback) => {
         // Create full-screen overlay
         const overlay = document.createElement('div');
@@ -2198,48 +2281,47 @@ function pauseForCaptcha(iframe) {
         
         overlay.innerHTML = `
             <h1 style="font-size: 32px; margin-bottom: 20px;">⚠️ 캡차 감지</h1>
-            <p style="font-size: 18px; margin-bottom: 30px;">아래 iframe에서 캡차를 해결해주세요.</p>
+            <p style="font-size: 18px; margin-bottom: 30px;">아래 프레임에서 캡차를 해결해주세요. (전용 프레임 모드)</p>
             <div style="width: 80%; height: 60%; background: white; border-radius: 10px; overflow: hidden; margin-bottom: 20px;" id="toki-captcha-frame-container"></div>
             <button id="toki-resume-btn" style="padding: 15px 40px; font-size: 18px; background: #4CAF50; color: white; border: none; border-radius: 8px; cursor: pointer;">
-                재개하기
+                해결 후 재개하기
             </button>
         `;
         
         document.body.appendChild(overlay);
         
-        // Move iframe to overlay for visibility
+        // 캡차 조작 전용 신규 프레임 띄우기 (다운로드용 프레임의 간섭 방지)
+        const captchaIframe = document.createElement('iframe');
+        captchaIframe.src = targetUrl;
+        captchaIframe.style.width = '100%';
+        captchaIframe.style.height = '100%';
+        captchaIframe.style.border = 'none';
+        
         const container = document.getElementById('toki-captcha-frame-container');
-        if (container && iframe) {
-            // Reset hidden styles from downloader.js
-            iframe.style.position = 'static';
-            iframe.style.top = '0';
-            iframe.style.width = '100%';
-            iframe.style.height = '100%';
-            iframe.style.border = 'none';
-            container.appendChild(iframe);
-            
-            // Auto-scroll to captcha field and focus input
+        if (container) {
+            container.appendChild(captchaIframe);
+        }
+
+        captchaIframe.onload = () => {
             try {
-                const iframeDoc = iframe.contentWindow.document;
+                const iframeDoc = captchaIframe.contentWindow.document;
                 const captchaField = iframeDoc.querySelector('fieldset#captcha, fieldset.captcha, .captcha_box');
                 if (captchaField) {
                     captchaField.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 }
-                
-                // Auto-focus on captcha input
                 const captchaInput = iframeDoc.querySelector('#captcha_key, input.captcha_box');
                 if (captchaInput) {
                     setTimeout(() => captchaInput.focus(), 300);
                 }
             } catch (e) {
-                console.warn('[Captcha] Auto-scroll/focus failed:', e.message);
+                console.warn('[Captcha] Auto-scroll/focus failed (May be CORS):', e.message);
             }
-        }
+        };
         
         // Periodic check for captcha resolution (auto-resume)
         const checkInterval = setInterval(() => {
             try {
-                const iframeDoc = iframe.contentWindow.document;
+                const iframeDoc = captchaIframe.contentWindow.document;
                 
                 // Check if captcha fields still exist
                 const captchaFieldset = iframeDoc.querySelector('fieldset#captcha, fieldset.captcha');
@@ -2255,33 +2337,23 @@ function pauseForCaptcha(iframe) {
                 if (!hasCaptcha) {
                     console.log('[Captcha] 자동 감지: 캡차 해결됨!');
                     clearInterval(checkInterval);
-                    restoreIframeAndResume();
+                    overlay.remove();
+                    resumeCallback();
                 }
             } catch (e) {
                 // CORS error or iframe changed - likely resolved
-                console.log('[Captcha] 자동 감지: iframe 변경 감지 (해결됨으로 추정)');
+                console.log('[Captcha] 자동 감지: 상위 프레임 권한 막힘 또는 리다이렉트 발생 (해결됨으로 추정)');
                 clearInterval(checkInterval);
-                restoreIframeAndResume();
+                overlay.remove();
+                resumeCallback();
             }
         }, 1000); // Check every 1 second
-        
-        // Helper function to restore iframe and resume
-        function restoreIframeAndResume() {
-            // Move iframe back to body BEFORE removing overlay
-            if (iframe && iframe.parentNode) {
-                document.body.appendChild(iframe);
-                iframe.style.position = 'fixed';
-                iframe.style.top = '-9999px';
-                iframe.style.display = 'none';
-            }
-            overlay.remove();
-            resumeCallback();
-        }
         
         // Resume button (manual override)
         document.getElementById('toki-resume-btn').onclick = () => {
             clearInterval(checkInterval);
-            restoreIframeAndResume();
+            overlay.remove();
+            resumeCallback();
         };
     });
 }
@@ -3730,26 +3802,36 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
         // [v1.6.0 Fast Path] Pre-load episode cache
         let episodeCacheMap = new Map(); // key: "0001 - Title", value: "fileId"
 
+        let historyCheckTimeoutFlag = false;
+        let historyFolderId = null;
+
         if (destination === 'drive') {
             try {
                 if (forceOverwrite) {
                     logger.log('⚠️ 강제 재다운로드 옵션 활성화: 기존 업로드 기록 무시 (전체 덮어쓰기)');
                 } else {
                     logger.log('☁️ 드라이브 업로드 기록 및 용량 확인 중 (Smart Skip)...');
-                    const history = await (0,network/* fetchHistoryDirect */.GA)(rootFolder, category);
-                    // Normalize: accept padded ("0001") and plain ("1") forms
-                    history.forEach(id => {
-                        const plain = parseInt(id).toString();
-                        uploadedHistorySet.add(id.toString());   // e.g. "0001"
-                        uploadedHistorySet.add(plain);           // e.g. "1"
-                    });
-                    if (uploadedHistorySet.size > 0) {
-                        logger.log(`⏭️ 조건 만족(기존 정상 업로드) 에피소드 ${history.length}개 감지 — 건너뜁니다.`);
+                    const histResult = await (0,network/* fetchHistoryDirect */.GA)(rootFolder, category);
+                    
+                    if (histResult.success) {
+                        // Normalize: accept padded ("0001") and plain ("1") forms
+                        histResult.data.forEach(id => {
+                            const plain = parseInt(id).toString();
+                            uploadedHistorySet.add(id.toString());   // e.g. "0001"
+                            uploadedHistorySet.add(plain);           // e.g. "1"
+                        });
+                        if (uploadedHistorySet.size > 0) {
+                            logger.log(`⏭️ 조건 만족(기존 정상 업로드) 에피소드 ${histResult.data.length}개 감지 — 건너뜁니다.`);
+                        }
+                    } else {
+                        historyCheckTimeoutFlag = true;
+                        historyFolderId = histResult.folderId;
+                        logger.log(`⚠️ 업로드 기록 조회 지연/타임아웃 감지. 개별 스킵(페일세이프) 모드로 전환합니다.`, 'warn');
                     }
                 }
             } catch (histErr) {
-                // Non-fatal: if history check fails, proceed without skipping
-                logger.log(`⚠️ 업로드 기록 조회 실패 (전체 다운로드 진행): ${histErr.message}`, 'warn');
+                // Non-fatal: if history check fails unexpectedly
+                logger.log(`⚠️ 업로드 기록 조회 실패: ${histErr.message}`, 'warn');
             }
 
             // [v1.6.0] Phase B-2: Load Master Index -> Cache File ID -> Episode List
@@ -3848,12 +3930,22 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
 
             // [v1.5.0 Smart Skip] Skip already-uploaded episodes (Drive policy only)
             // [v1.7.1] Bypass skipping in Single Volume mode (we need all chapters)
-            if (!isSingleVolume && destination === 'drive' && uploadedHistorySet.size > 0) {
+            if (!isSingleVolume && destination === 'drive') {
                 const numStr = item.num ? item.num.toString() : '';
                 const numPlain = parseInt(numStr).toString();
-                if (uploadedHistorySet.has(numStr) || uploadedHistorySet.has(numPlain)) {
+                if (uploadedHistorySet.size > 0 && (uploadedHistorySet.has(numStr) || uploadedHistorySet.has(numPlain))) {
                     logger.log(`⏭️ 건너뜀 (이미 업로드됨): ${item.title}`);
                     continue;
+                }
+                
+                // [v1.7.4] 페일세이프: 타임아웃 발생 시 개별 단위 핀셋 조회 수행
+                if (historyCheckTimeoutFlag && historyFolderId) {
+                    logger.log(`🔍 [페일세이프] 타임아웃 2차 단일 로컬/원격 검사 중: ${item.title}`);
+                    const isUploaded = await (0,network/* checkSingleHistoryDirect */.OS)(historyFolderId, numStr);
+                    if (isUploaded) {
+                        logger.log(`⏭️ [페일세이프 재검사] 건너뜀 (이미 업로드됨): ${item.title}`);
+                        continue;
+                    }
                 }
             }
 
@@ -4232,7 +4324,7 @@ async function fetchImages(imageUrls) {
 
 
 function main() {
-    console.log("🚀 TokiDownloader Loaded (New Core v1.7.1)");
+    console.log("🚀 TokiDownloader Loaded (New Core v1.7.4)");
     
     const logger = ui.LogBox.getInstance();
 
