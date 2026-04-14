@@ -116,6 +116,19 @@
                     </div>
                     <input type="checkbox" v-model="viewerDefaults.preloadNext" class="setting-checkbox accent-theme-accent">
                   </label>
+
+                  <!-- [v1.7.4] Download Threads Selection -->
+                  <div class="col-span-1 md:col-span-2 p-5 rounded-[24px] bg-black/20 border border-theme-accent/20 flex items-center justify-between">
+                    <div class="flex flex-col">
+                      <span class="text-[11px] font-black text-theme-accent uppercase tracking-tighter">Download Threads</span>
+                      <span class="text-[9px] text-theme-muted uppercase opacity-70">동시 다운로드 스레드 (4G: 2 추천)</span>
+                    </div>
+                    <select v-model.number="viewerDefaults.downloadThreads" class="bg-black/60 border border-white/10 rounded-xl px-4 py-2 text-[10px] font-black text-theme-accent outline-none focus:border-theme-accent/50 transition-all uppercase italic tracking-widest">
+                      <option :value="1">1 Thread</option>
+                      <option :value="2">2 Threads</option>
+                      <option :value="3">3 Threads</option>
+                    </select>
+                  </div>
                 </div>
               </div>
 

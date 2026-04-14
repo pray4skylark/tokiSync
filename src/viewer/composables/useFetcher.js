@@ -1,21 +1,18 @@
-/**
- * 📦 useFetcher - Client-side Download & Unzip Composable
- * Ports the legacy fetcher.js logic to Vue.
- *
- * Features:
- * - Adaptive download: Single fetch (<26MB) or Concurrent Chunks (>=26MB)
- * - Format detection: CBZ/ZIP → images, EPUB → images or text
- * - Progress tracking via reactive state
- */
-import { ref } from 'vue';
+import { ref, toRaw } from 'vue';
 import { useGAS } from './useGAS.js';
+import { useStore } from './useStore.js';
+import { db } from './db.js';
 import JSZip from 'jszip';
 
 // --- Singleton State ---
 const downloadProgress = ref('');  // e.g. "다운로드 중... (45%)"
 const isDownloading = ref(false);
 
-// --- File Cache ---
+// [v1.7.4] Global Configuration
+const DOWNLOAD_THRESHOLD = 5 * 1024 * 1024; // 5MB (4G environment baseline)
+const CHUNK_COUNT = 6; // Always divide into 6 chunks for progress resolution
+
+// --- File Cache (Level 1: RAM) ---
 let cachedFileId = null;
 let cachedBytes = null;
 
@@ -30,20 +27,17 @@ let isPreloading = ref(false);
 let activeBlobUrls = [];
 
 /**
- * Revoke all active Blob URLs to prevent memory leaks
+ * Revoke all active Blob URLs to prevent memory leaks.
  */
 function cleanupBlobUrls() {
-  activeBlobUrls.forEach((url) => URL.revokeObjectURL(url));
+  activeBlobUrls.forEach((url) => {
+    try {
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.warn('[Fetcher] Failed to revoke URL:', url, e);
+    }
+  });
   activeBlobUrls = [];
-  // Also clear file cache to prevent stale content
-  cachedFileId = null;
-  cachedBytes = null;
-  
-  // Clear preload cache (if any completed)
-  preloadedFileId = null;
-  preloadedBytes = null;
-  preloadPromise = null;
-  preloadTargetFileId = null;
 }
 
 /**
@@ -67,81 +61,114 @@ function naturalSort(a, b) {
 }
 
 /**
+ * [v1.7.4] Persistent Cache Helpers (Level 2: IndexedDB)
+ */
+async function saveToPersistentCache(fileId, bytes) {
+  try {
+    await db.episodeData.put({
+      fileId,
+      bytes,
+      cachedAt: Date.now()
+    });
+    console.log(`[Cache:DB] Saved ${fileId} to persistent storage.`);
+  } catch (err) {
+    console.warn(`[Cache:DB] Failed to save ${fileId}:`, err);
+  }
+}
+
+async function loadFromPersistentCache(fileId) {
+  try {
+    const record = await db.episodeData.get(fileId);
+    if (record) {
+      console.log(`[Cache:DB] Hit! Loaded ${fileId} from persistent storage.`);
+      // Update cachedAt to keep it alive (LRU)
+      db.episodeData.update(fileId, { cachedAt: Date.now() });
+      return record.bytes;
+    }
+  } catch (err) {
+    console.warn(`[Cache:DB] Failed to load ${fileId}:`, err);
+  }
+  return null;
+}
+
+/**
  * Main entry point: Download, unzip, and return content
- *
- * @param {string} fileId - Google Drive File ID
- * @param {number} totalSize - Total file size in bytes (0 = unknown)
- * @returns {Promise<Object>} Result object:
- *   - { type: 'images', images: string[] }  - Array of Blob URLs
- *   - { type: 'text', content: string }     - HTML content string
  */
 async function fetchAndUnzip(fileId, totalSize) {
   const { getChunk } = useGAS();
+  const { viewerDefaults } = useStore();
 
   isDownloading.value = true;
-  downloadProgress.value = '다운로드 준비 중...';
+  downloadProgress.value = '준비 중...';
 
   let combinedBytes = null;
-  const SAFE_THRESHOLD = 26 * 1024 * 1024; // 26MB
 
   try {
-    // 1. Check Cache
+    // 1. Level 1 Cache (RAM)
     if (cachedFileId === fileId && cachedBytes) {
-      console.log('♻️ Using cached data for re-render');
+      console.log('♻️ Using RAM cache');
       combinedBytes = cachedBytes;
-    } else if (preloadedFileId === fileId && preloadedBytes) {
-      console.log('⚡️ Using preloaded data!');
+    } 
+    // 2. Preload Cache (Memory)
+    else if (preloadedFileId === fileId && preloadedBytes) {
+      console.log('⚡️ Using preload cache');
       combinedBytes = preloadedBytes;
-    } else if (preloadTargetFileId === fileId && preloadPromise) {
-      console.log('⏳ Waiting for ongoing preload task...');
-      isDownloading.value = true;
-      downloadProgress.value = '사전 다운로드 파일 병합 대기 중...';
+    } 
+    // 3. Ongoing Preload
+    else if (preloadTargetFileId === fileId && preloadPromise) {
+      console.log('⏳ Waiting for ongoing preload...');
+      downloadProgress.value = '사전 다운로드 대기 중...';
       combinedBytes = await preloadPromise;
-      if (!combinedBytes) {
-         // fallback if it failed
-         throw new Error("Preload failed or was interrupted.");
-      }
-    } else {
-      // Clear old cache
+    } 
+    // 4. Level 2 Cache (IndexedDB)
+    if (!combinedBytes) {
+      combinedBytes = await loadFromPersistentCache(fileId);
+    }
+
+    // 5. Network Fetch (Final Fallback)
+    if (!combinedBytes) {
+      // Clear old ephemeral cache
       cachedFileId = null;
       cachedBytes = null;
 
-      if (totalSize > 0 && totalSize < SAFE_THRESHOLD) {
+      if (totalSize > 0 && totalSize <= DOWNLOAD_THRESHOLD) {
         // [Mode A] Single Fetch (Small file)
-        combinedBytes = await fetchSingle(fileId, totalSize, getChunk, false);
+        combinedBytes = await fetchSingle(fileId, totalSize, getChunk);
       } else if (totalSize === 0) {
         // [Mode C] Sequential Fallback (Unknown size)
-        combinedBytes = await fetchSequential(fileId, getChunk, false);
+        combinedBytes = await fetchSequential(fileId, getChunk);
       } else {
-        // [Mode B] Concurrent Chunk Fetch (Large file)
-        combinedBytes = await fetchConcurrent(fileId, totalSize, getChunk, false);
+        // [Mode B] Concurrent 6-Chunk Fetch (Standard file)
+        combinedBytes = await fetchConcurrent(fileId, totalSize, getChunk, viewerDefaults.downloadThreads);
+      }
+
+      // Save to Level 2 Cache (IndexedDB) after successful download
+      if (combinedBytes) {
+        saveToPersistentCache(fileId, combinedBytes);
       }
     }
 
-    // 2. Update cache
+    // Update Level 1 Cache (RAM)
     if (combinedBytes) {
+      if (fileId === preloadedFileId || fileId === preloadTargetFileId) {
+        preloadedFileId = null;
+        preloadedBytes = null;
+        preloadPromise = null;
+        preloadTargetFileId = null;
+      }
       cachedFileId = fileId;
       cachedBytes = combinedBytes;
-      // Preload complete, no need to keep it
-      preloadedFileId = null;
-      preloadedBytes = null;
-      preloadPromise = null;
     }
 
-    // 3. Unzip
-    downloadProgress.value = '압축 해제 중...';
+    // Unzip
+    downloadProgress.value = '이미지 압축 해제 중...';
     const zip = await JSZip.loadAsync(combinedBytes);
     const files = Object.keys(zip.files).sort(naturalSort);
 
-    // 4. Detect Format
     const isEpub = zip.file('OEBPS/content.opf') || zip.file('OPS/content.opf') || zip.file('mimetype');
-
-    if (isEpub) {
-      return await handleEpub(zip, files);
-    }
-
-    // 5. Extract Images (CBZ/ZIP)
+    if (isEpub) return await handleEpub(zip, files);
     return await extractImages(zip, files);
+
   } finally {
     isDownloading.value = false;
     downloadProgress.value = '';
@@ -149,65 +176,67 @@ async function fetchAndUnzip(fileId, totalSize) {
 }
 
 /**
- * [Mode A] Single Fetch for small files
+ * [Mode A] Single Fetch
  */
 async function fetchSingle(fileId, totalSize, getChunk, silent = false) {
-  if (!silent) downloadProgress.value = '다운로드 중... (0%)';
+  if (!silent) downloadProgress.value = '다운로드 중... (50%)';
   const response = await getChunk(fileId, 0, totalSize);
-  if (!response || !response.data) throw new Error('Empty Response');
+  if (!response || !response.data) throw new Error('Data Empty');
   if (!silent) downloadProgress.value = '다운로드 완료 (100%)';
   return base64ToBytes(response.data);
 }
 
 /**
- * [Mode B] Concurrent Chunk Fetch for large files (10MB chunks, 3 workers)
+ * [Mode B] Concurrent 6-Chunk Fetch with Byte Correction
  */
-async function fetchConcurrent(fileId, totalSize, getChunk, silent = false) {
-  const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB
-  const CONCURRENCY = 3;
-  const chunkCount = Math.ceil(totalSize / CHUNK_SIZE);
-
+async function fetchConcurrent(fileId, totalSize, getChunk, concurrency = 2, silent = false) {
   const tasks = [];
-  for (let i = 0; i < chunkCount; i++) {
-    tasks.push({ index: i, start: i * CHUNK_SIZE, length: CHUNK_SIZE });
+  const chunkSize = Math.floor(totalSize / CHUNK_COUNT);
+
+  for (let i = 0; i < CHUNK_COUNT; i++) {
+    const start = i * chunkSize;
+    // Last chunk takes all remaining bytes to prevent rounding errors
+    const length = (i === CHUNK_COUNT - 1) ? (totalSize - start) : chunkSize;
+    tasks.push({ index: i, start, length });
   }
 
   let completed = 0;
-  const results = new Array(chunkCount);
+  const results = new Array(CHUNK_COUNT);
 
   const worker = async () => {
     while (tasks.length > 0) {
       const task = tasks.shift();
-
       let retries = 3;
       while (retries > 0) {
         try {
           const response = await getChunk(fileId, task.start, task.length);
-          if (!response || !response.data) throw new Error('No response');
+          if (!response || !response.data) throw new Error('No Data');
 
           results[task.index] = base64ToBytes(response.data);
           completed++;
-          if (!silent) downloadProgress.value = `다운로드 중... (${Math.round((completed / chunkCount) * 100)}%)`;
+          
+          if (!silent) {
+            const pct = Math.round((completed / CHUNK_COUNT) * 100);
+            downloadProgress.value = `다운로드 중... (${pct}%) [${completed}/${CHUNK_COUNT}]`;
+          }
           break;
         } catch (e) {
           retries--;
           if (retries === 0) throw e;
-          console.warn(`Chunk ${task.index} failed, retrying...`, e);
-          await new Promise((r) => setTimeout(r, 1000));
+          await new Promise(r => setTimeout(r, 1500));
         }
       }
     }
   };
 
   const workers = [];
-  for (let k = 0; k < CONCURRENCY; k++) workers.push(worker());
+  const activeConcurrency = Math.min(concurrency || 2, 3); // Cap at 3 for safety
+  for (let k = 0; k < activeConcurrency; k++) workers.push(worker());
   await Promise.all(workers);
 
-  // Merge chunks
-  if (!silent) downloadProgress.value = '병합 중...';
-  let totalLen = 0;
-  results.forEach((r) => (totalLen += r.length));
-  const combinedBytes = new Uint8Array(totalLen);
+  // Merge chunks (Guaranteed byte accuracy)
+  if (!silent) downloadProgress.value = '데이터 병합 중...';
+  const combinedBytes = new Uint8Array(totalSize);
   let pos = 0;
   results.forEach((r) => {
     combinedBytes.set(r, pos);
@@ -218,16 +247,16 @@ async function fetchConcurrent(fileId, totalSize, getChunk, silent = false) {
 }
 
 /**
- * [Mode C] Sequential Fallback for unknown file size
+ * [Mode C] Sequential Fallback (Progressive)
  */
 async function fetchSequential(fileId, getChunk, silent = false) {
-  const CHUNK_SIZE = 10 * 1024 * 1024;
+  const STEP_SIZE = 10 * 1024 * 1024;
   const chunks = [];
   let offset = 0;
   let totalLength = 0;
 
   while (true) {
-    const response = await getChunk(fileId, offset, CHUNK_SIZE);
+    const response = await getChunk(fileId, offset, STEP_SIZE);
     if (!response) break;
 
     const bytes = base64ToBytes(response.data);
@@ -235,8 +264,13 @@ async function fetchSequential(fileId, getChunk, silent = false) {
     totalLength += bytes.length;
     offset = response.nextOffset;
 
-    if (response.totalSize && !silent) {
-      downloadProgress.value = `다운로드 중... (${Math.round((offset / response.totalSize) * 100)}%)`;
+    if (!silent) {
+      if (response.totalSize) {
+        const pct = Math.round((offset / response.totalSize) * 100);
+        downloadProgress.value = `수신 중... (${pct}%)`;
+      } else {
+        downloadProgress.value = `수신 중... (${formatSize(totalLength)})`;
+      }
     }
 
     if (!response.hasMore) break;
@@ -252,97 +286,52 @@ async function fetchSequential(fileId, getChunk, silent = false) {
 }
 
 /**
- * Handle EPUB format detection and extraction
- * @returns {{ type: 'images', images: string[] } | { type: 'text', content: string }}
+ * EPUB/Image handling remains same logic but integrated
  */
 async function handleEpub(zip, files) {
   const imageFiles = files.filter((f) => f.match(/\.(jpg|jpeg|png|webp|gif)$/i));
   const textFiles = files.filter((f) => f.match(/\.(xhtml|html)$/i));
 
-  // Image-heavy EPUB → treat as Comic
   if (imageFiles.length > 5 && imageFiles.length >= textFiles.length) {
-    console.log('📘 Comic EPUB Detected → Using Image Mode');
     return await extractImages(zip, files);
   }
 
-  // Text EPUB
-  console.log('📘 Text EPUB Detected → Using Novel Mode');
-
   let htmlContent = '';
-  let targetFile = zip.file('OEBPS/Text/chapter.xhtml');
-
-  if (!targetFile) {
-    // Try to find any HTML file
-    const htmlFiles = files.filter((f) => f.match(/\.(xhtml|html)$/i));
-    if (htmlFiles.length > 0) {
-      // Concatenate all chapters
-      const chapters = [];
-      for (const hf of htmlFiles) {
-        const content = await zip.file(hf).async('string');
-        chapters.push(content);
-      }
-      htmlContent = chapters.join('<hr class="chapter-divider" />');
+  const htmlFiles = files.filter((f) => f.match(/\.(xhtml|html)$/i));
+  if (htmlFiles.length > 0) {
+    const chapters = [];
+    for (const hf of htmlFiles) {
+      const content = await zip.file(hf).async('string');
+      chapters.push(content);
     }
-  } else {
-    htmlContent = await targetFile.async('string');
+    htmlContent = chapters.join('<hr class="chapter-divider" />');
   }
 
-  if (!htmlContent) {
-    throw new Error('EPUB 내에서 텍스트 파일을 찾을 수 없습니다.');
-  }
-
+  if (!htmlContent) throw new Error('EPUB Text Empty');
   return { type: 'text', content: htmlContent };
 }
 
-/**
- * Extract images from a ZIP archive and return Blob URLs with dimensions
- */
 async function extractImages(zip, files) {
-  // Cleanup previous Blob URLs
   cleanupBlobUrls();
-
   downloadProgress.value = '이미지 추출 중...';
   const imageUrls = [];
-  const dimensions = [];
   
-  let skipDir = 0, skipHidden = 0, skipNonImg = 0;
-
   for (const filename of files) {
     const file = zip.files[filename];
-    
-    // v1.7.3: 디렉토리는 제외
-    if (file.dir) {
-      skipDir++;
-      continue;
-    }
-    
-    // v1.7.3: 숨겨진 시스템 파일 및 메타데이터 폴더 제외 (._ 로 시작하거나 __MACOSX 포함)
+    if (file.dir) continue;
     const isHidden = filename.split('/').some(part => part.startsWith('.') || part === '__MACOSX');
-    if (isHidden) {
-      console.log(`[Parser:Skip] Hidden file ignored: ${filename}`);
-      skipHidden++;
-      continue;
-    }
+    if (isHidden) continue;
 
     if (filename.match(/\.(jpg|jpeg|png|webp|gif)$/i)) {
       const blob = await file.async('blob');
       const blobUrl = URL.createObjectURL(blob);
       activeBlobUrls.push(blobUrl);
       imageUrls.push(blobUrl);
-      console.debug(`[Parser:OK] Extracted image: ${filename}`);
-    } else {
-      console.log(`[Parser:Skip] Non-image file ignored: ${filename}`);
-      skipNonImg++;
     }
   }
 
-  console.log(`[Parser:Summary] Total: ${files.length}, Extracted: ${imageUrls.length}, Skipped: (Dir: ${skipDir}, Hidden: ${skipHidden}, Meta/Other: ${skipNonImg})`);
+  if (imageUrls.length === 0) throw new Error('No Images');
 
-  if (imageUrls.length === 0) {
-    throw new Error('이미지를 찾을 수 없습니다.');
-  }
-
-  // Detect dimensions for spread detection & validation
   downloadProgress.value = '레이아웃 분석 중...';
   const dimPromises = imageUrls.map((url) => new Promise((resolve) => {
     const img = new Image();
@@ -352,36 +341,20 @@ async function extractImages(zip, files) {
   }));
   const allDims = await Promise.all(dimPromises);
   
-  // v1.7.4: 최종 필터링 - 유효한 이미지만 남김 (차원이 0인 가짜 파일 제외)
   const finalImages = [];
   const finalDims = [];
-  let invalidCount = 0;
-
   for (let idx = 0; idx < imageUrls.length; idx++) {
-      if (allDims[idx].w > 0 && allDims[idx].h > 0) {
-          finalImages.push(imageUrls[idx]);
-          finalDims.push(allDims[idx]);
-      } else {
-          invalidCount++;
-          // 불필요한 URL 즉시 해제
-          URL.revokeObjectURL(imageUrls[idx]);
-      }
-  }
-
-  if (invalidCount > 0) {
-      console.log(`[Parser:Validation] ${invalidCount} hidden/invalid files removed via dimension check.`);
-  }
-
-  if (finalImages.length === 0) {
-    throw new Error('이미지를 찾을 수 없습니다.');
+    if (allDims[idx].w > 0 && allDims[idx].h > 0) {
+      finalImages.push(imageUrls[idx]);
+      finalDims.push(allDims[idx]);
+    } else {
+      URL.revokeObjectURL(imageUrls[idx]);
+    }
   }
 
   return { type: 'images', images: finalImages, dimensions: finalDims };
 }
 
-/**
- * Format file size for display
- */
 function formatSize(bytes) {
   if (!bytes || bytes === 0) return '0 B';
   const k = 1024;
@@ -391,42 +364,50 @@ function formatSize(bytes) {
 }
 
 /**
- * Background preload next chapter
+ * Background Preload with Level 2 Cache Support
  */
 async function preloadEpisode(fileId, totalSize) {
   if (preloadedFileId === fileId || cachedFileId === fileId || preloadTargetFileId === fileId) return;
 
-  console.log(`[Preload] Starting background preload for file ${fileId}`);
-  
-  preloadedFileId = null;
-  preloadedBytes = null;
-  preloadTargetFileId = fileId;
   const { getChunk } = useGAS();
-  const SAFE_THRESHOLD = 26 * 1024 * 1024;
+  const { viewerDefaults } = useStore();
 
+  // Check Level 2 Cache first before preloading via network
+  const existing = await loadFromPersistentCache(fileId);
+  if (existing) {
+    console.log(`[Preload] Found in persistent cache: ${fileId}. Skipping network preload.`);
+    preloadedFileId = fileId;
+    preloadedBytes = existing;
+    return;
+  }
+
+  preloadTargetFileId = fileId;
   preloadPromise = (async () => {
-      isPreloading.value = true;
-      try {
-        let combinedBytes = null;
-        if (totalSize > 0 && totalSize < SAFE_THRESHOLD) {
-          combinedBytes = await fetchSingle(fileId, totalSize, getChunk, true);
-        } else if (totalSize === 0) {
-          combinedBytes = await fetchSequential(fileId, getChunk, true);
-        } else {
-          combinedBytes = await fetchConcurrent(fileId, totalSize, getChunk, true);
-        }
-
-        preloadedFileId = fileId;
-        preloadedBytes = combinedBytes;
-        console.log(`[Preload] Finished background preload for file ${fileId}`);
-        return combinedBytes;
-      } catch (err) {
-        console.warn(`[Preload] Failed to preload:`, err);
-        preloadTargetFileId = null;
-        return null;
-      } finally {
-        isPreloading.value = false;
+    isPreloading.value = true;
+    try {
+      let combinedBytes = null;
+      if (totalSize > 0 && totalSize <= DOWNLOAD_THRESHOLD) {
+        combinedBytes = await fetchSingle(fileId, totalSize, getChunk, true);
+      } else if (totalSize === 0) {
+        combinedBytes = await fetchSequential(fileId, getChunk, true);
+      } else {
+        combinedBytes = await fetchConcurrent(fileId, totalSize, getChunk, viewerDefaults.downloadThreads, true);
       }
+
+      if (combinedBytes) {
+        saveToPersistentCache(fileId, combinedBytes);
+      }
+
+      preloadedFileId = fileId;
+      preloadedBytes = combinedBytes;
+      return combinedBytes;
+    } catch (err) {
+      console.warn(`[Preload] Failed:`, err);
+      preloadTargetFileId = null;
+      return null;
+    } finally {
+      isPreloading.value = false;
+    }
   })();
 }
 

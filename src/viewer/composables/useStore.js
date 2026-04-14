@@ -38,7 +38,8 @@ const viewerDefaults = reactive({
   coverFirst: true,
   autoCrop: false,      
   virtualScroll: true,
-  preloadNext: true    
+  preloadNext: true,
+  downloadThreads: 2 // [v1.7.4] Default parallelism
 });
 
 // [v1.7.0] [오류 2 수정] viewerDefaults 영속화
@@ -143,6 +144,24 @@ async function refreshLastReadEpisode() {
 
 // episodes가 로드될 때마다 lastReadEpisode 갱신
 watch(episodes, () => refreshLastReadEpisode(), { immediate: true });
+
+/**
+ * [v1.7.4] Persistent Cache Garbage Collection
+ * Keeps only the last 5 episodes in IndexedDB to manage storage space.
+ */
+async function cleanupEpisodeData() {
+  try {
+    const all = await db.episodeData.orderBy('cachedAt').reverse().toArray();
+    if (all.length > 5) {
+      const toDelete = all.slice(5);
+      const ids = toDelete.map(item => item.fileId);
+      await db.episodeData.bulkDelete(ids);
+      console.log(`[Cache:GC] Removed ${ids.length} old episodes from persistent storage.`);
+    }
+  } catch (err) {
+    console.warn('[Cache:GC] Failed to cleanup episode data:', err);
+  }
+}
 
 const filteredLibrary = computed(() => libraryItems.value.filter(item => {
   const cat = item.category || (item.metadata ? item.metadata.category : 'Unknown');
@@ -485,6 +504,8 @@ const refreshEpisodes = async () => {
 
 const startReading = async (ep) => {
   cleanupBlobUrls(); // 이전 에피소드 Blob URL 즉시 해제 (메모리 누수 방지)
+  cleanupEpisodeData(); // [v1.7.4] 저장소 용량 관리 가동
+
   currentEpisode.value = ep;
   currentPage.value = 1;
   showNextEpisodeGuide.value = false; // 안내 화면 초기화

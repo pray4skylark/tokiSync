@@ -17,3 +17,12 @@ db.version(3).stores({
 db.version(4).stores({
   imageMeta: '[seriesId+episodeId+index], bounds' // [v1.7.0] 
 });
+
+db.version(5).stores({
+  library: '++id, title, type, fileId, progress',
+  readHistory: 'episodeId, seriesId, lastReadAt',
+  libraryCache: 'id',
+  episodeCache: '[seriesId+id], seriesId, cachedAt', 
+  imageMeta: '[seriesId+episodeId+index], bounds',
+  episodeData: 'fileId, cachedAt' // [v1.7.4] Persistent Content Cache
+});
