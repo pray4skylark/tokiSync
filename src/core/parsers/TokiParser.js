@@ -177,7 +177,7 @@ export class TokiParser extends BaseParser {
     }
 
     getThumbnailUrl() {
-        const img = document.querySelector('img[itemprop="image"]');
+        const img = document.querySelector('img[itemprop="image"]') || document.querySelector('.view-img img');
         if (!img) return null;
         return img.getAttribute('content') || img.src;
     }

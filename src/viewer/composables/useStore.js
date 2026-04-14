@@ -19,7 +19,7 @@ function isStale(cachedAt, ttl) {
 // --- Sub-Composables ---
 const { isConnected, initBridge, bridgeFetch } = useBridge();
 const { gasConfig, setConfig, isConfigured, getLibrary, getBooks, getReadHistory, saveReadHistory } = useGAS();
-const { downloadProgress, isDownloading, fetchAndUnzip, cleanupBlobUrls, formatSize } = useFetcher();
+const { downloadProgress, isDownloading, fetchAndUnzip, preloadEpisode, cleanupBlobUrls, formatSize } = useFetcher();
 
 // --- Singleton State ---
 const currentView = ref('library');
@@ -37,7 +37,8 @@ const viewerDefaults = reactive({
   rtl: false, 
   coverFirst: true,
   autoCrop: false,      
-  virtualScroll: true    
+  virtualScroll: true,
+  preloadNext: true    
 });
 
 // [v1.7.0] [오류 2 수정] viewerDefaults 영속화
@@ -441,7 +442,7 @@ const openSeries = async (item, bypassCache = false) => {
     const books = await getBooks(item.id, bypassCache);
     const now = Date.now();
     
-    // v1.7.6: 새로고침(bypassCache) 시 기존 로컬 캐시를 먼저 삭제하여 삭제된 파일이 남지 않게 함
+    // v1.7.4: 새로고침(bypassCache) 시 기존 로컬 캐시를 먼저 삭제하여 삭제된 파일이 남지 않게 함
     if (bypassCache) {
       await db.episodeCache.where('seriesId').equals(item.id).delete();
     }
@@ -530,6 +531,16 @@ const startReading = async (ep) => {
     // Build page slots for spread mode
     if (result.type === 'images') {
       buildPageSlots();
+    }
+
+    // [v1.7.4] Preload Next Episode Background Task
+    if (viewerDefaults.preloadNext && hasNextEpisode.value) {
+      const nextEp = episodes.value[currentEpisodeIndex.value + 1];
+      if (nextEp) {
+        preloadEpisode(nextEp.id, nextEp.size || 0).catch(err => {
+          console.warn("[Preload] Failed:", err);
+        });
+      }
     }
   } catch (e) {
     console.error('Fetch Error:', e);

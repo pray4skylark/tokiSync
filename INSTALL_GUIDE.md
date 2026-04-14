@@ -1,6 +1,6 @@
-# TokiSync v1.7.3 설치 가이드
+# TokiSync v1.7.4 설치 가이드
 
-이 가이드는 **TokiSync v1.7.3**의 설치 및 설정 방법을 안내합니다.
+이 가이드는 **TokiSync v1.7.4**의 설치 및 설정 방법을 안내합니다.
 
 ## ✅ 사전 준비
 
@@ -15,7 +15,7 @@
 ### 1-1. 프로젝트 생성 및 코드 복사
 
 1. [Google Apps Script](https://script.google.com/) 접속 -> **새 프로젝트**.
-2. 프로젝트 이름: `TokiSync Server v1.7.3`.
+2. 프로젝트 이름: `TokiSync Server v1.7.4`.
 3. 아래 링크 중 원하는 버전을 클릭하여 전체 코드를 복사한 뒤 `Code.gs`에 붙여넣습니다:
    - 🌟 **[TokiSync_Server_Bundle.gs (Stable 정식 버전)](https://pray4skylark.github.io/tokiSync/TokiSync_Server_Bundle.gs)** (권장)
    - 🧪 **[TokiSync_Server_Bundle.gs (Dev 개발 빌드)](https://pray4skylark.github.io/tokiSync/dev/TokiSync_Server_Bundle.gs)** (최신 기능 테스트)

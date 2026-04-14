@@ -107,12 +107,17 @@ export async function waitIframeLoad(iframe, url) {
                 console.warn('[Captcha] 감지됨! 사용자 조치 필요');
                 const logger = LogBox.getInstance();
                 logger.error('[Captcha] 캡차가 감지되었습니다. 해결 후 "재개" 버튼을 눌러주세요.');
-                await pauseForCaptcha(iframe);
+                await pauseForCaptcha(url);
+                logger.log('[Captcha] 해결 확인됨! 원본 주소로 다운로드 프레임 재개 중...', 'System');
+                
+                // 기존 다운로드용 iframe은 그대로 두고, 
+                // 원본 주소(url)를 다시 로드하여 처음부터 캡차 검사 단계를 정상적으로 통과하도록 재귀호출
+                await waitIframeLoad(iframe, url);
+                resolve();
             } else {
                 console.log('[Captcha Debug] No captcha detected');
+                resolve();
             }
-            
-            resolve();
         };
         iframe.addEventListener('load', handler);
         iframe.src = url;
@@ -161,7 +166,6 @@ async function waitForContent(iframe, maxWaitMs = 8000) {
  * @param {number} stallTimeoutMs 진행 없을 때 포기하는 시간 (ms), 기본 20000
  */
 export async function scrollToLoad(iframeDoc, stallTimeoutMs = 20000) {
-    const scrollStep = 800;
     const POLL_INTERVAL = 300;
 
     const win = iframeDoc.defaultView || iframeDoc.parentWindow;
@@ -169,29 +173,47 @@ export async function scrollToLoad(iframeDoc, stallTimeoutMs = 20000) {
 
     const isHidden = document.visibilityState === 'hidden';
     const behavior = isHidden ? 'auto' : 'smooth';
-    const scrollInterval = isHidden ? 400 : 200;
+    const scrollInterval = isHidden ? 200 : 100;
 
     const logger = LogBox.getInstance();
 
-    // ── Phase 1: 페이지 끝까지 스크롤 (위치 기반, 횟수 제한 없음) ──
-    logger.log(`[ScrollToLoad] Phase 1: 스크롤 시작 (${behavior} 모드)`, 'DOM:Scroll');
+    // ── Phase 1: 요소 추적 하이브리드 점프 (EBHJ) ────────────────
+    logger.log(`[ScrollToLoad] Phase 1: 고속 점프 시작 (${behavior} 모드)`, 'DOM:Scroll');
 
-    let currentScroll = 0;
-    let maxScroll = iframeDoc.documentElement.scrollHeight - iframeDoc.documentElement.clientHeight;
+    // 범용적인 이미지 컨테이너 탐지 (마나토끼 등 다양한 사이트 구조 대응)
+    const targetSelectors = '.view-padding div img, .viewer-main img, #v_content img, .img-tag';
+    const allImages = Array.from(iframeDoc.querySelectorAll(targetSelectors));
+    
+    if (allImages.length > 0) {
+        // 4개 단위로 샘플링하여 징검다리 점프 수행 (IntersectionObserver rootMargin 활용)
+        const SAMPLE_STEP = 4;
+        const jumpTargets = allImages.filter((_, idx) => idx % SAMPLE_STEP === 0);
+        
+        // 마지막 이미지는 무조건 포함
+        if (allImages.length % SAMPLE_STEP !== 1) {
+            jumpTargets.push(allImages[allImages.length - 1]);
+        }
 
-    while (currentScroll < maxScroll) {
-        currentScroll += scrollStep;
-        win.scrollTo({ top: currentScroll, behavior });
-        await sleep(scrollInterval);
-
-        // 동적으로 늘어나는 페이지 높이 반영
-        maxScroll = iframeDoc.documentElement.scrollHeight - iframeDoc.documentElement.clientHeight;
-
-        // 백그라운드 탭: scroll 이벤트 강제 발화
-        if (isHidden) win.dispatchEvent(new Event('scroll'));
+        for (let i = 0; i < jumpTargets.length; i++) {
+            const target = jumpTargets[i];
+            target.scrollIntoView({ behavior, block: 'center' });
+            
+            // 전역 스크롤 이벤트 발화 (일부 사이트용)
+            if (isHidden) win.dispatchEvent(new Event('scroll'));
+            
+            logger.log(`[EBHJ] 점프 중... (${i + 1}/${jumpTargets.length})`, 'DOM:Jump');
+            await sleep(scrollInterval);
+        }
+    } else {
+        logger.warn('[EBHJ] 화면 내 이미지 요소를 찾을 수 없어 물리 스크롤 모드로 전환합니다.', 'DOM:Scroll');
     }
 
-    logger.log('[ScrollToLoad] Phase 1 완료 (페이지 끝 도달). Phase 2: 이미지 활성화 대기...', 'DOM:Scroll');
+    // Hybrid Fallback: 마지막에 문서를 바닥으로 내려꽂아 무한 스크롤 및 지연 로직 강제 기상
+    win.scrollTo({ top: iframeDoc.documentElement.scrollHeight, behavior });
+    if (isHidden) win.dispatchEvent(new Event('scroll'));
+    await sleep(scrollInterval * 2);
+
+    logger.log('[ScrollToLoad] Phase 1 완료 (요소 점프 및 바닥 도달). Phase 2: 이미지 활성화 대기...', 'DOM:Scroll');
 
     // ── Phase 2: lazy 이미지가 모두 실제 URL로 바뀔 때까지 폴링 ────
     const isDummySrc = (src) => {
@@ -274,7 +296,7 @@ export async function scrollToLoad(iframeDoc, stallTimeoutMs = 20000) {
 }
 
 // Pause execution until user resolves captcha
-function pauseForCaptcha(iframe) {
+function pauseForCaptcha(targetUrl) {
     return new Promise((resumeCallback) => {
         // Create full-screen overlay
         const overlay = document.createElement('div');
@@ -288,48 +310,47 @@ function pauseForCaptcha(iframe) {
         
         overlay.innerHTML = `
             <h1 style="font-size: 32px; margin-bottom: 20px;">⚠️ 캡차 감지</h1>
-            <p style="font-size: 18px; margin-bottom: 30px;">아래 iframe에서 캡차를 해결해주세요.</p>
+            <p style="font-size: 18px; margin-bottom: 30px;">아래 프레임에서 캡차를 해결해주세요. (전용 프레임 모드)</p>
             <div style="width: 80%; height: 60%; background: white; border-radius: 10px; overflow: hidden; margin-bottom: 20px;" id="toki-captcha-frame-container"></div>
             <button id="toki-resume-btn" style="padding: 15px 40px; font-size: 18px; background: #4CAF50; color: white; border: none; border-radius: 8px; cursor: pointer;">
-                재개하기
+                해결 후 재개하기
             </button>
         `;
         
         document.body.appendChild(overlay);
         
-        // Move iframe to overlay for visibility
+        // 캡차 조작 전용 신규 프레임 띄우기 (다운로드용 프레임의 간섭 방지)
+        const captchaIframe = document.createElement('iframe');
+        captchaIframe.src = targetUrl;
+        captchaIframe.style.width = '100%';
+        captchaIframe.style.height = '100%';
+        captchaIframe.style.border = 'none';
+        
         const container = document.getElementById('toki-captcha-frame-container');
-        if (container && iframe) {
-            // Reset hidden styles from downloader.js
-            iframe.style.position = 'static';
-            iframe.style.top = '0';
-            iframe.style.width = '100%';
-            iframe.style.height = '100%';
-            iframe.style.border = 'none';
-            container.appendChild(iframe);
-            
-            // Auto-scroll to captcha field and focus input
+        if (container) {
+            container.appendChild(captchaIframe);
+        }
+
+        captchaIframe.onload = () => {
             try {
-                const iframeDoc = iframe.contentWindow.document;
+                const iframeDoc = captchaIframe.contentWindow.document;
                 const captchaField = iframeDoc.querySelector('fieldset#captcha, fieldset.captcha, .captcha_box');
                 if (captchaField) {
                     captchaField.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 }
-                
-                // Auto-focus on captcha input
                 const captchaInput = iframeDoc.querySelector('#captcha_key, input.captcha_box');
                 if (captchaInput) {
                     setTimeout(() => captchaInput.focus(), 300);
                 }
             } catch (e) {
-                console.warn('[Captcha] Auto-scroll/focus failed:', e.message);
+                console.warn('[Captcha] Auto-scroll/focus failed (May be CORS):', e.message);
             }
-        }
+        };
         
         // Periodic check for captcha resolution (auto-resume)
         const checkInterval = setInterval(() => {
             try {
-                const iframeDoc = iframe.contentWindow.document;
+                const iframeDoc = captchaIframe.contentWindow.document;
                 
                 // Check if captcha fields still exist
                 const captchaFieldset = iframeDoc.querySelector('fieldset#captcha, fieldset.captcha');
@@ -345,33 +366,23 @@ function pauseForCaptcha(iframe) {
                 if (!hasCaptcha) {
                     console.log('[Captcha] 자동 감지: 캡차 해결됨!');
                     clearInterval(checkInterval);
-                    restoreIframeAndResume();
+                    overlay.remove();
+                    resumeCallback();
                 }
             } catch (e) {
                 // CORS error or iframe changed - likely resolved
-                console.log('[Captcha] 자동 감지: iframe 변경 감지 (해결됨으로 추정)');
+                console.log('[Captcha] 자동 감지: 상위 프레임 권한 막힘 또는 리다이렉트 발생 (해결됨으로 추정)');
                 clearInterval(checkInterval);
-                restoreIframeAndResume();
+                overlay.remove();
+                resumeCallback();
             }
         }, 1000); // Check every 1 second
-        
-        // Helper function to restore iframe and resume
-        function restoreIframeAndResume() {
-            // Move iframe back to body BEFORE removing overlay
-            if (iframe && iframe.parentNode) {
-                document.body.appendChild(iframe);
-                iframe.style.position = 'fixed';
-                iframe.style.top = '-9999px';
-                iframe.style.display = 'none';
-            }
-            overlay.remove();
-            resumeCallback();
-        }
         
         // Resume button (manual override)
         document.getElementById('toki-resume-btn').onclick = () => {
             clearInterval(checkInterval);
-            restoreIframeAndResume();
+            overlay.remove();
+            resumeCallback();
         };
     });
 }

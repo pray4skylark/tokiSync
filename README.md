@@ -1,15 +1,15 @@
-# ⚡️ TokiSync (토끼싱크) v1.7.3
+# ⚡️ TokiSync (토끼싱크) v1.7.4
 
 **북토끼, 뉴토끼, 마나토끼**의 콘텐츠를 **구글 드라이브로 직접 업로드**하고, **전용 웹 뷰어**를 통해 편리하게 관리/열람할 수 있는 올인원 솔루션입니다.
 
-> **🚀 v1.7.3 업데이트:**
-> **보안 및 안정화**: 랜덤 속성명 동적 탐지(LazyKey), 하이브리드 컨테이너 선별, **Native 다운로드 확장자 변조 방지**, 가상 스크롤(Virtual Scroll) 안정화 버전.
+> **🚀 v1.7.4 업데이트 (Consolidated):**
+> **성능 및 예외 처리 고도화**: 다운로드 히스토리 조회 타임아웃 페일세이프(Pinpoint Check), 뷰어 사전 다운로드(Preload) 기능 복구 및 레이스 컨디션 방어, 썸네일 파싱 로직 다각화(Fallback), 엔진 전반의 로직 안정화.
 
 ---
 
 ## ✨ 주요 기능
 
-### 📥 수집기 (UserScript) - v1.7.3
+### 📥 수집기 (UserScript) - v1.7.4
 
 - **📱 통합 메뉴 모달**: `Ctrl+Shift+T` 또는 우측 하단 버튼으로 모든 기능을 한 곳에서 제어.
 - **🚀 Direct Drive Access**: GAS 서버의 병목 없이 **구글 드라이브 API로 직접 데이터를 전송**합니다.
@@ -32,7 +32,7 @@
 - **🔒 API Key 보안**: 전체 API 인증 강제.
 - **📦 대용량 Resumable Upload**: 5GB+ 파일 지원.
 
-### 📊 뷰어 2.0 (Cinematic & Performance) - v1.7.3
+### 📊 뷰어 2.0 (Cinematic & Performance) - v1.7.4
 
 - **🎥 Cinematic Experience**: 글래스모피즘 UI와 몰입형 에피소드 상세 페이지 제공.
 - **🚀 High-Performance Engine**: **Virtual Scroll** 도입으로 수백 장의 고해상도 이미지도 끊김 없이 렌더링.

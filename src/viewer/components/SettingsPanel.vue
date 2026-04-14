@@ -12,7 +12,7 @@
           <div class="px-8 py-6 border-b border-white/5 flex justify-between items-center bg-black/20">
             <div class="flex items-center space-x-3">
               <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-sm">⚙️</div>
-              <h2 class="text-xl font-black tracking-tight text-theme-text uppercase italic">Settings <span class="text-blue-500 font-normal not-italic ml-2 opacity-50 text-sm tracking-widest uppercase">v1.7.1</span></h2>
+              <h2 class="text-xl font-black tracking-tight text-theme-text uppercase italic">Settings <span class="text-blue-500 font-normal not-italic ml-2 opacity-50 text-sm tracking-widest uppercase">v1.7.4</span></h2>
             </div>
             <button @click="showSettings = false" class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 text-theme-muted transition-colors">
               <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path></svg>
@@ -91,7 +91,7 @@
                   </label>
 
                   <div class="col-span-1 md:col-span-2 border-t border-white/5 my-2"></div>
-                  <div class="col-span-1 md:col-span-2 text-[9px] font-black text-theme-accent uppercase tracking-widest ml-1 mb-2">v1.7.0 Turbo Engine</div>
+                  <div class="col-span-1 md:col-span-2 text-[9px] font-black text-theme-accent uppercase tracking-widest ml-1 mb-2">v1.7.4 Turbo Engine</div>
 
                   <label class="setting-toggle border-theme-accent/20 hover:border-theme-accent/50">
                     <div class="flex flex-col">
@@ -107,6 +107,14 @@
                       <span class="text-[9px] text-theme-muted uppercase opacity-70">대용량 이미지 렌더링 최적화</span>
                     </div>
                     <input type="checkbox" v-model="viewerDefaults.virtualScroll" class="setting-checkbox accent-theme-accent">
+                  </label>
+
+                  <label class="setting-toggle border-theme-accent/20 hover:border-theme-accent/50">
+                    <div class="flex flex-col">
+                      <span class="text-[11px] font-black text-theme-accent uppercase tracking-tighter">Background Preload</span>
+                      <span class="text-[9px] text-theme-muted uppercase opacity-70">다음 화 백그라운드 사전 다운로드</span>
+                    </div>
+                    <input type="checkbox" v-model="viewerDefaults.preloadNext" class="setting-checkbox accent-theme-accent">
                   </label>
                 </div>
               </div>

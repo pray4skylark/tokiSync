@@ -489,33 +489,35 @@ export async function uploadDirect(blob, folderName, fileName, metadata = {}) {
 export const getOAuthToken = getToken;
 
 /**
- * [v1.8.0] Direct History Fetch with Size Heuristic
+ * [v1.7.4] Direct History Fetch with Size Heuristic
  * Bypasses GAS relay and directly queries the Google Drive API for the series folder.
  * Automatically filters out corrupted/incomplete files using the `(Max + Min) / 2 * 0.5` heuristic.
  * 
  * @param {string} seriesTitle 
  * @param {string} category 
- * @returns {Promise<string[]>} Array of valid episode IDs (e.g. "0001", "0002")
+ * @returns {Promise<{success: boolean, folderId: string|null, data: string[]}>} Object with valid episode IDs
  */
 export async function fetchHistoryDirect(seriesTitle, category = 'Webtoon') {
     const logger = LogBox.getInstance();
     const config = getConfig();
-    if (!config.folderId) return [];
+    if (!config.folderId) return { success: false, folderId: null, data: [] };
+
+    let currentSeriesFolderId = null;
 
     try {
         console.log(`[DirectHistory] Fetching history for: ${seriesTitle} (${category})`);
         const token = await getToken();
         
         // Find the Series Folder ID
-        const seriesFolderId = await getOrCreateFolder(seriesTitle, config.folderId, token, category);
+        currentSeriesFolderId = await getOrCreateFolder(seriesTitle, config.folderId, token, category);
         
-        if (!seriesFolderId) {
+        if (!currentSeriesFolderId) {
             console.log(`[DirectHistory] Series folder not found or created.`);
-            return [];
+            return { success: true, folderId: null, data: [] };
         }
 
         const searchUrl = `https://www.googleapis.com/drive/v3/files?` +
-            `q='${seriesFolderId}' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'` +
+            `q='${currentSeriesFolderId}' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'` +
             `&fields=files(id,name,size)` +
             `&pageSize=1000`;
             
@@ -536,7 +538,7 @@ export async function fetchHistoryDirect(seriesTitle, category = 'Webtoon') {
 
         if (!result.files || result.files.length === 0) {
             console.log(`[DirectHistory] No files found in folder.`);
-            return [];
+            return { success: true, folderId: currentSeriesFolderId, data: [] };
         }
 
         const fileInfos = [];
@@ -562,7 +564,7 @@ export async function fetchHistoryDirect(seriesTitle, category = 'Webtoon') {
             });
         });
 
-        if (fileInfos.length === 0) return [];
+        if (fileInfos.length === 0) return { success: true, folderId: currentSeriesFolderId, data: [] };
 
         let threshold = 0;
         if (maxSize > 0 && fileInfos.length > 1) {
@@ -587,12 +589,70 @@ export async function fetchHistoryDirect(seriesTitle, category = 'Webtoon') {
         }
 
         console.log(`[DirectHistory] Final valid episodes: ${validEpisodes.length}`);
-        return [...new Set(validEpisodes)].sort((a,b) => parseInt(a) - parseInt(b));
+        return { 
+            success: true, 
+            folderId: currentSeriesFolderId, 
+            data: [...new Set(validEpisodes)].sort((a,b) => parseInt(a) - parseInt(b))
+        };
 
     } catch (err) {
         console.error(`[DirectHistory] Failed:`, err);
-        logger.warn(`기록 직접 조회 실패: ${err.message}`, 'Network:History');
-        return [];
+        logger.warn(`기록 전체 조회 실패(플래그 활성화됨): ${err.message}`, 'Network:History');
+        return { success: false, folderId: currentSeriesFolderId, data: [] };
     }
+}
+
+/**
+ * [v1.7.4] Targeted Single Episode Check
+ * Used as a fallback when fetchHistoryDirect fails (e.g. timeout on huge folders).
+ * 
+ * @param {string} folderId 
+ * @param {string} episodeNumStr 
+ * @returns {Promise<boolean>} True if the episode file already exists
+ */
+export async function checkSingleHistoryDirect(folderId, episodeNumStr) {
+    if (!folderId) return false;
+    
+    try {
+        const token = await getToken();
+        // Since we don't know the full exact title, we query for the number.
+        // Google Drive API tokenizes queries, so querying for the number works.
+        const query = `name contains '${episodeNumStr}'`;
+        
+        const searchUrl = `https://www.googleapis.com/drive/v3/files?` +
+            `q=${encodeURIComponent(query)} and '${folderId}' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'` +
+            `&fields=files(id,size,name)` +
+            `&pageSize=10`; // Safe margin if multiple files contain the number
+            
+        const result = await new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url: searchUrl,
+                headers: { 'Authorization': `Bearer ${token}` },
+                timeout: 5000,
+                onload: (res) => {
+                    try { resolve(JSON.parse(res.responseText)); } 
+                    catch (e) { reject(e); }
+                },
+                onerror: reject,
+                ontimeout: () => reject(new Error('Timeout'))
+            });
+        });
+
+        if (result.files && result.files.length > 0) {
+            // Strict filter clientside: filename must start with the exact episode number.
+            // Because 'name contains 1' might also match '10', '11' or other text.
+            const file = result.files.find(f => {
+                const match = f.name.match(/^(\d+)/);
+                return match && parseInt(match[1], 10) === parseInt(episodeNumStr, 10);
+            });
+            if (file && parseInt(file.size || "0", 10) > 1000) { // arbitrary small size check (1KB)
+                return true;
+            }
+        }
+    } catch (e) {
+        console.warn(`[SingleCheck] Error checking ${episodeNumStr}:`, e);
+    }
+    return false;
 }
 

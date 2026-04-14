@@ -7,7 +7,7 @@ import { LogBox, Notifier } from './ui.js';
 import { getConfig } from './config.js';
 import { startSilentAudio, stopSilentAudio } from './anti_sleep.js';
 import { fetchHistory, refreshCacheAfterUpload, getBooksByCacheId, initUpdateUploadViaGASRelay, getMergeIndexFragment } from './gas.js';
-import { fetchHistoryDirect } from './network.js';
+import { fetchHistoryDirect, checkSingleHistoryDirect } from './network.js';
 
 // Sleep Policy Presets
 const SLEEP_POLICIES = {
@@ -286,26 +286,36 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
         // [v1.6.0 Fast Path] Pre-load episode cache
         let episodeCacheMap = new Map(); // key: "0001 - Title", value: "fileId"
 
+        let historyCheckTimeoutFlag = false;
+        let historyFolderId = null;
+
         if (destination === 'drive') {
             try {
                 if (forceOverwrite) {
                     logger.log('⚠️ 강제 재다운로드 옵션 활성화: 기존 업로드 기록 무시 (전체 덮어쓰기)');
                 } else {
                     logger.log('☁️ 드라이브 업로드 기록 및 용량 확인 중 (Smart Skip)...');
-                    const history = await fetchHistoryDirect(rootFolder, category);
-                    // Normalize: accept padded ("0001") and plain ("1") forms
-                    history.forEach(id => {
-                        const plain = parseInt(id).toString();
-                        uploadedHistorySet.add(id.toString());   // e.g. "0001"
-                        uploadedHistorySet.add(plain);           // e.g. "1"
-                    });
-                    if (uploadedHistorySet.size > 0) {
-                        logger.log(`⏭️ 조건 만족(기존 정상 업로드) 에피소드 ${history.length}개 감지 — 건너뜁니다.`);
+                    const histResult = await fetchHistoryDirect(rootFolder, category);
+                    
+                    if (histResult.success) {
+                        // Normalize: accept padded ("0001") and plain ("1") forms
+                        histResult.data.forEach(id => {
+                            const plain = parseInt(id).toString();
+                            uploadedHistorySet.add(id.toString());   // e.g. "0001"
+                            uploadedHistorySet.add(plain);           // e.g. "1"
+                        });
+                        if (uploadedHistorySet.size > 0) {
+                            logger.log(`⏭️ 조건 만족(기존 정상 업로드) 에피소드 ${histResult.data.length}개 감지 — 건너뜁니다.`);
+                        }
+                    } else {
+                        historyCheckTimeoutFlag = true;
+                        historyFolderId = histResult.folderId;
+                        logger.log(`⚠️ 업로드 기록 조회 지연/타임아웃 감지. 개별 스킵(페일세이프) 모드로 전환합니다.`, 'warn');
                     }
                 }
             } catch (histErr) {
-                // Non-fatal: if history check fails, proceed without skipping
-                logger.log(`⚠️ 업로드 기록 조회 실패 (전체 다운로드 진행): ${histErr.message}`, 'warn');
+                // Non-fatal: if history check fails unexpectedly
+                logger.log(`⚠️ 업로드 기록 조회 실패: ${histErr.message}`, 'warn');
             }
 
             // [v1.6.0] Phase B-2: Load Master Index -> Cache File ID -> Episode List
@@ -404,12 +414,22 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
 
             // [v1.5.0 Smart Skip] Skip already-uploaded episodes (Drive policy only)
             // [v1.7.1] Bypass skipping in Single Volume mode (we need all chapters)
-            if (!isSingleVolume && destination === 'drive' && uploadedHistorySet.size > 0) {
+            if (!isSingleVolume && destination === 'drive') {
                 const numStr = item.num ? item.num.toString() : '';
                 const numPlain = parseInt(numStr).toString();
-                if (uploadedHistorySet.has(numStr) || uploadedHistorySet.has(numPlain)) {
+                if (uploadedHistorySet.size > 0 && (uploadedHistorySet.has(numStr) || uploadedHistorySet.has(numPlain))) {
                     logger.log(`⏭️ 건너뜀 (이미 업로드됨): ${item.title}`);
                     continue;
+                }
+                
+                // [v1.7.4] 페일세이프: 타임아웃 발생 시 개별 단위 핀셋 조회 수행
+                if (historyCheckTimeoutFlag && historyFolderId) {
+                    logger.log(`🔍 [페일세이프] 타임아웃 2차 단일 로컬/원격 검사 중: ${item.title}`);
+                    const isUploaded = await checkSingleHistoryDirect(historyFolderId, numStr);
+                    if (isUploaded) {
+                        logger.log(`⏭️ [페일세이프 재검사] 건너뜀 (이미 업로드됨): ${item.title}`);
+                        continue;
+                    }
                 }
             }
 
