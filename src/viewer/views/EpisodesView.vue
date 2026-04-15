@@ -136,8 +136,30 @@
                   <p class="text-[11px] font-medium">
                     {{ formatDate(ep.createdTime) }}
                     <span v-if="ep.size"> · {{ formatSize(ep.size) }}</span>
+                    <!-- 캐시 상태 표시 -->
+                    <span v-if="cacheMap[ep.id]" class="ml-2 text-green-500 font-bold flex items-center">
+                      <svg class="w-3 h-3 mr-0.5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293l-4 4a1 1 0 01-1.414 0l-2-2a1 1 0 111.414-1.414L9 10.586l3.293-3.293a1 1 0 111.414 1.414z"/></svg>
+                      Cached
+                    </span>
                   </p>
                 </div>
+              </div>
+
+              <!-- 다운로드 버튼 / 상태 -->
+              <div class="flex items-center space-x-3 ml-4">
+                <div v-if="getStatus(ep.id)" class="text-[10px] font-black ep-text-accent uppercase tracking-tighter w-12 text-center">
+                  <span v-if="getStatus(ep.id).status === 'downloading'">{{ getStatus(ep.id).progress }}%</span>
+                  <span v-else-if="getStatus(ep.id).status === 'completed'" class="text-green-500">DONE</span>
+                  <span v-else-if="getStatus(ep.id).status === 'failed'" class="text-red-500">ERR</span>
+                </div>
+                <button 
+                  v-else-if="!cacheMap[ep.id]"
+                  @click.stop="handleDownload(ep)"
+                  class="w-9 h-9 flex items-center justify-center rounded-full hover:bg-theme-surface-hover text-theme-muted hover:text-theme-accent transition-all"
+                  title="오프라인 캐시 다운로드"
+                >
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                </button>
               </div>
 
               <!-- 읽음 체크: 레퍼런스 opacity-80 스타일 -->
@@ -162,15 +184,31 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
 import { useStore } from '../composables/useStore';
+import { useDownloadManager } from '../composables/useDownloadManager.js';
 
 const {
   selectedItem, episodes, isSyncing,
   startReading, refreshEpisodes,
   getThumbnailUrl, formatSize, NO_IMAGE_SVG,
-  lastReadEpisode,
+  lastReadEpisode, viewerDefaults
 } = useStore();
+
+const { startDownload, getStatus, isCached } = useDownloadManager();
+
+// 캐시 상태 추적용 (fileId -> boolean)
+const cacheMap = ref({});
+
+async function updateCacheStatus() {
+  for (const ep of episodes.value) {
+    cacheMap.value[ep.id] = await isCached(ep.id);
+  }
+}
+
+// 초기 로드 및 에피소드 목록 변경 시 캐시 상태 갱신
+onMounted(updateCacheStatus);
+watch(episodes, updateCacheStatus, { deep: true });
 
 // 정렬 상태 (localStorage 연동)
 const sortOrder = ref(localStorage.getItem('TOKI_EP_SORT') || 'asc');
@@ -181,6 +219,11 @@ const sortedEpisodes = computed(() => {
   const arr = [...episodes.value];
   return sortOrder.value === 'asc' ? arr : arr.reverse();
 });
+
+// 다운로드 처리
+function handleDownload(ep) {
+  startDownload(ep, viewerDefaults.downloadThreads);
+}
 
 function getFileIcon(ep) {
   const name = (ep.name || '').toLowerCase();

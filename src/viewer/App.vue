@@ -8,6 +8,7 @@
     <transition name="fade" mode="out-in">
       <LibraryView v-if="currentView === 'library'" key="library" />
       <EpisodesView v-else-if="currentView === 'episodes'" key="episodes" />
+      <DownloadManagerView v-else-if="currentView === 'downloads'" key="downloads" />
       <ReaderView v-else-if="currentView === 'viewer'" key="viewer" />
     </transition>
 
@@ -31,6 +32,7 @@ import NotificationToast from './components/NotificationToast.vue';
 import LibraryView from './views/LibraryView.vue';
 import EpisodesView from './views/EpisodesView.vue';
 import ReaderView from './views/ReaderView.vue';
+import DownloadManagerView from './views/DownloadManagerView.vue';
 
 const { currentView, initApp } = useStore();
 

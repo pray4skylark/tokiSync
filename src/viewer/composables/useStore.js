@@ -19,7 +19,10 @@ function isStale(cachedAt, ttl) {
 // --- Sub-Composables ---
 const { isConnected, initBridge, bridgeFetch } = useBridge();
 const { gasConfig, setConfig, isConfigured, getLibrary, getBooks, getReadHistory, saveReadHistory } = useGAS();
-const { downloadProgress, isDownloading, fetchAndUnzip, preloadEpisode, cleanupBlobUrls, formatSize } = useFetcher();
+const { 
+  downloadProgress, isDownloading, isPreloading, 
+  fetchAndUnzip, preloadEpisode, cleanupBlobUrls, formatSize, cancelViewerDownload 
+} = useFetcher();
 
 // --- Singleton State ---
 const currentView = ref('library');
@@ -542,7 +545,13 @@ const startReading = async (ep) => {
 
   // Fetch and unzip the file
   try {
-    const result = await fetchAndUnzip(ep.id, ep.size || 0);
+    const result = await fetchAndUnzip(
+      ep.id, 
+      ep.size || 0, 
+      viewerDefaults.downloadThreads, 
+      selectedItem.value?.id || ''
+    );
+    if (!result) return; // Cancelled
     viewerContent.value = result;
 
     // If text EPUB, switch to appropriate mode
@@ -559,7 +568,12 @@ const startReading = async (ep) => {
     if (viewerDefaults.preloadNext && hasNextEpisode.value) {
       const nextEp = episodes.value[currentEpisodeIndex.value + 1];
       if (nextEp) {
-        preloadEpisode(nextEp.id, nextEp.size || 0).catch(err => {
+        preloadEpisode(
+          nextEp.id, 
+          nextEp.size || 0, 
+          viewerDefaults.downloadThreads, 
+          selectedItem.value?.id || ''
+        ).catch(err => {
           console.warn("[Preload] Failed:", err);
         });
       }
@@ -590,6 +604,7 @@ const goToPrevEpisode = () => {
 };
 
 const exitViewer = () => {
+  cancelViewerDownload(); // [v1.7.5] 시청 종료 시 뷰어 다운로드 + 프리로드 즉시 중단
   cleanupBlobUrls();
   viewerContent.value = null;
   currentView.value = 'episodes';
@@ -802,6 +817,6 @@ export function useStore() {
     goToNextEpisode, goToPrevEpisode,
     toggleViewerUI, setViewerMode,
     handleWheel, handleNext, handlePrev, onScrollUpdate,
-    deleteItem, reloadApp,
+    deleteItem, reloadApp, cancelViewerDownload,
   };
 }

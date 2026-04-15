@@ -26,3 +26,12 @@ db.version(5).stores({
   imageMeta: '[seriesId+episodeId+index], bounds',
   episodeData: 'fileId, cachedAt' // [v1.7.4] Persistent Content Cache
 });
+
+db.version(6).stores({
+  library: '++id, title, type, fileId, progress',
+  readHistory: 'episodeId, seriesId, lastReadAt',
+  libraryCache: 'id',
+  episodeCache: '[seriesId+id], seriesId, id, cachedAt', 
+  imageMeta: '[seriesId+episodeId+index], bounds',
+  episodeData: 'fileId, seriesId, cachedAt'
+});

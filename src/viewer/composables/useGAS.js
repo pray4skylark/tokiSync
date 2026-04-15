@@ -85,7 +85,7 @@ function getBaseUrl() {
  * @param {object} payload - Additional data
  * @returns {Promise<any>} Response body
  */
-async function request(type, payload = {}) {
+async function request(type, payload = {}, signal = null) {
   const baseUrl = getBaseUrl();
   if (!baseUrl) throw new Error('API ID가 설정되지 않았습니다.');
 
@@ -98,14 +98,17 @@ async function request(type, payload = {}) {
   };
 
   try {
-    // text/plain to avoid CORS preflight with GAS
-    const response = await fetch(baseUrl, {
+    const fetchOptions = {
       method: 'POST',
       headers: {
         'Content-Type': 'text/plain;charset=utf-8',
       },
       body: JSON.stringify(bodyData),
-    });
+    };
+
+    if (signal) fetchOptions.signal = signal;
+
+    const response = await fetch(baseUrl, fetchOptions);
 
     if (!response.ok) {
       throw new Error(`HTTP Error: ${response.status}`);
@@ -192,8 +195,8 @@ async function getBooks(seriesId, bypassCache = false) {
  * @param {number} length - Chunk length
  * @returns {Promise<Object>} { data (base64), nextOffset, hasMore, totalSize }
  */
-async function getChunk(fileId, offset, length) {
-  return await request('view_get_chunk', { fileId, offset, length });
+async function getChunk(fileId, offset, length, signal = null) {
+  return await request('view_get_chunk', { fileId, offset, length }, signal);
 }
 
 

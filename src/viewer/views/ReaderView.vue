@@ -5,7 +5,10 @@
     <transition name="fade">
       <div v-if="isDownloading" class="fixed inset-0 z-[200] bg-black/90 flex flex-col items-center justify-center text-white">
         <div class="w-16 h-16 border-4 border-zinc-800 border-t-blue-500 rounded-full animate-spin mb-8"></div>
-        <p class="text-sm font-bold text-zinc-400 tracking-wider uppercase">{{ downloadProgress || '준비 중...' }}</p>
+        <p class="text-sm font-bold text-zinc-400 tracking-wider uppercase mb-8">{{ downloadProgress || '준비 중...' }}</p>
+        <button @click="exitViewer" class="px-8 py-3 bg-red-500/20 hover:bg-red-500/40 text-red-500 border border-red-500/50 rounded-2xl text-sm font-black transition-all uppercase tracking-widest">
+          취소하고 나가기
+        </button>
       </div>
     </transition>
 
