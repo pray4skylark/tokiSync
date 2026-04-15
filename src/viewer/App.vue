@@ -8,11 +8,11 @@
     <transition name="fade" mode="out-in">
       <LibraryView v-if="currentView === 'library'" key="library" />
       <EpisodesView v-else-if="currentView === 'episodes'" key="episodes" />
-      <DownloadManagerView v-else-if="currentView === 'downloads'" key="downloads" />
       <ReaderView v-else-if="currentView === 'viewer'" key="viewer" />
     </transition>
 
     <!-- Global Modals -->
+    <DownloadManagerView />
     <EpisodeListModal />
     <NotificationToast />
   </div>

@@ -120,8 +120,8 @@ export function useDownloadManager() {
    * 특정 에피소드가 IndexedDB에 캐시되어 있는지 확인
    */
   async function isCached(fileId) {
-    const count = await db.episodeData.where('fileId').equals(fileId).count();
-    return count > 0;
+    const record = await db.episodeData.get(fileId);
+    return !!record;
   }
 
   return {

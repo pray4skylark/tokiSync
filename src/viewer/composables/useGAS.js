@@ -76,6 +76,12 @@ function isConfigured() {
  */
 function getBaseUrl() {
   if (!gasConfig.gasId) return '';
+  
+  // [v1.7.5] 로컬 개발(DEV) 환경일 때만 Vite 프록시 경로 사용 (CORS 에러 방지)
+  if (import.meta.env.DEV) {
+    return `/api/gas/macros/s/${gasConfig.gasId}/exec`;
+  }
+
   return `https://script.google.com/macros/s/${gasConfig.gasId}/exec`;
 }
 

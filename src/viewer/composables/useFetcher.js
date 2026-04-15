@@ -188,6 +188,7 @@ async function fetchAndUnzip(fileId, totalSize, downloadThreads = 2, seriesId = 
     } 
 
     if (!combinedBytes) {
+      if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
       combinedBytes = await loadFromPersistentCache(fileId);
     }
 
@@ -200,12 +201,14 @@ async function fetchAndUnzip(fileId, totalSize, downloadThreads = 2, seriesId = 
         combinedBytes = await fetchConcurrent(fileId, totalSize, getChunk, downloadThreads, false, signal);
       }
 
-      if (combinedBytes && !_cancelRequested) {
+      if (combinedBytes && !signal.aborted) {
         saveToPersistentCache(fileId, combinedBytes, seriesId);
       }
     }
 
-    if (_cancelRequested) throw new DOMException('Aborted', 'AbortError');
+    if (signal.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
+    }
 
     if (combinedBytes) {
       if (fileId === preloadedFileId || fileId === preloadTargetFileId) {

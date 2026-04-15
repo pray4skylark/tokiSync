@@ -33,6 +33,14 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 3000,
       open: true,
+      proxy: {
+        // [v1.7.5] 로컬 CORS 이슈 해결을 위한 GAS 프록시 설정
+        '/api/gas': {
+          target: 'https://script.google.com',
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/api\/gas/, '')
+        }
+      }
     },
 
     resolve: {

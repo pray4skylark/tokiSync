@@ -23,9 +23,8 @@
         <span class="text-base leading-none">{{ appTheme === 'dark' ? '☀️' : '🌙' }}</span>
       </button>
       <button 
-        @click="currentView = 'downloads'" 
+        @click="showDownloadManager = true" 
         class="w-9 h-9 flex items-center justify-center text-theme-sub hover:text-theme-text transition-colors rounded-full hover:bg-theme-surface-hover"
-        :class="{'text-theme-text': currentView === 'downloads'}"
         title="다운로드 관리자"
       >
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
@@ -38,5 +37,5 @@
 
 <script setup>
 import { useStore } from '../composables/useStore';
-const { currentView, showSettings, isAddModalOpen, isSyncing, goBackToLibrary, reloadApp, appTheme, toggleTheme } = useStore();
+const { currentView, showSettings, showDownloadManager, isAddModalOpen, isSyncing, goBackToLibrary, reloadApp, appTheme, toggleTheme } = useStore();
 </script>

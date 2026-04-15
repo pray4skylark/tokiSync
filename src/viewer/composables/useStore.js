@@ -27,7 +27,9 @@ const {
 // --- Singleton State ---
 const currentView = ref('library');
 const showSettings = ref(false);
+const showDownloadManager = ref(false);
 const showViewerControls = ref(false);
+const isAddModalOpen = ref(false);
 
 const showEpisodeModal = ref(false);
 const isInitialLoading = ref(true);
@@ -769,6 +771,7 @@ export function useStore() {
   return {
     // UI State
     currentView, showSettings, showViewerControls, showEpisodeModal,
+    showDownloadManager, isAddModalOpen,
     isInitialLoading, isSyncing, notification,
 
     // Config & Settings
