@@ -32,12 +32,15 @@
 - **🔒 API Key 보안**: 전체 API 인증 강제.
 - **📦 대용량 Resumable Upload**: 5GB+ 파일 지원.
 
-### 📊 뷰어 2.0 (Cinematic & Performance) - v1.7.4
+### 📊 뷰어 2.0 (Cinematic & Performance) - v1.7.5
 
 - **🎥 Cinematic Experience**: 글래스모피즘 UI와 몰입형 에피소드 상세 페이지 제공.
+- **🚀 Download Manager (New)**: 전체 다운로드 대기열 관리 및 실시간 진행 상황을 한 눈에 확인하는 전용 UI.
+- **🛡️ Network Isolation**: 뷰어 종료와 무관하게 백그라운드에서 지속되는 독립적 다운로드 엔진 탑재.
 - **🚀 High-Performance Engine**: **Virtual Scroll** 및 **6분할 병렬 다운로드** 도입으로 대용량 이미지도 끊김 없이 로딩.
 - **✂️ Auto-Crop**: 지능형 여백 제거 및 2쪽 보기(Double Spread) 지원.
-- **📱 영구 캐시 시스템 (L2)**: IndexedDB를 활용하여 다운로드된 바이너리 데이터를 영구 저장하고, 설정 메뉴에서 가변 병렬도(스레드 1-3) 조절 가능.
+- **📱 영구 캐시 및 LRU (L2)**: IndexedDB를 활용하여 데이터를 영구 저장하며, 최신 열람 순서(LRU)에 따라 자동으로 저장 공간을 관리하는 가비지 컬렉션(GC) 지원.
+
 
 ---
 
