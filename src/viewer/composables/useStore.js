@@ -97,6 +97,7 @@ const currentEpisode = ref(null);
 const currentPage = ref(1);
 const scrollProgress = ref(0);
 const isScrollSyncing = ref(false);
+const isPreloadTriggered = ref(false); // [v1.7.5-fix] 프리로드 제어용
 
 // Episode list (fetched from GAS)
 const episodes = ref([]);
@@ -566,20 +567,8 @@ const startReading = async (ep) => {
       buildPageSlots();
     }
 
-    // [v1.7.4] Preload Next Episode Background Task
-    if (viewerDefaults.preloadNext && hasNextEpisode.value) {
-      const nextEp = episodes.value[currentEpisodeIndex.value + 1];
-      if (nextEp) {
-        preloadEpisode(
-          nextEp.id, 
-          nextEp.size || 0, 
-          viewerDefaults.downloadThreads, 
-          selectedItem.value?.id || ''
-        ).catch(err => {
-          console.warn("[Preload] Failed:", err);
-        });
-      }
-    }
+    // [v1.7.5-fix] 즉시 프리로드 제거 (사용자가 50% 읽었을 때로 지연)
+    isPreloadTriggered.value = false;
   } catch (e) {
     console.error('Fetch Error:', e);
     notify(`❌ 콘텐츠 로드 실패: ${e.message}`);
@@ -652,7 +641,23 @@ const onScrollUpdate = () => {
   isScrollSyncing.value = true;
   const total = totalPages.value;
   currentPage.value = Math.max(1, Math.min(total, Math.round(pct * (total - 1)) + 1));
-  Promise.resolve().then(() => { isScrollSyncing.value = false; });
+  
+  // [v1.7.5-fix] 스마트 프리로드: 50% 이상 읽었을 때 딱 한 번만 다음 화 가져오기
+  if (pct >= 0.5 && !isPreloadTriggered.value && viewerDefaults.preloadNext && hasNextEpisode.value) {
+    const nextEp = episodes.value[currentEpisodeIndex.value + 1];
+    if (nextEp) {
+      isPreloadTriggered.value = true;
+      console.log(`%c[Preload] Triggered at ${Math.round(pct*100)}%`, 'color: #8b5cf6; font-weight: bold;');
+      preloadEpisode(
+        nextEp.id, nextEp.size || 0, 
+        viewerDefaults.downloadThreads, 
+        selectedItem.value?.id || ''
+      ).catch(err => console.warn("[Preload] Failed:", err));
+    }
+  }
+
+  // 약간의 지연 후 잠금 해제하여 브라우저 스크롤 안정화
+  setTimeout(() => { isScrollSyncing.value = false; }, 100);
 };
 
 // 슬라이더(currentPage) 변경 → 스크롤 위치 동기화
@@ -665,7 +670,11 @@ watch(currentPage, (newPage) => {
   if (maxScroll <= 0) return;
   const total = totalPages.value;
   const targetScroll = ((newPage - 1) / Math.max(1, total - 1)) * maxScroll;
-  container.scrollTo({ top: targetScroll, behavior: 'smooth' });
+  
+  // [v1.7.5-fix] 위치 가드: 이미 해당 위치 근처라면 스크롤 건너뛰기 (무한 루프 방지)
+  if (Math.abs(container.scrollTop - targetScroll) < 20) return;
+
+  container.scrollTo({ top: targetScroll, behavior: 'auto' });
 });
 
 const next = () => {

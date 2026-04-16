@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.7.6] - 2026-04-16
+
+### ✨ 뷰어 안정성 및 네트워크 최적화 (Stability & Traffic Control)
+
+- **무한 루프 차단 (Sync Guard Implementation)**: 뷰어 하단 슬라이더(Slider)와 실제 스크롤 위치 간의 무한 동기화 재귀 호출을 근본적으로 해결했습니다.
+    - **Synchronous Sync**: 슬라이더 조작 시 `smooth` 애니메이션 대신 즉시 이동(`auto`)하도록 변경하여 비동기 스크롤 이벤트 폭주를 방지했습니다.
+    - **Position Guard**: 이동하려는 목표 위치가 현재 뷰포트와 임계값(20px) 이내일 경우 스크롤 연산을 건너뛰어 화면 튐 현상을 제거했습니다.
+    - **Locking Refinement**: `isScrollSyncing` 잠금 해제 타이밍을 최적화하여 브라우저의 스크롤 처리와 상태 반영 주기를 안정화했습니다.
+- **스마트 사전 다운로드 (Preload Threshold)**: 다음 화를 미리 가져오는 시점을 지능화하여 네트워크 부하와 GAS 서버 에러(`ERR_HTTP2`)를 해결했습니다.
+    - **50% Trigger**: 에피소드 진입 즉시 다운로드하던 방식에서, 사용자가 본문의 50% 이상을 읽었을 때만 백그라운드 다운로드를 시작하도록 변경했습니다.
+    - **Single-fire Flag**: `isPreloadTriggered` 플래그를 통해 한 에피소드 내에서 사전 다운로드 요청이 단 1회만 발생하도록 보장했습니다.
+
 ## [v1.7.5] - 2026-04-15
 
 ### ✨ 다운로드 매니저 모달화 및 UX 고도화 (Refined Control)
