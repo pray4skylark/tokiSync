@@ -17,12 +17,13 @@ function View_getSeriesList(
 
   // 1. Check Cache (Only if clean start)
   if (!bypassCache && !continuationToken) {
-    const root = DriveApp.getFolderById(folderId);
-    const files = root.getFilesByName(INDEX_FILE_NAME);
+    const files = DriveAccessService.list(folderId, {
+      query: `name = '${INDEX_FILE_NAME}'`,
+      fields: "files(id)"
+    });
 
-    if (files.hasNext()) {
-      const file = files.next();
-      const content = file.getBlob().getDataAsString();
+    if (files.length > 0) {
+      const content = DriveAccessService.getFileContent(files[0].id);
       if (content && content.trim() !== "") {
         try {
           let cachedList = JSON.parse(content);
@@ -48,22 +49,17 @@ function View_getSeriesList(
  * @returns {Array} The updated cached list
  */
 function SweepMergeIndex(folderId, cachedList) {
-    let root;
-    try {
-        root = DriveApp.getFolderById(folderId);
-    } catch (e) {
-        Debug.log(`[SweepMergeIndex] Service Error: Cannot access root folder ${folderId}: ${e.message}`);
-        return null; // Silent abort, try again next cron tick
-    }
-
     let masterList = cachedList;
     
     // If no cachedList provided (e.g., from cron job), try to load it first
     if (!masterList) {
         try {
-            const files = root.getFilesByName(INDEX_FILE_NAME);
-            if (files.hasNext()) {
-                const content = files.next().getBlob().getDataAsString();
+            const results = DriveAccessService.list(folderId, {
+                query: `name = '${INDEX_FILE_NAME}'`,
+                fields: "files(id)"
+            });
+            if (results.length > 0) {
+                const content = DriveAccessService.getFileContent(results[0].id);
                 if (content && content.trim() !== "") {
                     try { masterList = JSON.parse(content); } catch (e) { return null; }
                 }
@@ -77,40 +73,25 @@ function SweepMergeIndex(folderId, cachedList) {
     if (!masterList || !Array.isArray(masterList)) return null;
 
     let hasMerged = false;
-    let mergeFolders;
-    try {
-        mergeFolders = root.getFoldersByName("_MergeIndex");
-    } catch (e) {
-        Debug.log(`[SweepMergeIndex] Service Error accessing _MergeIndex: ${e.message}`);
-        return null;
-    }
+    let mergeFolders = DriveAccessService.list(folderId, {
+        query: "name = '_MergeIndex' and mimeType = 'application/vnd.google-apps.folder'",
+        fields: "files(id)"
+    });
 
-    if (mergeFolders.hasNext()) {
-        const mFolder = mergeFolders.next();
-        let mFiles;
-        try {
-            mFiles = mFolder.getFiles();
-        } catch (e) {
-            Debug.log(`[SweepMergeIndex] Service Error reading files in _MergeIndex: ${e.message}`);
-            return null;
-        }
+    if (mergeFolders.length > 0) {
+        const mFolderId = mergeFolders[0].id;
+        let mFiles = DriveAccessService.list(mFolderId, {
+            fields: "files(id, name)"
+        });
         
-        while (mFiles.hasNext()) {
-            let mFile;
+        mFiles.forEach(mFile => {
             try {
-                mFile = mFiles.next();
-            } catch (e) {
-                Debug.log(`[SweepMergeIndex] Skip corrupted or inaccessible fragment: ${e.message}`);
-                continue;
-            }
-            
-            try {
-                if (mFile.getName().startsWith("_toki_merge_")) {
-                    const fragData = JSON.parse(mFile.getBlob().getDataAsString());
+                if (mFile.name.startsWith("_toki_merge_")) {
+                    const content = DriveAccessService.getFileContent(mFile.id);
+                    const fragData = JSON.parse(content);
                     
                     const targetIndex = masterList.findIndex(s => s.sourceId === fragData.sourceId || s.id === fragData.id);
                     if (targetIndex !== -1) {
-                        // [UPDATE] Existing series — patch fields
                         masterList[targetIndex].cacheFileId = fragData.cacheFileId;
                         if (fragData.itemsCount !== undefined) {
                             masterList[targetIndex].itemsCount = fragData.itemsCount;
@@ -121,8 +102,6 @@ function SweepMergeIndex(folderId, cachedList) {
                         hasMerged = true;
                         Debug.log(`[MergeIndex] Merged fragment into main list: ${fragData.sourceId}`);
                     } else if (fragData.name && fragData.id) {
-                        // [v1.6.2] INSERT — Brand-new series not yet in master index
-                        // Guard against race condition duplicates before pushing
                         const isDuplicate = masterList.some(s => s.sourceId === fragData.sourceId || s.id === fragData.id);
                         if (!isDuplicate) {
                             masterList.push({
@@ -141,12 +120,12 @@ function SweepMergeIndex(folderId, cachedList) {
                             Debug.log(`[MergeIndex] Inserted NEW series into master list: ${fragData.name} (${fragData.sourceId})`);
                         }
                     }
-                    mFile.setTrashed(true);
+                    DriveAccessService.trash(mFile.id);
                 }
             } catch (e) {
-                Debug.log(`[MergeIndex] Failed to process fragment ${mFile.getName()}: ${e}`);
+                Debug.log(`[MergeIndex] Failed to process fragment ${mFile.name}: ${e}`);
             }
-        }
+        });
     }
     
     if (hasMerged) {
@@ -163,7 +142,6 @@ function SweepMergeIndex(folderId, cachedList) {
  * 2. Scan Series Folders using Map (No file scan inside series)
  */
 function View_rebuildLibraryIndex(folderId, continuationToken) {
-  const root = DriveApp.getFolderById(folderId);
   const startTime = new Date().getTime();
   const TIME_LIMIT = 20000; // 20 Seconds
   const seriesList = [];
@@ -181,35 +159,34 @@ function View_rebuildLibraryIndex(folderId, continuationToken) {
   // Phase 0: Plan Targets & Build Thumbnail Map (Only on first run)
   if (state.step === 0 && state.targets.length === 0) {
     // 1. Build Thumbnail Map
-    // Assumption: _Thumbnails has reasonable count (<10k).
-    // If >10k, we might need pagination here too, but GAS iterator handles it.
-    // We try to fill it in 5s.
-    const thumbFolders = root.getFoldersByName(THUMB_FOLDER_NAME);
-    if (thumbFolders.hasNext()) {
-      const tFolder = thumbFolders.next();
-      const tFiles = tFolder.getFiles();
-      while (tFiles.hasNext()) {
-        // Safety check for time in Map building?
-        // If huge, this loop might timeout.
-        // Ideally we assume it fits. If not, we need a separate Step for Map building.
-        // Let's rely on GAS speed for listing files.
-        const tf = tFiles.next();
-        // Name: "12345.jpg" -> ID: "12345"
-        const tid = tf.getName().replace(/\.[^/.]+$/, "");
-        state.thumbMap[tid] = tf.getId();
-      }
+    const thumbFolders = DriveAccessService.list(folderId, {
+      query: `name = '${THUMB_FOLDER_NAME}' and mimeType = 'application/vnd.google-apps.folder'`,
+      fields: "files(id)"
+    });
+
+    if (thumbFolders.length > 0) {
+      const tFiles = DriveAccessService.list(thumbFolders[0].id, {
+        fields: "files(id, name)"
+      });
+      tFiles.forEach(tf => {
+        const tid = tf.name.replace(/\.[^/.]+$/, "");
+        state.thumbMap[tid] = tf.id;
+      });
     }
 
     // 2. Plan Targets
     state.targets.push({ id: folderId, category: "Uncategorized" }); // Root
     const CATS = ["Webtoon", "Manga", "Novel"];
-    const folders = root.getFolders();
-    while (folders.hasNext()) {
-      const f = folders.next();
-      if (CATS.includes(f.getName())) {
-        state.targets.push({ id: f.getId(), category: f.getName() });
+    const folders = DriveAccessService.list(folderId, {
+      query: "mimeType = 'application/vnd.google-apps.folder'",
+      fields: "files(id, name)"
+    });
+    
+    folders.forEach(f => {
+      if (CATS.includes(f.name)) {
+        state.targets.push({ id: f.id, category: f.name });
       }
-    }
+    });
   }
 
   let hasMore = false;
@@ -217,24 +194,22 @@ function View_rebuildLibraryIndex(folderId, continuationToken) {
   // Execution Loop
   while (state.step < state.targets.length) {
     const current = state.targets[state.step];
-    let iterator;
 
     try {
-      if (state.driveToken) {
-        iterator = DriveApp.continueFolderIterator(state.driveToken);
-      } else {
-        iterator = DriveApp.getFolderById(current.id).getFolders();
-      }
+      const response = DriveAccessService.listPaged(current.id, {
+        pageToken: state.driveToken,
+        pageSize: 50, // 페이지별 처리량 조절
+        query: "mimeType = 'application/vnd.google-apps.folder'"
+      });
 
-      while (iterator.hasNext()) {
+      const folders = response.files;
+      for (const folder of folders) {
         if (new Date().getTime() - startTime > TIME_LIMIT) {
           hasMore = true;
           break;
         }
 
-        const folder = iterator.next();
-        const name = folder.getName();
-
+        const name = folder.name;
         if (name === INDEX_FILE_NAME || name === THUMB_FOLDER_NAME) continue;
         if (
           ["Webtoon", "Manga", "Novel"].includes(name) &&
@@ -243,27 +218,32 @@ function View_rebuildLibraryIndex(folderId, continuationToken) {
           continue;
 
         try {
-          // Pass thumbMap
           const s = processSeriesFolder(
             folder,
             current.category,
             state.thumbMap,
           );
           if (s) seriesList.push(s);
-        } catch (e) {}
+        } catch (e) {
+          Debug.log(`Error processing folder ${name}: ${e}`);
+        }
       }
 
-      if (hasMore) {
-        state.driveToken = iterator.getContinuationToken();
-        return {
-          status: "continue",
-          continuationToken: JSON.stringify(state),
-          list: seriesList,
-        };
-      } else {
-        state.step++;
-        state.driveToken = null;
-      }
+      if (hasMore || response.nextPageToken) {
+        state.driveToken = response.nextPageToken;
+        // 내뱉기 전에 루프 중간 종료 여부 판단 (hasMore는 시간 초과, nextPageToken은 순수 로드 완료)
+        if (hasMore || response.nextPageToken) {
+            return {
+              status: "continue",
+              continuationToken: JSON.stringify(state),
+              list: seriesList,
+            };
+        }
+      } 
+      
+      state.step++;
+      state.driveToken = null;
+      
     } catch (e) {
       Debug.log(`Error in step ${state.step}: ${e}`);
       state.step++;
@@ -277,17 +257,20 @@ function View_rebuildLibraryIndex(folderId, continuationToken) {
 function View_saveIndex(folderId, list) {
   if (!list || !Array.isArray(list)) return;
   list.sort((a, b) => new Date(b.lastModified) - new Date(a.lastModified));
-  const root = DriveApp.getFolderById(folderId);
   const jsonString = JSON.stringify(list);
-  const files = root.getFilesByName(INDEX_FILE_NAME);
-  if (files.hasNext()) {
-    files.next().setContent(jsonString);
-    // 중복 파일이 존재할 경우 삭제 (처음 한 개 이후의 파일들)
-    while (files.hasNext()) {
-      files.next().setTrashed(true);
+  
+  const results = DriveAccessService.list(folderId, {
+    query: `name = '${INDEX_FILE_NAME}'`,
+    fields: "files(id)"
+  });
+
+  if (results.length > 0) {
+    DriveAccessService.updateFileContent(results[0].id, jsonString);
+    for (let i = 1; i < results.length; i++) {
+        DriveAccessService.trash(results[i].id);
     }
   } else {
-    root.createFile(INDEX_FILE_NAME, jsonString, MimeType.PLAIN_TEXT);
+    DriveAccessService.createFile(folderId, INDEX_FILE_NAME, jsonString, "application/json");
   }
 }
 
@@ -300,7 +283,8 @@ function View_saveIndex(folderId, list) {
  * - ONLY scan for `info.json`
  */
 function processSeriesFolder(folder, categoryContext, thumbMap) {
-  const folderName = folder.getName();
+  const folderId = folder.id;
+  const folderName = folder.name;
 
   let metadata = {
     status: "ONGOING",
@@ -314,23 +298,28 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
   let thumbnailId = "";
 
   // 1. [v1.7.0] Metadata Persistence (Phase 3) - Self-Healing
-  const metaFiles = folder.getFilesByName("_toki_meta.json");
-  if (metaFiles.hasNext()) {
+  const metaResults = DriveAccessService.list(folderId, {
+    query: "name = '_toki_meta.json'",
+    fields: "files(id)"
+  });
+
+  if (metaResults.length > 0) {
     try {
-      const metaData = JSON.parse(metaFiles.next().getBlob().getDataAsString());
+      const content = DriveAccessService.getFileContent(metaResults[0].id);
+      const metaData = JSON.parse(content);
       const tid = (thumbMap && metaData.sourceId) ? thumbMap[metaData.sourceId] : "";
       return {
-        id: metaData.id || folder.getId(),
+        id: metaData.id || folderId,
         sourceId: metaData.sourceId || "",
         name: metaData.name || folderName,
         folderName: folderName,
-        url: metaData.url || folder.getUrl(),
+        url: metaData.url || "", // V3 metadata doesn't have webViewLink by default unless requested
         booksCount: metaData.itemsCount || 0,
         cacheFileId: metaData.cacheFileId || "",
         thumbnailId: tid,
         thumbnail: tid ? "" : (metaData.thumbnail || ""), 
         hasCover: !!tid,
-        lastModified: metaData.lastUpdated || folder.getLastUpdated().toISOString(),
+        lastModified: metaData.lastUpdated || folder.modifiedTime,
         category: metaData.category || categoryContext,
         metadata: {
             category: metaData.category || categoryContext,
@@ -344,27 +333,26 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
     }
   }
 
-  // 2. ID Parsing "[12345] Title" (Fallback)
   const idMatch = folderName.match(/^\[(\d+)\]/);
   if (idMatch) {
     sourceId = idMatch[1];
-    // Lookup Optimized Map
     if (thumbMap && thumbMap[sourceId]) {
       thumbnailId = thumbMap[sourceId];
     }
   }
 
-  // Parse info.json (Still needed for name/author)
-  const infoFiles = folder.getFilesByName("info.json");
+  const infoResults = DriveAccessService.list(folderId, {
+    query: "name = 'info.json'",
+    fields: "files(id)"
+  });
   let thumbnailOld = "";
 
-  if (infoFiles.hasNext()) {
+  if (infoResults.length > 0) {
     try {
-      const content = infoFiles.next().getBlob().getDataAsString();
+      const content = DriveAccessService.getFileContent(infoResults[0].id);
       const parsed = JSON.parse(content);
 
       if (parsed.title) seriesName = parsed.title;
-      // If we didn't get ID from folder, try info.json (rare fallback)
       if (!sourceId && parsed.id) {
         sourceId = parsed.id;
         if (thumbMap && thumbMap[sourceId]) thumbnailId = thumbMap[sourceId];
@@ -382,7 +370,6 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
         metadata.authors = parsed.metadata.authors;
       else if (parsed.author) metadata.authors = [parsed.author];
 
-      // Fallback text thumb (http)
       if (parsed.thumbnail) thumbnailOld = parsed.thumbnail;
     } catch (e) {}
   } else {
@@ -390,9 +377,6 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
     if (match) seriesName = match[2];
   }
 
-  // Decide Final Thumbnail
-  // Rule: If we have thumbnailId (from Map), use it.
-  // Rule: If not, use thumbnailOld URL (but NOT base64)
   let finalThumbnail = "";
   if (thumbnailId) {
     // Good.
@@ -400,17 +384,19 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
     if (!thumbnailOld.startsWith("data:image")) {
       finalThumbnail = thumbnailOld;
     }
-  } // <-- 누락된 괄호 복구
+  }
 
-  // [v1.6.0] Task A-1: Find cacheFileId
   let cacheFileId = "";
-  const cacheFiles = folder.getFilesByName("_toki_cache.json");
-  if (cacheFiles.hasNext()) {
-      cacheFileId = cacheFiles.next().getId();
+  const cacheResults = DriveAccessService.list(folderId, {
+    query: "name = '_toki_cache.json'",
+    fields: "files(id)"
+  });
+  if (cacheResults.length > 0) {
+      cacheFileId = cacheResults[0].id;
   }
 
   return {
-    id: folder.getId(),
+    id: folderId,
     sourceId: sourceId,
     name: seriesName,
     booksCount: booksCount,
@@ -418,8 +404,8 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
     thumbnail: finalThumbnail,
     thumbnailId: thumbnailId,
     hasCover: !!thumbnailId,
-    cacheFileId: cacheFileId, // [v1.6.0] Store cache file ID for fast access
-    lastModified: folder.getLastUpdated(),
+    cacheFileId: cacheFileId, 
+    lastModified: folder.modifiedTime,
     category: metadata.category,
   };
 }

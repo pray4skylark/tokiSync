@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.8.0] - 2026-04-17
+
+### 🚀 차세대 Drive API V3 아키텍처 전환 및 백엔드 전면 개편
+
+- **Legacy `DriveApp` 완전 제거 (Zero-DriveApp)**: 권한 스코프 경고 최소화 및 속도 향상을 위해 기존의 무겁고 제약이 많은 `DriveApp` 클래스 의존성을 100% 걷어냈습니다.
+- **Drive API V3 기반 중앙 추상화 계층 (DriveAccessService) 정립**:
+    - 파일/폴더 I/O, 메타데이터 연산 및 스캔 등 구글 드라이브와 상호작용하는 모든 로직을 Advanced Service 기반 V3 API로 통일했습니다.
+    - 루트 폴더 조회(`getRootId`), 파일명 변경(`patch`), 폴더간 이동(`move`) 등 강력한 V3 기반 메서드들을 추가 지원합니다.
+- **REST 통신을 통한 첨단 미디어 폴백 시스템 구현**:
+    - Drive V3 변경 후 발생하는 Blob 타입 캐스팅 오류(`getDataAsString is not a function` 등) 현상을 선제적으로 방어하기 위해, **UrlFetchApp 기반의 명시적 REST API 호출**을 결합(Hybrid)하여 가장 최신의 파일 내용과 바이트 스트림을 고속으로 다운로드하도록 안정성을 극대화했습니다.
+- **데이터 흐름 정합성 및 인덱스 최적화**:
+    - `SyncService`, `View_LibraryService` 등 전 구간의 인덱스 검색, 객체 반환(`id` 통일) 인터페이스를 정밀히 리팩터링하여 향후 업데이트(i18n, 설정 동기화 등) 확장에 유리한 확고한 설계 기반을 다졌습니다.
+
 ## [v1.7.6] - 2026-04-16
 
 ### ✨ 뷰어 안정성 및 네트워크 최적화 (Stability & Traffic Control)

@@ -13,7 +13,6 @@
  */
 function findFolderId(folderName, rootFolderId) {
   const idMatch = folderName.match(/^\[(\d+)\]/);
-  const root = DriveApp.getFolderById(rootFolderId);
 
   console.log(`🔍 findFolderId: "${folderName}"`); // Stackdriver Log
   Debug.log(`🔍 findFolderId: "${folderName}"`);
@@ -34,19 +33,15 @@ function findFolderId(folderName, rootFolderId) {
   Debug.log(`   -> Query: ${query}`);
 
   try {
-    const response = Drive.Files.list({
-      q: query,
+    const results = DriveAccessService.list(rootFolderId, {
+      query: query,
       fields: "files(id, name)",
-      pageSize: 1,
-      supportsAllDrives: true,
-      includeItemsFromAllDrives: true,
+      pageSize: 1
     });
 
-    if (response.files && response.files.length > 0) {
-      Debug.log(
-        `   ✅ Found: ${response.files[0].name} (${response.files[0].id})`
-      );
-      return response.files[0].id;
+    if (results.length > 0) {
+      Debug.log(`   ✅ Found: ${results[0].name} (${results[0].id})`);
+      return results[0].id;
     }
     Debug.log(`   ⚠️ Primary Search returned 0 results.`);
 
@@ -57,19 +52,15 @@ function findFolderId(folderName, rootFolderId) {
       const safeTitle = titleOnly.replace(/'/g, "\\'");
       const fallbackQuery = `'${rootFolderId}' in parents and name = '${safeTitle}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
 
-      const fallbackRes = Drive.Files.list({
-        q: fallbackQuery,
+      const fallbackRes = DriveAccessService.list(rootFolderId, {
+        query: fallbackQuery,
         fields: "files(id, name)",
-        pageSize: 1,
-        supportsAllDrives: true,
-        includeItemsFromAllDrives: true,
+        pageSize: 1
       });
 
-      if (fallbackRes.files && fallbackRes.files.length > 0) {
-        Debug.log(
-          `   ✅ Fallback Found: ${fallbackRes.files[0].name} (${fallbackRes.files[0].id})`
-        );
-        return fallbackRes.files[0].id;
+      if (fallbackRes.length > 0) {
+        Debug.log(`   ✅ Fallback Found: ${fallbackRes[0].name} (${fallbackRes[0].id})`);
+        return fallbackRes[0].id;
       }
     }
   } catch (e) {
@@ -89,42 +80,26 @@ function getOrCreateSeriesFolder(
   category = "Webtoon",
   createIfMissing = true
 ) {
-  const root = DriveApp.getFolderById(rootFolderId);
-
   // 1. Check Legacy (Root Direct)
   const legacyId = findFolderId(folderName, rootFolderId);
   if (legacyId) {
     Debug.log(`♻️ Found Legacy Series Folder in Root: ${legacyId}`);
-    return DriveApp.getFolderById(legacyId);
+    return legacyId;
   }
 
   // 2. Check/Create Category Folder
-  // category should be "Webtoon" or "Novel"
   const catName = category || "Webtoon";
-  let catFolder;
-  const catIter = root.getFoldersByName(catName);
-
-  if (catIter.hasNext()) {
-    catFolder = catIter.next();
-  } else {
-    // If scanning (read-only) and category missing -> Not Found
-    if (!createIfMissing) return null;
-    Debug.log(`📂 Creating Category Folder: ${catName}`);
-    catFolder = root.createFolder(catName);
-  }
+  const catId = DriveAccessService.ensureFolder(rootFolderId, catName);
 
   // 3. Check Series in Category
-  // Note: if catFolder was just created, this is redundant but safe
-  const seriesId = findFolderId(folderName, catFolder.getId());
-  if (seriesId) {
-    return DriveApp.getFolderById(seriesId);
-  }
+  const seriesId = findFolderId(folderName, catId);
+  if (seriesId) return seriesId;
 
   if (!createIfMissing) return null;
 
   // 4. Create New Series in Category
   Debug.log(`🆕 Creating New Series Folder in ${catName}: ${folderName}`);
-  return catFolder.createFolder(folderName);
+  return DriveAccessService.ensureFolder(catId, folderName);
 }
 
 /**
@@ -146,7 +121,7 @@ function createRes(status, body, debugLogs = null) {
 
 // 권한 승인용 더미 함수
 function authorizeCheck() {
-  DriveApp.getRootFolder();
+  DriveAccessService.getRootId();
   UrlFetchApp.fetch("https://www.google.com");
   console.log("✅ 권한 승인 완료!");
 }

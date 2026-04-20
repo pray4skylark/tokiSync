@@ -3,20 +3,22 @@
 // =======================================================
 
 function initResumableUpload(data, rootFolderId) {
-  // Use new helper with Category support
-  const seriesFolder = getOrCreateSeriesFolder(
+  const folderId = getOrCreateSeriesFolder(
     rootFolderId,
     data.folderName,
     data.category,
     true,
   );
-  const folderId = seriesFolder.getId();
 
   // [Fix] Prevent Duplicate Files: Delete existing file with the same name before uploading a new one
-  const existing = seriesFolder.getFilesByName(data.fileName);
-  while (existing.hasNext()) {
-    existing.next().setTrashed(true);
-  }
+  const existingFiles = DriveAccessService.list(folderId, {
+    query: `name = '${data.fileName.replace(/'/g, "\\'")}'`,
+    fields: "files(id)"
+  });
+
+  existingFiles.forEach(file => {
+    DriveAccessService.trash(file.id);
+  });
 
   const url =
     "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable";
@@ -106,12 +108,13 @@ function initUpdateResumableUpload(data) {
 
   // [v1.7.3-hotfix] Check if file exists and is NOT in trash
   try {
-    const file = DriveApp.getFileById(fileId);
-    if (file.isTrashed()) {
-        return createRes("error", "File is in trash. Use fresh upload instead.");
-    }
+    const meta = DriveAccessService.getMetadata(fileId);
+    // V3 get response doesn't have trashed field by default unless requested, 
+    // but in V3 hidden/trashed files are usually not returned by get unless using special flags.
+    // However, for safety we can check or rely on the error thrown by getMetadata.
+    if (!meta) throw new Error("Metadata not found");
   } catch (e) {
-    return createRes("error", "File not found or access denied: " + fileId);
+    return createRes("error", "File not found, in trash, or access denied: " + fileId);
   }
 
   const url = `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=resumable`;

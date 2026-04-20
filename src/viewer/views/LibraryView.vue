@@ -21,6 +21,9 @@
         </button>
       </div>
     </div>
+    
+    <!-- [v1.8.0] Server Update Alert -->
+    <ServerUpdateBanner />
 
     <!-- Not Configured State -->
     <div v-if="!isConfigured()" class="text-center py-32">
@@ -58,5 +61,6 @@
 
 <script setup>
 import { useStore } from '../composables/useStore';
+import ServerUpdateBanner from '../components/ServerUpdateBanner.vue';
 const { currentTab, tabs, searchQuery, isInitialLoading, isSyncing, filteredLibrary, openSeries, refreshLibrary, isConfigured, getThumbnailUrl, NO_IMAGE_SVG } = useStore();
 </script>

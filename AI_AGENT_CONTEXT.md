@@ -7,7 +7,7 @@ This document is the **single source of truth (SSOT)** for the project's static 
 - **Project Name**: TokiSync
 - **Target**: Manga/Webtoon/Novel Synchronizer & Viewer
 - **Architecture**:
-  - **Backend**: Google Apps Script (Stateless API).
+  - **Backend**: Google Apps Script (Stateless API + Drive API V3).
   - **Bridge**: Tampermonkey UserScript (Core logic, DOM Scraping, `GM_xmlhttpRequest` for Direct Drive Access).
   - **Frontend (Viewer)**: Vue 3 (Composition API) + Tailwind CSS SPA, hosted on GitHub Pages.
 - **Storage**: Dexie.js for offline viewer cache (IndexedDB).
@@ -16,6 +16,10 @@ This document is the **single source of truth (SSOT)** for the project's static 
 
 - **Stateless GAS**: The Google Apps Script backend must remain stateless.
   Do NOT use `PropertiesService` for user settings; everything must be payload-driven.
+- **Drive API V3 & Zero-DriveApp (v1.8.0+)**: All Google Drive interactions MUST use the **Drive API v3 (Advanced Service)**. 
+  - Usage of legacy `DriveApp` is strictly forbidden to minimize permission scopes and improve performance.
+  - All Drive operations must be routed through `DriveAccessService.gs`.
+- **Hybrid Media Access (v1.8.0)**: Due to v3 API's Blob compatibility issues in GAS, file content/bytes retrieval must use the **UrlFetchApp + REST API (alt=media)** pattern for stability.
 - **Direct Drive Access**: Use `GM_xmlhttpRequest` (via Tampermonkey) to bypass GAS 6-minute execution limits and CORS restrictions.
   - **Resumable Upload (v1.7.3+)**: Use Google Drive's Resumable Upload protocol (5MB chunks) for all direct uploads to prevent memory/size limits.
 - **Single Controller Rule**: All viewer input (mouse, touch, keyboard, wheel) MUST be handled through a single composable: `useViewerInput.js`.
@@ -23,12 +27,15 @@ This document is the **single source of truth (SSOT)** for the project's static 
   - Mouse clicks: Use `@mousedown.left` attached directly to `viewer-container`.
   - Touch: Attach `touchstart`/`touchend` directly to `viewer-container`. Use `lastTouch` timestamp (+300ms) to prevent ghost events after touch.
   - `nav-zone` div pattern is **ABOLISHED**. Do not re-introduce it.
+- **Sync Guard (v1.7.6)**: To prevent infinite scroll sync loops between the slider and the viewport, a **20px Position Guard** must be used. If the scroll target is within 20px of the current position, skip the scroll operation. Always use `behavior: 'auto'` for programmatic scroll sync to prevent event flooding.
+- **Smart Preload (v1.7.6)**: Background downloading of the next episode must be triggered only after the user reaches **50% reading progress** (or scroll percentage) of the current episode to optimize network and server resources.
 - **Merge-First Cloud Sync**: To prevent data loss across multiple devices/browsers, ALL history uploads MUST perform a 'Pull & Merge' before pushing back to the cloud.
   - ❌ WRONG: Uploading local history directly as a replacement.
   - ✅ CORRECT: Fetch remote history -> Merge with local based on `lastReadAt` -> Upload consolidated result.
 - **Viewer Engine Stability**:
   - **Virtual Scroll**: Must use `aspect-ratio` to preserve layout height even when images are unmounted from DOM.
   - **Scroll Mode Exclusion**: Auto-crop (`clip-path`) must be disabled in scroll mode to maintain vertical continuity of webtoon content.
+  - **RootMargin Expansion**: 고속 스크롤 대응을 위해 마진을 `3000px`로 확장.
 - **Cinematic Design**: The viewer follows a glassmorphism aesthetic with subtle animations and a premium feel.
 
 ---
@@ -63,6 +70,7 @@ This document is the **single source of truth (SSOT)** for the project's static 
 `google_app_script/TokiSync/`
 
 - `Main.gs`: Entry points (`doPost`, `doGet`) and triggers.
+- **`DriveAccessService.gs`**: v1.8.0 central gateway for all Drive API v3 operations. Modular abstraction for I/O, metadata, and search.
 - `SyncService.gs`: History management, index handling.
 - `UploadService.gs`: Resumable upload sessions.
 - `View_LibraryService.gs`: Background index merging (`SweepMergeIndex`).

@@ -10,6 +10,6 @@
  * 이 함수를 실행하여 View 관련 스코프(DriveApp) 권한을 승인받습니다.
  */
 function View_authorizeCheck() {
-  DriveApp.getRootFolder();
+  DriveAccessService.getRootId();
   console.log("✅ [Viewer] Auth Check Complete");
 }

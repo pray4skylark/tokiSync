@@ -60,14 +60,20 @@ function View_Dispatcher(data) {
     } else if (action === "view_get_merge_index") {
       // [v1.6.1] Fast Path Fallback: Get Merge Index Fragment directly
       if (!data.folderId || !data.sourceId) throw new Error("folderId and sourceId are required for merge index");
-      const rootFolder = DriveApp.getFolderById(data.folderId);
-      const mFolders = rootFolder.getFoldersByName("_MergeIndex");
+      
+      const mFolders = DriveAccessService.list(data.folderId, {
+          query: "name = '_MergeIndex' and mimeType = 'application/vnd.google-apps.folder'",
+          fields: "files(id)"
+      });
       resultBody = { found: false, data: null };
-      if (mFolders.hasNext()) {
-          const mFolder = mFolders.next();
-          const fragFiles = mFolder.getFilesByName(`_toki_merge_${data.sourceId}.json`);
-          if (fragFiles.hasNext()) {
-              const fragContent = fragFiles.next().getBlob().getDataAsString();
+      if (mFolders.length > 0) {
+          const mFolderId = mFolders[0].id;
+          const fragFiles = DriveAccessService.list(mFolderId, {
+              query: `name = '_toki_merge_${data.sourceId}.json'`,
+              fields: "files(id)"
+          });
+          if (fragFiles.length > 0) {
+              const fragContent = DriveAccessService.getFileContent(fragFiles[0].id);
               resultBody = { found: true, data: JSON.parse(fragContent) };
           }
       }
@@ -83,43 +89,38 @@ function View_Dispatcher(data) {
       // UserScript 업로드 완료 후 호출 — folderName 기반으로 캐시 갱신
       if (!data.folderName)
         throw new Error("folderName is required for cache update");
-      const seriesFolder = getOrCreateSeriesFolder(
+      const seriesId = getOrCreateSeriesFolder(
         folderId,
         data.folderName,
         data.category || "Unknown",
         false,
       );
-      if (!seriesFolder) {
+      if (!seriesId) {
         resultBody = { updated: false, reason: "folder not found" };
       } else {
-        const seriesId = seriesFolder.getId();
         const booksArray = View_getBooks(seriesId, true); // bypassCache=true → 재스캔 + 캐시 기록
         const itemsCount = booksArray ? booksArray.length : 0;
         
         // [v1.6.1] Merge Index Fragment Creation
         try {
-            const rootFolder = DriveApp.getFolderById(folderId);
-            
             // 1. Find or create _MergeIndex folder
-            let mergeFolder;
-            const mFolders = rootFolder.getFoldersByName("_MergeIndex");
-            if (mFolders.hasNext()) {
-                mergeFolder = mFolders.next();
-            } else {
-                mergeFolder = rootFolder.createFolder("_MergeIndex");
-            }
+            const mergeFolderId = DriveAccessService.ensureFolder(folderId, "_MergeIndex");
             
             // 2. Extract sourceId & find cacheFileId
-            const folderName = seriesFolder.getName();
-            const idMatch = folderName.match(/^\[(\d+)\]/);
+            const meta = DriveAccessService.getMetadata(seriesId);
+            const seriesFolderName = meta.name;
+            const idMatch = seriesFolderName.match(/^\[(\d+)\]/);
             const sourceId = idMatch ? idMatch[1] : seriesId; // Fallback to drive ID if no stamp
             
             let cacheFileId = "";
             let retries = 3;
             while (retries > 0) {
-                const cacheFiles = seriesFolder.getFilesByName("_toki_cache.json");
-                if (cacheFiles.hasNext()) {
-                    cacheFileId = cacheFiles.next().getId();
+                const cacheResults = DriveAccessService.list(seriesId, {
+                    query: "name = '_toki_cache.json'",
+                    fields: "files(id)"
+                });
+                if (cacheResults.length > 0) {
+                    cacheFileId = cacheResults[0].id;
                     break;
                 }
                 Utilities.sleep(1500); // Wait 1.5s for Drive eventual consistency
@@ -131,9 +132,6 @@ function View_Dispatcher(data) {
                 const fragName = `_toki_merge_${sourceId}.json`;
                 
                 // [v1.6.2] Enrich fragment with full series metadata for dynamic Insert support
-                // Allows SweepMergeIndex to add brand-new series without a full rebuild.
-                const seriesFolderName = seriesFolder.getName();
-                // Extract clean title from "[12345] 작품명" → "작품명"
                 const titleClean = seriesFolderName.replace(/^\[\d+\]\s*/, '').trim();
                 
                 const extraMeta = data.metadata || {};
@@ -142,35 +140,41 @@ function View_Dispatcher(data) {
                     sourceId: sourceId,
                     name: titleClean,
                     folderName: seriesFolderName,
-                    url: seriesFolder.getUrl(),
+                    url: "", // V3 metadata webViewLink is not used here to keep it small
                     category: data.category || "Unknown",
                     author: extraMeta.author || "",
                     status: extraMeta.status || "연재중",
                     summary: extraMeta.summary || "",
                     thumbnail: extraMeta.thumbnail || "",
-                    created: seriesFolder.getDateCreated().toISOString(),
+                    created: meta.modifiedTime, // modifiedTime used as fallback for created
                     cacheFileId: cacheFileId,
                     itemsCount: itemsCount,
                     lastUpdated: new Date().toISOString()
                 });
                 
-                const existingFrags = mergeFolder.getFilesByName(fragName);
-                if (existingFrags.hasNext()) {
-                    const frag = existingFrags.next();
-                    frag.setContent(fragData); // Update existing
+                const existingFrags = DriveAccessService.list(mergeFolderId, {
+                    query: `name = '${fragName}'`,
+                    fields: "files(id)"
+                });
+
+                if (existingFrags.length > 0) {
+                    DriveAccessService.updateFileContent(existingFrags[0].id, fragData);
                 } else {
-                    mergeFolder.createFile(fragName, fragData, MimeType.PLAIN_TEXT);
+                    DriveAccessService.createFile(mergeFolderId, fragName, fragData, "application/json");
                 }
                 Debug.log(`[MergeIndex] Created fragment for ${sourceId} / ${cacheFileId}`);
 
                 // [v1.7.0] Metadata Persistence (Phase 3)
-                // Save series metadata into _toki_meta.json within the series folder itself
                 const metaName = "_toki_meta.json";
-                const metaFiles = seriesFolder.getFilesByName(metaName);
-                if (metaFiles.hasNext()) {
-                    metaFiles.next().setContent(fragData); // Re-use fragData as it's the same schema
+                const metaResults = DriveAccessService.list(seriesId, {
+                    query: `name = '${metaName}'`,
+                    fields: "files(id)"
+                });
+
+                if (metaResults.length > 0) {
+                    DriveAccessService.updateFileContent(metaResults[0].id, fragData);
                 } else {
-                    seriesFolder.createFile(metaName, fragData, MimeType.PLAIN_TEXT);
+                    DriveAccessService.createFile(seriesId, metaName, fragData, "application/json");
                 }
                 Debug.log(`[Metadata] Persisted metadata in series folder: ${seriesFolderName}`);
             }
@@ -178,7 +182,6 @@ function View_Dispatcher(data) {
             resultBody = { updated: true, seriesId: seriesId, mergeStatus: "success" };
         } catch (mergeErr) {
             Debug.log(`[MergeIndex] Error creating fragment: ${mergeErr.toString()}`);
-            // Non-fatal, let the response succeed but return the error for debugging
             resultBody = { updated: true, seriesId: seriesId, mergeStatus: "failed", error: mergeErr.toString() };
         }
       }

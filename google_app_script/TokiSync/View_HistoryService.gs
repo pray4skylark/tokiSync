@@ -13,13 +13,17 @@ const HISTORY_FILE_NAME = "read_history.json";
  */
 function View_getReadHistory(folderId) {
   try {
-    const folder = DriveApp.getFolderById(folderId);
-    const files = folder.getFilesByName(HISTORY_FILE_NAME);
-    if (!files.hasNext()) {
+    const results = DriveAccessService.list(folderId, {
+      query: `name = '${HISTORY_FILE_NAME}'`,
+      fields: "files(id)"
+    });
+
+    if (results.length === 0) {
       Debug.log("[History] read_history.json 없음 → 빈 배열 반환");
       return createRes("success", []);
     }
-    const content = files.next().getBlob().getDataAsString();
+
+    const content = DriveAccessService.getFileContent(results[0].id);
     const data = JSON.parse(content);
     Debug.log(`[History] 불러오기 완료: ${data.length}개 레코드`);
     return createRes("success", data);
@@ -55,43 +59,22 @@ function View_saveReadHistory(data, folderId) {
         HISTORY_FILE_NAME,
       );
 
-      // 1. Find existing file using Advanced Service (V3)
-      // DriveApp.getFilesByName 보다 빠르고 안정적입니다.
-      const query = `'${folderId}' in parents and name = '${HISTORY_FILE_NAME}' and trashed = false`;
-      const result = Drive.Files.list({
-        q: query,
-        fields: "files(id)",
-        pageSize: 10,
-        supportsAllDrives: true,
-        includeItemsFromAllDrives: true,
+      const results = DriveAccessService.list(folderId, {
+        query: `name = '${HISTORY_FILE_NAME}'`,
+        fields: "files(id)"
       });
 
-      if (result.files && result.files.length > 0) {
-        // 2. Update existing file
-        const fileId = result.files[0].id;
-        Drive.Files.update({}, fileId, blob, { supportsAllDrives: true });
+      if (results.length > 0) {
+        const fileId = results[0].id;
+        DriveAccessService.updateFileContent(fileId, jsonString);
 
-        // 3. Cleanup duplicates if any
-        if (result.files.length > 1) {
-          for (let i = 1; i < result.files.length; i++) {
-            Drive.Files.update(
-              { trashed: true },
-              result.files[i].id,
-              null,
-              { supportsAllDrives: true },
-            );
+        if (results.length > 1) {
+          for (let i = 1; i < results.length; i++) {
+            DriveAccessService.trash(results[i].id);
           }
         }
       } else {
-        // 4. Create new file
-        Drive.Files.create(
-          {
-            name: HISTORY_FILE_NAME,
-            parents: [folderId],
-          },
-          blob,
-          { supportsAllDrives: true },
-        );
+        DriveAccessService.createFile(folderId, HISTORY_FILE_NAME, jsonString, "application/json");
       }
 
       Debug.log(

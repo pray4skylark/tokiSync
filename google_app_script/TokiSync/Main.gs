@@ -1,7 +1,7 @@
-// ⚙️ TokiSync API Server v1.0.0 (Stateless)
+// ⚙️ TokiSync API Server v1.8.0 (Stateless)
 // -----------------------------------------------------
 // 🤝 Compatibility:
-//    - Client v1.0.0+ (User Execution Mode)
+//    - Client v1.8.0+ (User Execution Mode)
 // -----------------------------------------------------
 
 // [GET] 서버 상태 확인용
@@ -14,7 +14,7 @@
  */
 function doGet(e) {
   return ContentService.createTextOutput(
-    "✅ TokiSync API Server v1.5.5 (Stateless) is Running...",
+    "✅ TokiSync API Server v1.8.0 (Stateless) is Running...",
   );
 }
 
@@ -33,7 +33,7 @@ function doGet(e) {
  * @returns {TextOutput} JSON 응답
  */
 // [CONSTANTS]
-const SERVER_VERSION = "v1.6.0"; // Kavita Compatibility & Batching (v1.6.0)
+const SERVER_VERSION = "v1.8.0"; // Drive API V3 Migration
 // API Key stored in Script Properties (Project Settings > Script Properties)
 // Set property: API_KEY = your_secret_key
 const API_KEY = PropertiesService.getScriptProperties().getProperty("API_KEY");

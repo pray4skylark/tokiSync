@@ -7,61 +7,36 @@
 function checkDownloadHistory(data, rootFolderId) {
   Debug.log(`🚀 checkDownloadHistory Start`);
   // Use Helper with Category support (Create=false)
-  const seriesFolder = getOrCreateSeriesFolder(
+  const folderId = getOrCreateSeriesFolder(
     rootFolderId,
     data.folderName,
     data.category,
     false,
   );
 
-  if (!seriesFolder) {
-    Debug.log(
-      `❌ Folder not found in Root(${rootFolderId}) or Category(${data.category})`,
-    );
+  if (!folderId) {
+    Debug.log(`❌ Folder not found in Root or Category: ${data.folderName}`);
     return createRes("success", [], Debug.getLogs());
   }
-  const folderId = seriesFolder.getId();
 
   Debug.log(`📂 Scanning Files in: ${folderId}`);
-  // const seriesFolder = DriveApp.getFolderById(folderId); // Redundant
   const existingEpisodes = [];
 
-  // 🚀 Optimization: Drive Advanced Service (Drive.Files.list)
-  let pageToken = null;
-  let fetchCount = 0;
-
   try {
-    do {
-      Debug.log(`☁️ Fetching file list (Page: ${fetchCount + 1})...`);
-      const response = Drive.Files.list({
-        q: `'${folderId}' in parents and trashed = false`,
-        fields: "nextPageToken, files(name)",
-        pageSize: 1000,
-        pageToken: pageToken,
-        supportsAllDrives: true,
-        includeItemsFromAllDrives: true,
-      });
+    const files = DriveAccessService.list(folderId, {
+      fields: "files(name)"
+    });
 
-      if (response.files) {
-        Debug.log(`   -> Retrieved ${response.files.length} files.`);
-        response.files.forEach((file) => {
-          const match = file.name.match(/^(\d+)/);
-          if (match) existingEpisodes.push(parseInt(match[1]));
-        });
-      }
-      pageToken = response.nextPageToken;
-      fetchCount++;
-    } while (pageToken);
+    files.forEach((file) => {
+      const match = file.name.match(/^(\d+)/);
+      if (match) existingEpisodes.push(parseInt(match[1]));
+    });
 
     Debug.log(`🎉 Scan Complete. Found ${existingEpisodes.length} episodes.`);
   } catch (e) {
     Debug.error("❌ Drive Scan Failed (Advanced)", e);
-    // Fallback? No, we want to see if this fails.
     return createRes("error", `Scan Error: ${e.message}`, Debug.getLogs());
   }
-
-  // 폴더 스캔 (구버전 호환) - 이건 DriveApp 그대로 유지 (보조)
-  // const subFolders = seriesFolder.getFolders(); ... (생략 또는 필요시 추가)
 
   // 중복 제거 및 정렬
   const uniqueEpisodes = [...new Set(existingEpisodes)].sort((a, b) => a - b);
@@ -73,16 +48,18 @@ function checkDownloadHistory(data, rootFolderId) {
 // 기능: 작품 정보(info.json) 저장
 function saveSeriesInfo(data, rootFolderId) {
   // Use Helper with Category support (Create=true)
-  const seriesFolder = getOrCreateSeriesFolder(
+  const folderId = getOrCreateSeriesFolder(
     rootFolderId,
     data.folderName,
     data.category,
     true,
   );
-  // const root = DriveApp.getFolderById(rootFolderId); // Unused
 
   const fileName = "info.json";
-  const files = seriesFolder.getFilesByName(fileName);
+  const results = DriveAccessService.list(folderId, {
+    query: `name = '${fileName}'`,
+    fields: "files(id)"
+  });
 
   const infoData = {
     id: data.id,
@@ -95,9 +72,7 @@ function saveSeriesInfo(data, rootFolderId) {
     },
     thumbnail: data.thumbnail || "",
     url: data.url,
-
-    // Legacy / Convenience fields
-    author: data.author || "Unknown", // for backward compat if needed during migration
+    author: data.author || "Unknown",
     last_episode: data.last_episode || 0,
     file_count: data.file_count || 0,
     last_updated: new Date().toISOString(),
@@ -105,11 +80,14 @@ function saveSeriesInfo(data, rootFolderId) {
 
   const jsonString = JSON.stringify(infoData, null, 2);
 
-  if (files.hasNext()) {
-    files.next().setContent(jsonString);
-    while (files.hasNext()) files.next().setTrashed(true);
+  if (results.length > 0) {
+    DriveAccessService.updateFileContent(results[0].id, jsonString);
+    // 중복 파일 제거
+    for (let i = 1; i < results.length; i++) {
+      DriveAccessService.trash(results[i].id);
+    }
   } else {
-    seriesFolder.createFile(fileName, jsonString, MimeType.PLAIN_TEXT);
+    DriveAccessService.createFile(folderId, fileName, jsonString, "application/json");
   }
 
   return createRes("success", "Info saved");
@@ -117,31 +95,36 @@ function saveSeriesInfo(data, rootFolderId) {
 
 // 기능: 라이브러리 인덱스 조회 (TokiView 캐시 공유)
 function getLibraryIndex(rootFolderId) {
-  const root = DriveApp.getFolderById(rootFolderId);
-  const files = root.getFilesByName("index.json");
+  const results = DriveAccessService.list(rootFolderId, {
+    query: "name = 'index.json'",
+    fields: "files(id)"
+  });
 
-  if (files.hasNext()) {
-    const content = files.next().getBlob().getDataAsString();
+  if (results.length > 0) {
+    const content = DriveAccessService.getFileContent(results[0].id);
     try {
       return createRes("success", JSON.parse(content));
     } catch (e) {
       return createRes("success", []);
     }
   }
-  return createRes("success", []); // 파일 없으면 빈 배열
+  return createRes("success", []);
 }
 
 // 기능: 라이브러리 상태 업데이트 (클라이언트 결과 저장)
 function updateLibraryStatus(data, rootFolderId) {
-  const root = DriveApp.getFolderById(rootFolderId);
-  const files = root.getFilesByName("index.json");
+  const results = DriveAccessService.list(rootFolderId, {
+    query: "name = 'index.json'",
+    fields: "files(id)"
+  });
 
-  if (!files.hasNext()) return createRes("error", "Index not found");
+  if (results.length === 0) return createRes("error", "Index not found");
 
-  const file = files.next();
+  const fileId = results[0].id;
   let library = [];
   try {
-    library = JSON.parse(file.getBlob().getDataAsString());
+    const content = DriveAccessService.getFileContent(fileId);
+    library = JSON.parse(content);
     if (!Array.isArray(library)) library = [];
   } catch (e) {
     return createRes("error", "Invalid JSON");
@@ -161,8 +144,10 @@ function updateLibraryStatus(data, rootFolderId) {
   });
 
   if (changedCount > 0) {
-    file.setContent(JSON.stringify(library));
+    DriveAccessService.updateFileContent(fileId, JSON.stringify(library));
+    return createRes("success", `Updated ${changedCount} items`);
   }
+  return createRes("success", "No changes");
 }
 
 // =======================================================
@@ -170,62 +155,45 @@ function updateLibraryStatus(data, rootFolderId) {
 // =======================================================
 
 function migrateLegacyStructure(rootFolderId) {
-  const root = DriveApp.getFolderById(rootFolderId);
-  const webtoonFolder = getOrCreateSeriesFolder(
-    rootFolderId,
-    "Webtoon",
-    "Webtoon",
-    true,
-  ); // Ensure Cat Folder
-  const novelFolder = getOrCreateSeriesFolder(
-    rootFolderId,
-    "Novel",
-    "Novel",
-    true,
-  ); // Ensure Cat Folder
+  const catWebtoonId = DriveAccessService.ensureFolder(rootFolderId, "Webtoon");
+  const catNovelId = DriveAccessService.ensureFolder(rootFolderId, "Novel");
+  const catMangaId = DriveAccessService.ensureFolder(rootFolderId, "Manga");
 
-  // Reuse helper? getOrCreateSeriesFolder creates Series folder.
-  // We just want ensure Category folders exist.
-  // Let's do it manually for clarity.
-  const ensureCat = (name) => {
-    const iter = root.getFoldersByName(name);
-    return iter.hasNext() ? iter.next() : root.createFolder(name);
-  };
-
-  const catWebtoon = ensureCat("Webtoon");
-  const catNovel = ensureCat("Novel");
-  const catManga = ensureCat("Manga");
-
-  const folders = root.getFolders();
+  const items = DriveAccessService.list(rootFolderId, {
+      fields: "files(id, name, mimeType)"
+  });
+  const folders = items.filter(f => f.mimeType === "application/vnd.google-apps.folder");
+  
   const toMigrate = [];
-  const EXT = ["Webtoon", "Novel", "Manga", "Libraries", "System"];
+  const EXT = ["Webtoon", "Novel", "Manga", "Libraries", "System", "_Thumbnails", "_MergeIndex"];
 
-  // 1. Collect Valid Folders (Snapshot)
-  while (folders.hasNext()) {
-    const folder = folders.next();
-    const name = folder.getName();
-    if (
-      !EXT.includes(name) &&
-      name !== "index.json" &&
-      name !== "info.json"
-    ) {
+  folders.forEach((folder) => {
+    const name = folder.name;
+    if (!EXT.includes(name) && name !== "index.json" && name !== "info.json") {
       toMigrate.push(folder);
     }
-  }
+  });
 
-  // 2. Process Migration
+  let movedCount = 0;
+  let fixedThumbnails = 0;
+
   toMigrate.forEach((folder) => {
     try {
-      const name = folder.getName();
-      Debug.log(`🔄 Migrating: ${name}`);
+      const folderId = folder.id;
+      const folderName = folder.name;
+      Debug.log(`🔄 Migrating: ${folderName}`);
 
       let category = "Webtoon"; // Default
 
       // 1. Analyze info.json for Category & Thumbnail
-      const infoFiles = folder.getFilesByName("info.json");
-      if (infoFiles.hasNext()) {
-        const infoFile = infoFiles.next();
-        const content = infoFile.getBlob().getDataAsString();
+      const infoResults = DriveAccessService.list(folderId, {
+          query: "name = 'info.json'",
+          fields: "files(id)"
+      });
+
+      if (infoResults.length > 0) {
+        const infoFileId = infoResults[0].id;
+        const content = DriveAccessService.getFileContent(infoFileId);
         try {
           const json = JSON.parse(content);
           const metaPublisher = (
@@ -235,48 +203,29 @@ function migrateLegacyStructure(rootFolderId) {
           ).toString();
           const metaSite = (json.site || "").toString();
 
-          // Category Detection
-          if (
-            json.category === "Novel" ||
-            (json.metadata && json.metadata.category === "Novel")
-          ) {
+          if (json.category === "Novel" || (json.metadata && json.metadata.category === "Novel")) {
             category = "Novel";
-          } else if (
-            json.category === "Manga" ||
-            metaPublisher.includes("마나토끼") ||
-            metaSite.includes("마나토끼")
-          ) {
+          } else if (json.category === "Manga" || metaPublisher.includes("마나토끼") || metaSite.includes("마나토끼")) {
             category = "Manga";
           }
 
-          // Extract Thumbnail
           let needsUpdate = false;
-          // Force Update Category in info.json if it changed
           if (json.category !== category) {
             json.category = category;
-            // Also update metadata.category if exists
             if (json.metadata) json.metadata.category = category;
             needsUpdate = true;
           }
 
           if (json.thumbnail && json.thumbnail.length > 500) {
-            // Assume Base64
-            const blob = Utilities.newBlob(
-              Utilities.base64Decode(json.thumbnail),
-              "image/jpeg",
-              "cover.jpg",
-            );
-            folder.createFile(blob);
-
-            // Update info.json to remove Base64
-            json.thumbnail = ""; // Clear it
+            DriveAccessService.createFile(folderId, "cover.jpg", Utilities.base64Decode(json.thumbnail), "image/jpeg");
+            json.thumbnail = ""; 
             needsUpdate = true;
             fixedThumbnails++;
             Debug.log(`   -> Extracted Thumbnail`);
           }
 
           if (needsUpdate) {
-            infoFile.setContent(JSON.stringify(json, null, 2));
+            DriveAccessService.updateFileContent(infoFileId, JSON.stringify(json, null, 2));
             Debug.log(`   -> Updated info.json (Category/Thumbnail)`);
           }
         } catch (e) {
@@ -285,11 +234,11 @@ function migrateLegacyStructure(rootFolderId) {
       }
 
       // 2. Move Folder
-      let targetCat = catWebtoon;
-      if (category === "Novel") targetCat = catNovel;
-      else if (category === "Manga") targetCat = catManga;
+      let targetCatId = catWebtoonId;
+      if (category === "Novel") targetCatId = catNovelId;
+      else if (category === "Manga") targetCatId = catMangaId;
 
-      folder.moveTo(targetCat);
+      DriveAccessService.move(folderId, rootFolderId, targetCatId);
       movedCount++;
       Debug.log(`   -> Moved to ${category}`);
     } catch (e) {

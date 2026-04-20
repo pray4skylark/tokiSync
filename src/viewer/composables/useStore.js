@@ -35,6 +35,8 @@ const showEpisodeModal = ref(false);
 const isInitialLoading = ref(true);
 const isSyncing = ref(false);
 const notification = ref('');
+const needsServerUpdate = ref(false); // [v1.8.0] 서버 업데이트 안내용
+const RECOMMENDED_SERVER_VERSION = '1.8.0';
 
 const config = reactive({ deploymentId: '', apiKey: '', folderId: '' });
 const viewerDefaults = reactive({ 
@@ -374,6 +376,33 @@ const initApp = async () => {
   if (isConfigured()) {
     notify('🚀 저장된 설정으로 연결합니다...');
     await refreshLibrary();
+    
+    // [v1.8.0] 구형 GAS 서버 감지 및 안내 (백그라운드 체크)
+    (async () => {
+      try {
+        const info = await request('get_server_info', {});
+        console.log('[Store:ServerInfo]', info);
+        if (info && info.version) {
+          const verStr = info.version.replace(/^v/, ''); // 'v1.8.0' -> '1.8.0'
+          const [svMajor, svMinor, svPatch] = verStr.split('.').map(Number);
+          const [rcMajor, rcMinor, rcPatch] = RECOMMENDED_SERVER_VERSION.split('.').map(Number);
+          
+          if (svMajor < rcMajor || (svMajor === rcMajor && svMinor < rcMinor)) {
+            needsServerUpdate.value = true;
+          }
+        } else {
+          // get_server_info가 없거나 응답이 이상한 경우 (매우 구형)
+          needsServerUpdate.value = true;
+        }
+      } catch (e) {
+        console.warn('[Store:VersionCheck] Failed:', e);
+        // Unknown type 에러 등이 발생하면 구형 서버로 판단
+        if (e.message?.includes('Unknown type') || e.message?.includes('not found')) {
+          needsServerUpdate.value = true;
+        }
+      }
+    })();
+
     // 3. 이력 Drive sync (백그라운드, 실패해도 무시)
     syncHistoryFromDrive().catch(e => console.warn('[History] 초기 sync 실패:', e));
   } else {
@@ -781,7 +810,7 @@ export function useStore() {
     // UI State
     currentView, showSettings, showViewerControls, showEpisodeModal,
     showDownloadManager, isAddModalOpen,
-    isInitialLoading, isSyncing, notification,
+    isInitialLoading, isSyncing, notification, needsServerUpdate,
 
     // Config & Settings
     config, gasConfig, viewerDefaults, viewerData, novelSettings,
