@@ -547,6 +547,11 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
             } catch (err) {
                 console.error(err);
                 logger.error(`항목 처리 실패 (${item.title}): ${err.message}`, 'Downloader');
+
+                if (isSingleVolume) {
+                    throw new Error(`단행본 합본 모드 중단: ${item.title} 회차를 가져오지 못했습니다. (${err.message})`);
+                }
+
                 continue; // Skip faulty item but continue loop
             }
 
