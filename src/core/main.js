@@ -1,4 +1,4 @@
-import { tokiDownload, resumeNovelSingleVolumeJob } from './downloader.js';
+import { tokiDownload } from './downloader.js';
 import { detectSite, getMaxEpisodes, parseEpisodeRange } from './detector.js'; // Need to export getMaxEpisodes/parseEpisodeRange if possible, or implement logic here.
 import { showConfigModal, getConfig, setConfig } from './config.js';
 import { LogBox, markDownloadedItems, MenuModal } from './ui.js';
@@ -8,7 +8,7 @@ import { getOAuthToken } from './network.js';
 
 import { getCommonPrefix, blobToArrayBuffer, saveFile } from './utils.js';
 
-export async function main() {
+export function main() {
     console.log("🚀 TokiDownloader Loaded (New Core v1.7.4)");
     
     const logger = LogBox.getInstance();
@@ -259,10 +259,6 @@ export async function main() {
 
     const siteInfo = detectSite();
     if(!siteInfo) return; 
-
-    if (await resumeNovelSingleVolumeJob(siteInfo)) {
-        return;
-    }
 
     // -- 4. History Sync (Async) & Cross-Tab Auto Refresh --
     let lastSyncTime = Date.now();
