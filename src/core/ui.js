@@ -47,6 +47,13 @@ export class LogBox {
                 #toki-logbox-title { font-weight: bold; color: #fff; }
                 #toki-logbox-controls span { cursor: pointer; margin-left: 8px; color: #aaa; }
                 #toki-logbox-controls span:hover { color: #fff; }
+                #toki-logbox-controls button {
+                    cursor: pointer; margin-left: 8px; color: #ffb4b4;
+                    background: rgba(255, 80, 80, 0.14);
+                    border: 1px solid rgba(255, 80, 80, 0.35);
+                    border-radius: 4px; font-size: 11px; padding: 2px 6px;
+                }
+                #toki-logbox-controls button:hover { color: #fff; background: rgba(255, 80, 80, 0.25); }
                 #toki-logbox-content {
                     flex: 1; overflow-y: auto; padding: 10px; margin: 0;
                     list-style: none;
@@ -172,6 +179,7 @@ export class LogBox {
             <div id="toki-logbox-header">
                 <span id="toki-logbox-title">TokiSync Log</span>
                 <div id="toki-logbox-controls">
+                    <button id="toki-btn-cancel-job" title="진행 중인 단행본 합본 작업 취소">STOP</button>
                     <span id="toki-btn-report" title="버그 리포트 복사" style="cursor:pointer; color:#facc15;">📋</span>
                     <span id="toki-btn-audio" title="백그라운드 모드" style="cursor:pointer;">🔊</span>
                     <span id="toki-btn-clear" title="Clear">🚫</span>
@@ -188,6 +196,19 @@ export class LogBox {
         document.getElementById('toki-btn-report').onclick = () => this.exportReport();
         document.getElementById('toki-btn-clear').onclick = () => this.clear();
         document.getElementById('toki-btn-close').onclick = () => this.hide();
+
+        const cancelJobBtn = document.getElementById('toki-btn-cancel-job');
+        if (cancelJobBtn) {
+            cancelJobBtn.onclick = async () => {
+                try {
+                    const { cancelNovelSingleVolumeJob } = await import('./downloader.js');
+                    cancelNovelSingleVolumeJob();
+                    this.warn('진행 중인 단행본 합본 작업을 취소했습니다.', 'System');
+                } catch (e) {
+                    this.error(`작업 취소 실패: ${e.message}`, 'System');
+                }
+            };
+        }
         
         // Anti-Sleep Button
         const audioBtn = document.getElementById('toki-btn-audio');

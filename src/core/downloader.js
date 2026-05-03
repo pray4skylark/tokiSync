@@ -18,6 +18,7 @@ const SLEEP_POLICIES = {
 
 const NOVEL_SINGLE_VOLUME_JOB_KEY = "TOKI_NOVEL_SINGLE_VOLUME_JOB";
 const NOVEL_SINGLE_VOLUME_CHAPTERS_KEY = "TOKI_NOVEL_SINGLE_VOLUME_CHAPTERS";
+const NOVEL_SINGLE_VOLUME_CANCELLED_KEY = "TOKI_NOVEL_SINGLE_VOLUME_CANCELLED_AT";
 
 // Processing Loop에 해당되는 로직을 분리 한다.
 export async function processItem(item, builder, siteInfo, iframe, parser, seriesTitle = "") {
@@ -238,6 +239,13 @@ function clearNovelSingleVolumeJob() {
     }
 }
 
+export function cancelNovelSingleVolumeJob() {
+    clearNovelSingleVolumeJob();
+    if (typeof GM_setValue === 'function') {
+        GM_setValue(NOVEL_SINGLE_VOLUME_CANCELLED_KEY, Date.now());
+    }
+}
+
 async function startNovelSingleVolumeNavigationJob({ list, parser, siteInfo, rootFolder, seriesTitle, destination, category, seriesMetadata }) {
     const items = list.map((li) => {
         const item = parser.parseListItem(li.element || li);
@@ -310,6 +318,18 @@ export async function resumeNovelSingleVolumeJob(siteInfo) {
 
     const job = GM_getValue(NOVEL_SINGLE_VOLUME_JOB_KEY, null);
     if (!job || !job.active || !Array.isArray(job.items) || job.items.length === 0) return false;
+
+    const cancelledAt = GM_getValue(NOVEL_SINGLE_VOLUME_CANCELLED_KEY, 0);
+    if (cancelledAt && job.startedAt && cancelledAt >= job.startedAt) {
+        clearNovelSingleVolumeJob();
+        return false;
+    }
+
+    const MAX_JOB_AGE_MS = 30 * 60 * 1000;
+    if (job.startedAt && Date.now() - job.startedAt > MAX_JOB_AGE_MS) {
+        clearNovelSingleVolumeJob();
+        return false;
+    }
 
     const currentPath = normalizePath(window.location.href);
     let currentIndex = job.items.findIndex((item) => normalizePath(item.src) === currentPath);
