@@ -500,6 +500,9 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
         }
 
         // --- Processing Loop ---
+        let processedSuccessCount = 0;
+        const failedItems = [];
+
         for (let i = 0; i < list.length; i++) {
             const item = parser.parseListItem(list[i].element || list[i]); 
             console.clear();
@@ -547,6 +550,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
             } catch (err) {
                 console.error(err);
                 logger.error(`항목 처리 실패 (${item.title}): ${err.message}`, 'Downloader');
+                failedItems.push(`${item.title}: ${err.message}`);
 
                 if (isSingleVolume) {
                     throw new Error(`단행본 합본 모드 중단: ${item.title} 회차를 가져오지 못했습니다. (${err.message})`);
@@ -698,6 +702,8 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                     }
                 }
             }
+
+            processedSuccessCount++;
             
             // [v1.4.0] Add completion badge to list item (real-time feedback)
             if (item.element && !item.element.querySelector('.toki-badge')) {
@@ -771,6 +777,11 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
             }
         }
 
+        if (processedSuccessCount === 0) {
+            const reason = failedItems.length > 0 ? failedItems.slice(0, 3).join('\n') : '성공한 항목이 없습니다.';
+            throw new Error(`다운로드된 항목이 0개입니다.\n${reason}`);
+        }
+
         // Cleanup
         iframe.remove();
 
@@ -786,8 +797,13 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
             );
         }
 
-        logger.success(`✅ 다운로드 완료!`);
-        Notifier.notify('TokiSync', `다운로드 완료! (${list.length}개 항목)`);
+        if (failedItems.length > 0) {
+            logger.warn(`⚠️ 다운로드 완료: 성공 ${processedSuccessCount}개, 실패 ${failedItems.length}개`, 'Downloader');
+            Notifier.notify('TokiSync', `다운로드 완료: 성공 ${processedSuccessCount}개, 실패 ${failedItems.length}개`);
+        } else {
+            logger.success(`✅ 다운로드 완료!`);
+            Notifier.notify('TokiSync', `다운로드 완료! (${processedSuccessCount}개 항목)`);
+        }
 
     } catch (error) {
         console.error(error);
