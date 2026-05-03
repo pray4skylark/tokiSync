@@ -44,7 +44,7 @@ export async function waitIframeLoad(iframe, url) {
             
             // [Fix] 시나리오 1/4: 고정 sleep(500) 대신 실제 콘텐츠 DOM 폴링
             // load 이벤트 후에도 JS lazy-render 페이지는 DOM이 비어있을 수 있음
-            // 이미지(.view-padding div img) 또는 소설 텍스트(#novel_content) 중 하나가
+            // 이미지(.view-padding div img) 또는 소설 텍스트(#novel_content / 새 ntk 본문 컨테이너) 중 하나가
             // 나타날 때까지 최대 8초 폴링 (200ms 간격 × 40회)
             await waitForContent(iframe, 8000);
             
@@ -126,7 +126,7 @@ export async function waitIframeLoad(iframe, url) {
 
 /**
  * iframe 내부에 실제 콘텐츠가 로드될 때까지 폴링 대기
- * 웹툰: .view-padding div img / 소설: #novel_content
+ * 웹툰: .view-padding div img / 소설: #novel_content 또는 새 ntk 본문 컨테이너
  * @param {HTMLIFrameElement} iframe
  * @param {number} maxWaitMs 최대 대기 시간 (ms), 기본 8000
  */
@@ -138,7 +138,18 @@ async function waitForContent(iframe, maxWaitMs = 8000) {
         try {
             const iframeDoc = iframe.contentWindow.document;
             const hasImages = iframeDoc.querySelector('.view-padding div img') !== null;
-            const hasNovel  = iframeDoc.querySelector('#novel_content') !== null;
+            const hasNovel  = iframeDoc.querySelector([
+                '#novel_content',
+                '.novel-content',
+                '.novel_view',
+                '.novel-view',
+                '.episode-content',
+                '.episode_view',
+                '.viewer-content',
+                '.reading-content',
+                'article',
+                'main'
+            ].join(',')) !== null;
             
             if (hasImages || hasNovel) {
                 const type = hasImages ? 'Webtoon' : 'Novel';

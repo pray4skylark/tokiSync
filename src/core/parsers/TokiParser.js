@@ -7,29 +7,42 @@ export class TokiParser extends BaseParser {
 
     getListItems() {
         const listBody = document.querySelector('.list-body');
-        if (!listBody) {
-            console.warn('[TokiParser] .list-body not found');
-            return [];
+        if (listBody) {
+            return Array.from(listBody.querySelectorAll('li')).reverse();
         }
-        return Array.from(listBody.querySelectorAll('li')).reverse();
+
+        const novelEpisodeLinks = this._getNovelEpisodeLinks(document);
+        if (novelEpisodeLinks.length > 0) {
+            console.log(`[TokiParser] novel episode links detected: ${novelEpisodeLinks.length}`);
+            return novelEpisodeLinks.reverse();
+        }
+
+        console.warn('[TokiParser] supported episode list not found');
+        return [];
     }
 
     parseListItem(li) {
         // Extract Number
         const numEl = li.querySelector('.wr-num');
-        const num = numEl ? numEl.innerText.trim().padStart(4, '0') : "0000";
+        const linkEl = li.matches && li.matches('a') ? li : li.querySelector('a');
+        const hrefNum = this._extractEpisodeNumber(linkEl);
+        const textNum = this._extractEpisodeNumberFromText((linkEl && linkEl.textContent) || li.textContent || '');
+        const numText = numEl ? (numEl.innerText || numEl.textContent || '') : '';
+        const numTextMatch = numText.match(/[0-9]+/);
+        // ntk novel URLs use internal post IDs, so visible text like "801화" must win over href IDs.
+        const rawNum = numEl ? (numTextMatch ? numTextMatch[0] : numText.trim()) : (textNum || hrefNum || "0");
+        const num = rawNum.toString().padStart(4, '0');
 
         // Extract Title & Link
-        const linkEl = li.querySelector('a');
         let title = "Unknown";
         let src = "";
         
         if (linkEl) {
             // Clean title: Remove spans and fix redundant patterns
-            title = linkEl.innerHTML.replace(/<span[\s\S]*?\/span>/g, '')
-                .replace(/\s+/g, ' ')               // Remove extra spaces
-                .replace(/(\d+)\s*-\s*(\1)/, '$1')  // Fix "255 - 255" -> "255"
-                .trim();
+            const rawTitle = li.classList && li.classList.contains('list-body')
+                ? linkEl.innerHTML
+                : (linkEl.innerText || linkEl.textContent || linkEl.innerHTML);
+            title = this._cleanEpisodeTitle(rawTitle, rawNum);
             src = linkEl.href;
         }
 
@@ -38,7 +51,220 @@ export class TokiParser extends BaseParser {
 
     getNovelContent(iframeDocument) {
         const contentEl = iframeDocument.querySelector('#novel_content');
-        return contentEl ? contentEl.innerText : "";
+        if (contentEl) {
+            const text = this._extractCleanText(contentEl);
+            return this._isValidNovelText(text) ? text : "";
+        }
+
+        const fallback = this._getBestNovelTextContainer(iframeDocument);
+        return fallback ? fallback.text : "";
+    }
+
+    _getNovelEpisodeLinks(rootDocument) {
+        let pageUrl = null;
+        try {
+            pageUrl = new URL(rootDocument.location.href);
+        } catch (e) {
+            return [];
+        }
+
+        const seriesMatch = pageUrl.pathname.match(/^\/novel\/([0-9]+)/);
+        if (!seriesMatch) return [];
+
+        const seriesId = seriesMatch[1];
+        const seen = new Set();
+        const links = Array.from(rootDocument.querySelectorAll(`a[href*="/novel/${seriesId}/"]`));
+
+        return links.filter((link) => {
+            let hrefUrl = null;
+            try {
+                hrefUrl = new URL(link.href, pageUrl.origin);
+            } catch (e) {
+                return false;
+            }
+
+            if (hrefUrl.origin !== pageUrl.origin) return false;
+            if (!hrefUrl.pathname.match(new RegExp(`^/novel/${seriesId}/[0-9]+/?$`))) return false;
+
+            const text = (link.innerText || link.textContent || '').replace(/\s+/g, ' ').trim();
+            if (!text) return false;
+
+            // Quick action links duplicate real episodes on ntk pages.
+            if (/(?:부터|정주행|최신화)/.test(text)) return false;
+
+            const key = hrefUrl.pathname.replace(/\/$/, '');
+            if (seen.has(key)) return false;
+            seen.add(key);
+
+            return true;
+        });
+    }
+
+    _extractEpisodeNumber(linkEl) {
+        if (!linkEl || !linkEl.href) return null;
+        try {
+            const hrefUrl = new URL(linkEl.href);
+            const match = hrefUrl.pathname.match(/^\/novel\/[0-9]+\/([0-9]+)\/?$/);
+            return match ? match[1] : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    _extractEpisodeNumberFromText(text) {
+        const match = (text || '').match(/([0-9]+)\s*화/);
+        return match ? match[1] : null;
+    }
+
+    _cleanEpisodeTitle(rawTitle, num) {
+        let title = (rawTitle || '')
+            .replace(/<span[\s\S]*?<\/span>/g, '')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/\bNEW\b/g, ' ')
+            .replace(/[▶›→]+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .replace(/(\d+)\s*-\s*(\1)/, '$1')
+            .trim();
+
+        title = title
+            .replace(/\s*\d{2}\.\s*\d{2}\.\s*\d{2}\.?\s*$/g, '')
+            .replace(/\s*\d{4}\.\s*\d{2}\.\s*\d{2}\.?\s*$/g, '')
+            .replace(/\s*(방금|[0-9]+시간 전|[0-9]+분 전)\s*$/g, '')
+            .replace(/^([0-9]+)\s*화\s+\1\.?$/g, '$1화')
+            .replace(/^([0-9]+)\s*화\s+\1\.\s+/g, '$1화 ')
+            .trim();
+
+        if (!title && num !== undefined && num !== null) {
+            title = `${parseInt(num, 10)}화`;
+        }
+
+        return title || "Unknown";
+    }
+
+    _getBestNovelTextContainer(iframeDocument) {
+        const selectors = [
+            '.novel-content',
+            '.novel_view',
+            '.novel-view',
+            '.episode-content',
+            '.episode_view',
+            '.viewer-content',
+            '.reading-content',
+            '.post-content',
+            '.content-view',
+            '.view-content',
+            'article',
+            'main'
+        ];
+
+        let best = null;
+        for (const selector of selectors) {
+            const candidates = Array.from(iframeDocument.querySelectorAll(selector));
+            for (const candidate of candidates) {
+                const text = this._extractCleanText(candidate);
+                if (!this._isValidNovelText(text)) continue;
+
+                const anchorCount = candidate.querySelectorAll('a').length;
+                const buttonCount = candidate.querySelectorAll('button').length;
+                const score = text.length - (anchorCount * 80) - (buttonCount * 50);
+
+                if (text.length > 100 && (!best || score > best.score)) {
+                    best = { text, score };
+                }
+            }
+        }
+
+        if (best) return best;
+
+        const bodyText = this._extractCleanText(iframeDocument.body, true);
+        return this._isValidNovelText(bodyText) ? { text: bodyText, score: bodyText.length } : null;
+    }
+
+    _extractCleanText(element, filterUiLines = false) {
+        if (!element) return "";
+
+        const clone = element.cloneNode(true);
+        clone.querySelectorAll('br').forEach((el) => el.replaceWith('\n'));
+        clone.querySelectorAll([
+            'p',
+            'div',
+            'section',
+            'article',
+            'li',
+            'h1',
+            'h2',
+            'h3'
+        ].join(',')).forEach((el) => {
+            el.appendChild((el.ownerDocument || document).createTextNode('\n'));
+        });
+
+        clone.querySelectorAll([
+            'script',
+            'style',
+            'noscript',
+            'nav',
+            'header',
+            'footer',
+            'aside',
+            'form',
+            'button',
+            'input',
+            'textarea',
+            '[class*="comment"]',
+            '[id*="comment"]',
+            '[class*="reply"]',
+            '[id*="reply"]'
+        ].join(',')).forEach((el) => el.remove());
+
+        let text = (clone.innerText || clone.textContent || '')
+            .replace(/\r/g, '')
+            .replace(/\n[ \t]+/g, '\n')
+            .replace(/[ \t]+\n/g, '\n')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+
+        if (filterUiLines) {
+            const uiLinePattern = /^(홈|웹툰|완결웹툰|만화|완결만화|소설|랭킹|이벤트|공지사항|자유게시판|즐겨찾기|최근본웹툰|로그인|회원가입|검색|댓글|목록|이전화|다음화|별점|평가|뉴토끼|뉴 토끼)$/;
+            text = text
+                .split('\n')
+                .map((line) => line.trim())
+                .filter((line) => line && !uiLinePattern.test(line))
+                .join('\n')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim();
+        }
+
+        return text;
+    }
+
+    _isValidNovelText(text) {
+        const normalized = (text || '').replace(/\s+/g, ' ').trim();
+        if (normalized.length < 80) return false;
+
+        const invalidMarkers = [
+            '본문을 불러올 수 없습니다',
+            '불러오는 중',
+            '댓글을 작성하려면 로그인이 필요합니다',
+            '로그인회원가입',
+            '글자16px',
+            '홈 › 소설',
+            '아직 댓글이 없어요',
+            '첫 댓글을 남겨보세요'
+        ];
+
+        if (invalidMarkers.some((marker) => normalized.includes(marker))) return false;
+
+        const uiMarkerCount = [
+            '이전화',
+            '다음화',
+            '책갈피',
+            '목록',
+            '댓글',
+            '로그인',
+            '회원가입'
+        ].filter((marker) => normalized.includes(marker)).length;
+
+        return uiMarkerCount < 3;
     }
 
     /**
@@ -203,6 +429,11 @@ export class TokiParser extends BaseParser {
                 if (splitIndex > 0) return title.substring(0, splitIndex).trim();
                 return title.trim();
             }
+        }
+
+        const heading = document.querySelector('h1');
+        if (heading && heading.innerText.trim().length > 0) {
+            return heading.innerText.trim();
         }
 
         const viewContent = document.querySelectorAll('.view-content');

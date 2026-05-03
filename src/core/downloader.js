@@ -18,23 +18,28 @@ const SLEEP_POLICIES = {
 
 // Processing Loop에 해당되는 로직을 분리 한다.
 export async function processItem(item, builder, siteInfo, iframe, parser, seriesTitle = "") {
-    const { site } = siteInfo;
-    const isNovel = (site === "북토끼");
+    const { site, category } = siteInfo;
+    const isNovel = (category === "Novel");
 
-    await waitIframeLoad(iframe, item.src);
-    
     // Apply Dynamic Sleep based on Policy
     const config = getConfig();
     const policy = SLEEP_POLICIES[config.sleepMode] || SLEEP_POLICIES.agile;
-    await sleep(policy.min, policy.max);
-    
-    const iframeDoc = iframe.contentWindow.document;
 
     if (isNovel) {
-        const text = parser.getNovelContent(iframeDoc);        // Add chapter to existing builder instance
+        const novelDoc = await loadNovelDocument(item.src, iframe, parser);
+        await sleep(policy.min, policy.max);
+        const text = parser.getNovelContent(novelDoc);
+        if (!text || text.trim().length === 0) {
+            throw new Error("소설 본문을 찾을 수 없습니다.");
+        }
         builder.addChapter(item.title, text);
     } 
     else {
+        await waitIframeLoad(iframe, item.src);
+        await sleep(policy.min, policy.max);
+
+        const iframeDoc = iframe.contentWindow.document;
+
         // Webtoon / Manga (v1.7.1 Hybrid Collection)
         const logger = LogBox.getInstance();
         
@@ -100,6 +105,94 @@ export async function processItem(item, builder, siteInfo, iframe, parser, serie
     }
 }
 
+async function loadNovelDocument(url, iframe, parser) {
+    const logger = LogBox.getInstance();
+
+    try {
+        logger.log('[Novel] fetch 기반 본문 로드 시도', 'Parser');
+        const response = await fetch(url, {
+            credentials: 'include',
+            cache: 'no-store'
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        const html = await response.text();
+        if (/Just a moment|Enable JavaScript and cookies|cf-challenge|_cf_chl_opt/i.test(html)) {
+            throw new Error('Cloudflare challenge page returned');
+        }
+
+        const parsedDoc = new DOMParser().parseFromString(html, 'text/html');
+        const text = parser.getNovelContent(parsedDoc);
+        if (text && text.trim().length > 0) {
+            logger.log('[Novel] fetch 기반 본문 로드 성공', 'Parser');
+            return parsedDoc;
+        }
+
+        throw new Error('본문 컨테이너 미감지');
+    } catch (fetchErr) {
+        logger.warn(`[Novel] fetch 로드 실패, iframe 새로고침 폴백 시도: ${fetchErr.message}`, 'Parser');
+    }
+
+    return await loadNovelDocumentFromIframe(url, iframe, parser, logger);
+}
+
+async function loadNovelDocumentFromIframe(url, iframe, parser, logger) {
+    const MAX_ATTEMPTS = 3;
+
+    await waitIframeLoad(iframe, url);
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        let iframeDoc = null;
+        try {
+            iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+        } catch (frameErr) {
+            throw new Error(`소설 페이지 DOM 접근 실패: ${frameErr.message}`);
+        }
+
+        const text = parser.getNovelContent(iframeDoc);
+        if (text && text.trim().length > 0) {
+            logger.log(`[Novel] iframe 본문 로드 성공 (${attempt}/${MAX_ATTEMPTS})`, 'Parser');
+            return iframeDoc;
+        }
+
+        if (attempt === MAX_ATTEMPTS) break;
+
+        logger.warn(`[Novel] 본문 미로드 상태 감지, 새로고침 재시도 (${attempt}/${MAX_ATTEMPTS})`, 'Parser');
+        await refreshNovelFrame(iframe, iframeDoc);
+    }
+
+    throw new Error('소설 본문을 불러오지 못했습니다. 회차 페이지의 새로고침이 계속 실패했습니다.');
+}
+
+async function refreshNovelFrame(iframe, iframeDoc) {
+    let clicked = false;
+
+    try {
+        const refreshControl = Array.from(iframeDoc.querySelectorAll('button, a, [role="button"]'))
+            .find((el) => /새로고침/.test((el.innerText || el.textContent || '').trim()));
+
+        if (refreshControl) {
+            refreshControl.click();
+            clicked = true;
+        }
+    } catch (e) {
+        // Fall back to a normal reload below.
+    }
+
+    if (!clicked) {
+        try {
+            iframe.contentWindow.location.reload();
+        } catch (e) {
+            iframe.src = iframe.src;
+        }
+    }
+
+    await sleep(2500);
+}
+
 
 /**
  * "1,2,4-10,15" 형식 문자열을 에피소드 번호 Set으로 변환
@@ -153,7 +246,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
     }
 
     const { site, category } = siteInfo;
-    const isNovel = (site === "북토끼");
+    const isNovel = (category === "Novel");
 
     try {
         // Prepare Strategy Variables
@@ -407,6 +500,9 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
         }
 
         // --- Processing Loop ---
+        let processedSuccessCount = 0;
+        const failedItems = [];
+
         for (let i = 0; i < list.length; i++) {
             const item = parser.parseListItem(list[i].element || list[i]); 
             console.clear();
@@ -454,6 +550,12 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
             } catch (err) {
                 console.error(err);
                 logger.error(`항목 처리 실패 (${item.title}): ${err.message}`, 'Downloader');
+                failedItems.push(`${item.title}: ${err.message}`);
+
+                if (isSingleVolume) {
+                    throw new Error(`단행본 합본 모드 중단: ${item.title} 회차를 가져오지 못했습니다. (${err.message})`);
+                }
+
                 continue; // Skip faulty item but continue loop
             }
 
@@ -600,6 +702,8 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                     }
                 }
             }
+
+            processedSuccessCount++;
             
             // [v1.4.0] Add completion badge to list item (real-time feedback)
             if (item.element && !item.element.querySelector('.toki-badge')) {
@@ -673,6 +777,11 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
             }
         }
 
+        if (processedSuccessCount === 0) {
+            const reason = failedItems.length > 0 ? failedItems.slice(0, 3).join('\n') : '성공한 항목이 없습니다.';
+            throw new Error(`다운로드된 항목이 0개입니다.\n${reason}`);
+        }
+
         // Cleanup
         iframe.remove();
 
@@ -688,8 +797,13 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
             );
         }
 
-        logger.success(`✅ 다운로드 완료!`);
-        Notifier.notify('TokiSync', `다운로드 완료! (${list.length}개 항목)`);
+        if (failedItems.length > 0) {
+            logger.warn(`⚠️ 다운로드 완료: 성공 ${processedSuccessCount}개, 실패 ${failedItems.length}개`, 'Downloader');
+            Notifier.notify('TokiSync', `다운로드 완료: 성공 ${processedSuccessCount}개, 실패 ${failedItems.length}개`);
+        } else {
+            logger.success(`✅ 다운로드 완료!`);
+            Notifier.notify('TokiSync', `다운로드 완료! (${processedSuccessCount}개 항목)`);
+        }
 
     } catch (error) {
         console.error(error);

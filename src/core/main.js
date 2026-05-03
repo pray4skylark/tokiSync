@@ -286,9 +286,7 @@ export function main() {
             // Determine Root Folder Name (Unified with Downloader)
             const rootFolder = parser.getFormattedTitle(seriesId, first.title, last.title, getCommonPrefix);
 
-            let category = 'Webtoon';
-            if (siteInfo.site === '북토끼') category = 'Novel';
-            else if (siteInfo.site === '마나토끼') category = 'Manga';
+            const category = siteInfo.category || 'Webtoon';
 
             console.log(`[TokiSync] Fetching history for: ${rootFolder} (${category})`);
             const history = await fetchHistory(rootFolder, category);
