@@ -21,20 +21,25 @@ export async function processItem(item, builder, siteInfo, iframe, parser, serie
     const { site, category } = siteInfo;
     const isNovel = (category === "Novel");
 
-    await waitIframeLoad(iframe, item.src);
-    
     // Apply Dynamic Sleep based on Policy
     const config = getConfig();
     const policy = SLEEP_POLICIES[config.sleepMode] || SLEEP_POLICIES.agile;
-    await sleep(policy.min, policy.max);
-    
-    const iframeDoc = iframe.contentWindow.document;
 
     if (isNovel) {
-        const text = parser.getNovelContent(iframeDoc);        // Add chapter to existing builder instance
+        const novelDoc = await loadNovelDocument(item.src, iframe, parser);
+        await sleep(policy.min, policy.max);
+        const text = parser.getNovelContent(novelDoc);
+        if (!text || text.trim().length === 0) {
+            throw new Error("소설 본문을 찾을 수 없습니다.");
+        }
         builder.addChapter(item.title, text);
     } 
     else {
+        await waitIframeLoad(iframe, item.src);
+        await sleep(policy.min, policy.max);
+
+        const iframeDoc = iframe.contentWindow.document;
+
         // Webtoon / Manga (v1.7.1 Hybrid Collection)
         const logger = LogBox.getInstance();
         
@@ -97,6 +102,46 @@ export async function processItem(item, builder, siteInfo, iframe, parser, serie
         const chapterNum = chapterMatch ? chapterMatch[1].padStart(4, '0') : item.num;
         const cleanChapterTitle = `${chapterNum} ${chapterTitleOnly}`;
         builder.addChapter(cleanChapterTitle, images);
+    }
+}
+
+async function loadNovelDocument(url, iframe, parser) {
+    const logger = LogBox.getInstance();
+
+    try {
+        logger.log('[Novel] fetch 기반 본문 로드 시도', 'Parser');
+        const response = await fetch(url, {
+            credentials: 'include',
+            cache: 'no-store'
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        const html = await response.text();
+        if (/Just a moment|Enable JavaScript and cookies|cf-challenge|_cf_chl_opt/i.test(html)) {
+            throw new Error('Cloudflare challenge page returned');
+        }
+
+        const parsedDoc = new DOMParser().parseFromString(html, 'text/html');
+        const text = parser.getNovelContent(parsedDoc);
+        if (text && text.trim().length > 0) {
+            logger.log('[Novel] fetch 기반 본문 로드 성공', 'Parser');
+            return parsedDoc;
+        }
+
+        throw new Error('본문 컨테이너 미감지');
+    } catch (fetchErr) {
+        logger.warn(`[Novel] fetch 로드 실패, iframe 폴백 시도: ${fetchErr.message}`, 'Parser');
+    }
+
+    await waitIframeLoad(iframe, url);
+
+    try {
+        return iframe.contentDocument || iframe.contentWindow.document;
+    } catch (frameErr) {
+        throw new Error(`소설 페이지 DOM 접근 실패: ${frameErr.message}`);
     }
 }
 
