@@ -18,8 +18,8 @@ const SLEEP_POLICIES = {
 
 // Processing Loop에 해당되는 로직을 분리 한다.
 export async function processItem(item, builder, siteInfo, iframe, parser, seriesTitle = "") {
-    const { site } = siteInfo;
-    const isNovel = (site === "북토끼");
+    const { site, category } = siteInfo;
+    const isNovel = (category === "Novel");
 
     await waitIframeLoad(iframe, item.src);
     
@@ -153,7 +153,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
     }
 
     const { site, category } = siteInfo;
-    const isNovel = (site === "북토끼");
+    const isNovel = (category === "Novel");
 
     try {
         // Prepare Strategy Variables

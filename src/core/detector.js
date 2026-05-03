@@ -3,8 +3,29 @@ export function detectSite() {
     let site = '뉴토끼'; // Default
     let protocolDomain = 'https://newtoki350.com'; // Default fallback
     let category = 'Webtoon'; // Default
+    let parsedUrl = null;
 
-    if (currentURL.match(/^https:\/\/booktoki[0-9]+.com\/novel\/[0-9]+/)) {
+    try {
+        parsedUrl = new URL(currentURL);
+    } catch (e) {
+        return null;
+    }
+
+    const hostname = parsedUrl.hostname;
+    const pathname = parsedUrl.pathname;
+
+    // NewToki novel pages moved from the old BookToki-only host pattern to ntkXX.com/novel/{seriesId}.
+    // Keep this scoped to series/episode pages so the top-level /novel catalogue is not treated as a download page.
+    if (
+        (/^(booktoki|newtoki)\d+\.com$/.test(hostname) || /^ntk\d+\.com$/.test(hostname)) &&
+        /^\/novel\/[0-9]+(?:\/[0-9]+)?\/?$/.test(pathname)
+    ) {
+        site = hostname.startsWith('booktoki') ? '북토끼' : '뉴토끼';
+        protocolDomain = parsedUrl.origin;
+        category = 'Novel';
+    }
+
+    else if (currentURL.match(/^https:\/\/booktoki[0-9]+.com\/novel\/[0-9]+/)) {
         site = "북토끼"; 
         protocolDomain = currentURL.match(/^https:\/\/booktoki[0-9]+.com/)[0];
         category = 'Novel';

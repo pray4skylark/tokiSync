@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased] - 2026-05-03
+
+### 🛠 소설 도메인 변경 대응
+
+- **ntk 소설 주소 지원**: `ntkXX.com/novel/{seriesId}` 및 `ntkXX.com/novel/{seriesId}/{episodeId}` 형식을 소설 카테고리로 감지하도록 추가했습니다.
+- **새 소설 회차 목록 파서**: 기존 `.list-body` 구조가 없는 페이지에서도 동일 작품의 `/novel/{seriesId}/{episodeId}` 링크를 회차 목록으로 수집하도록 폴백을 추가했습니다.
+- **소설 본문 폴백 강화**: `#novel_content`가 없는 새 페이지 구조에서도 일반적인 본문 컨테이너(`article`, `main`, `.novel-content` 등)를 점수 기반으로 선택해 EPUB 텍스트를 추출하도록 보강했습니다.
+
 ## [v1.8.0] - 2026-04-17
 
 ### 🚀 차세대 Drive API V3 아키텍처 전환 및 백엔드 전면 개편
