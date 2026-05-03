@@ -397,15 +397,17 @@ export class MenuModal {
     constructor(handlers = {}) {
         if (MenuModal.instance) return MenuModal.instance;
         this.handlers = handlers; // { onDownload, openViewer, openSettings, toggleLog, ... }
+        this.fabWatchdog = null;
+        this.fabObserver = null;
         this.init();
         MenuModal.instance = this;
     }
 
     init() {
-        if (document.getElementById('toki-menu-fab')) return;
-        
-        // 1. Create FAB
-        this.createFAB();
+        // 1. Create FAB and keep it mounted. Some target pages hydrate after document-end
+        // and remove foreign body children, so the menu button needs a light watchdog.
+        this.ensureFAB();
+        this.startFABWatchdog();
         
         // 2. Keyboard Shortcut (Ctrl+Shift+T)
         window.addEventListener('keydown', (e) => {
@@ -416,7 +418,31 @@ export class MenuModal {
         });
     }
 
+    ensureFAB() {
+        if (!document.body) return;
+        if (document.getElementById('toki-menu-fab')) return;
+        this.createFAB();
+    }
+
+    startFABWatchdog() {
+        if (this.fabWatchdog) return;
+
+        this.fabWatchdog = setInterval(() => this.ensureFAB(), 1000);
+
+        try {
+            this.fabObserver = new MutationObserver(() => this.ensureFAB());
+            this.fabObserver.observe(document.documentElement, {
+                childList: true,
+                subtree: true
+            });
+        } catch (e) {
+            // setInterval watchdog above is enough if MutationObserver is unavailable.
+        }
+    }
+
     createFAB() {
+        if (!document.body || document.getElementById('toki-menu-fab')) return;
+
         const fab = document.createElement('div');
         fab.id = 'toki-menu-fab';
         fab.className = 'toki-fab';
