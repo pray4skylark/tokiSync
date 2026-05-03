@@ -133,16 +133,64 @@ async function loadNovelDocument(url, iframe, parser) {
 
         throw new Error('본문 컨테이너 미감지');
     } catch (fetchErr) {
-        logger.warn(`[Novel] fetch 로드 실패, iframe 폴백 시도: ${fetchErr.message}`, 'Parser');
+        logger.warn(`[Novel] fetch 로드 실패, iframe 새로고침 폴백 시도: ${fetchErr.message}`, 'Parser');
     }
+
+    return await loadNovelDocumentFromIframe(url, iframe, parser, logger);
+}
+
+async function loadNovelDocumentFromIframe(url, iframe, parser, logger) {
+    const MAX_ATTEMPTS = 3;
 
     await waitIframeLoad(iframe, url);
 
-    try {
-        return iframe.contentDocument || iframe.contentWindow.document;
-    } catch (frameErr) {
-        throw new Error(`소설 페이지 DOM 접근 실패: ${frameErr.message}`);
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        let iframeDoc = null;
+        try {
+            iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+        } catch (frameErr) {
+            throw new Error(`소설 페이지 DOM 접근 실패: ${frameErr.message}`);
+        }
+
+        const text = parser.getNovelContent(iframeDoc);
+        if (text && text.trim().length > 0) {
+            logger.log(`[Novel] iframe 본문 로드 성공 (${attempt}/${MAX_ATTEMPTS})`, 'Parser');
+            return iframeDoc;
+        }
+
+        if (attempt === MAX_ATTEMPTS) break;
+
+        logger.warn(`[Novel] 본문 미로드 상태 감지, 새로고침 재시도 (${attempt}/${MAX_ATTEMPTS})`, 'Parser');
+        await refreshNovelFrame(iframe, iframeDoc);
     }
+
+    throw new Error('소설 본문을 불러오지 못했습니다. 회차 페이지의 새로고침이 계속 실패했습니다.');
+}
+
+async function refreshNovelFrame(iframe, iframeDoc) {
+    let clicked = false;
+
+    try {
+        const refreshControl = Array.from(iframeDoc.querySelectorAll('button, a, [role="button"]'))
+            .find((el) => /새로고침/.test((el.innerText || el.textContent || '').trim()));
+
+        if (refreshControl) {
+            refreshControl.click();
+            clicked = true;
+        }
+    } catch (e) {
+        // Fall back to a normal reload below.
+    }
+
+    if (!clicked) {
+        try {
+            iframe.contentWindow.location.reload();
+        } catch (e) {
+            iframe.src = iframe.src;
+        }
+    }
+
+    await sleep(2500);
 }
 
 

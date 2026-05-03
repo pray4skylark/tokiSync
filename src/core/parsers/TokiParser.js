@@ -51,7 +51,10 @@ export class TokiParser extends BaseParser {
 
     getNovelContent(iframeDocument) {
         const contentEl = iframeDocument.querySelector('#novel_content');
-        if (contentEl) return contentEl.innerText;
+        if (contentEl) {
+            const text = this._extractCleanText(contentEl);
+            return this._isValidNovelText(text) ? text : "";
+        }
 
         const fallback = this._getBestNovelTextContainer(iframeDocument);
         return fallback ? fallback.text : "";
@@ -159,6 +162,8 @@ export class TokiParser extends BaseParser {
             const candidates = Array.from(iframeDocument.querySelectorAll(selector));
             for (const candidate of candidates) {
                 const text = this._extractCleanText(candidate);
+                if (!this._isValidNovelText(text)) continue;
+
                 const anchorCount = candidate.querySelectorAll('a').length;
                 const buttonCount = candidate.querySelectorAll('button').length;
                 const score = text.length - (anchorCount * 80) - (buttonCount * 50);
@@ -172,13 +177,27 @@ export class TokiParser extends BaseParser {
         if (best) return best;
 
         const bodyText = this._extractCleanText(iframeDocument.body, true);
-        return bodyText.length > 100 ? { text: bodyText, score: bodyText.length } : null;
+        return this._isValidNovelText(bodyText) ? { text: bodyText, score: bodyText.length } : null;
     }
 
     _extractCleanText(element, filterUiLines = false) {
         if (!element) return "";
 
         const clone = element.cloneNode(true);
+        clone.querySelectorAll('br').forEach((el) => el.replaceWith('\n'));
+        clone.querySelectorAll([
+            'p',
+            'div',
+            'section',
+            'article',
+            'li',
+            'h1',
+            'h2',
+            'h3'
+        ].join(',')).forEach((el) => {
+            el.appendChild((el.ownerDocument || document).createTextNode('\n'));
+        });
+
         clone.querySelectorAll([
             'script',
             'style',
@@ -216,6 +235,36 @@ export class TokiParser extends BaseParser {
         }
 
         return text;
+    }
+
+    _isValidNovelText(text) {
+        const normalized = (text || '').replace(/\s+/g, ' ').trim();
+        if (normalized.length < 80) return false;
+
+        const invalidMarkers = [
+            '본문을 불러올 수 없습니다',
+            '불러오는 중',
+            '댓글을 작성하려면 로그인이 필요합니다',
+            '로그인회원가입',
+            '글자16px',
+            '홈 › 소설',
+            '아직 댓글이 없어요',
+            '첫 댓글을 남겨보세요'
+        ];
+
+        if (invalidMarkers.some((marker) => normalized.includes(marker))) return false;
+
+        const uiMarkerCount = [
+            '이전화',
+            '다음화',
+            '책갈피',
+            '목록',
+            '댓글',
+            '로그인',
+            '회원가입'
+        ].filter((marker) => normalized.includes(marker)).length;
+
+        return uiMarkerCount < 3;
     }
 
     /**
