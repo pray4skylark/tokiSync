@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 - **새 소설 회차 목록 파서**: 기존 `.list-body` 구조가 없는 페이지에서도 동일 작품의 `/novel/{seriesId}/{episodeId}` 링크를 회차 목록으로 수집하도록 폴백을 추가했습니다.
 - **소설 본문 폴백 강화**: `#novel_content`가 없는 새 페이지 구조에서도 일반적인 본문 컨테이너(`article`, `main`, `.novel-content` 등)를 점수 기반으로 선택해 EPUB 텍스트를 추출하도록 보강했습니다.
 - **소설 로딩 경로 개선**: 새 소설 페이지에서 숨은 iframe DOM 접근이 cross-origin으로 막히는 경우를 피하기 위해, 소설 회차는 먼저 같은 도메인 `fetch`와 `DOMParser`로 본문을 읽도록 변경했습니다.
+- **회차 번호 정규화 수정**: ntk 소설 URL의 내부 글 ID 대신 화면에 표시된 `801화` 같은 실제 회차 번호를 저장/범위 필터/합본 파일명에 사용하도록 수정했습니다.
 
 ## [v1.8.0] - 2026-04-17
 

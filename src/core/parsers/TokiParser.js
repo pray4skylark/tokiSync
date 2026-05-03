@@ -27,7 +27,10 @@ export class TokiParser extends BaseParser {
         const linkEl = li.matches && li.matches('a') ? li : li.querySelector('a');
         const hrefNum = this._extractEpisodeNumber(linkEl);
         const textNum = this._extractEpisodeNumberFromText((linkEl && linkEl.textContent) || li.textContent || '');
-        const rawNum = numEl ? numEl.innerText.trim() : (hrefNum || textNum || "0");
+        const numText = numEl ? (numEl.innerText || numEl.textContent || '') : '';
+        const numTextMatch = numText.match(/[0-9]+/);
+        // ntk novel URLs use internal post IDs, so visible text like "801화" must win over href IDs.
+        const rawNum = numEl ? (numTextMatch ? numTextMatch[0] : numText.trim()) : (textNum || hrefNum || "0");
         const num = rawNum.toString().padStart(4, '0');
 
         // Extract Title & Link
@@ -124,6 +127,8 @@ export class TokiParser extends BaseParser {
             .replace(/\s*\d{2}\.\s*\d{2}\.\s*\d{2}\.?\s*$/g, '')
             .replace(/\s*\d{4}\.\s*\d{2}\.\s*\d{2}\.?\s*$/g, '')
             .replace(/\s*(방금|[0-9]+시간 전|[0-9]+분 전)\s*$/g, '')
+            .replace(/^([0-9]+)\s*화\s+\1\.?$/g, '$1화')
+            .replace(/^([0-9]+)\s*화\s+\1\.\s+/g, '$1화 ')
             .trim();
 
         if (!title && num !== undefined && num !== null) {
