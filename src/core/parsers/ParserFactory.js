@@ -1,32 +1,35 @@
-import { TokiParser } from './TokiParser.js';
+import { GenericParser } from './GenericParser.js';
 import { detectSite } from '../detector.js';
 
+/**
+ * ParserFactory
+ * Creates and provides the appropriate parser for the current site.
+ */
 export class ParserFactory {
     static #instance = null;
 
     /**
      * Get the appropriate parser for the current site (Singleton)
-     * @returns {BaseParser|null}
+     * @returns {Promise<BaseParser|null>}
      */
-    static getParser() {
+    static async getParser() {
         if (this.#instance) return this.#instance;
 
-        const siteInfo = detectSite();
+        const siteInfo = await detectSite();
         if (!siteInfo) {
             console.error('[ParserFactory] Failed to detect site');
+            alert("TokiSync 파서 에러: 매칭되는 파싱 룰이 없습니다.\n\n해당 사이트를 지원하려면 설정에서 커스텀 파싱 룰(JSON)을 등록해야 합니다.\n(자세한 방법은 Github의 rules.sample.json을 참조하세요)");
             return null;
         }
 
-        const { site, protocolDomain } = siteInfo;
+        const { site, protocolDomain, matchedRule } = siteInfo;
 
-        // Currently, ManaToki, NewToki, and BookToki all use the same structure
-        if (site === '마나토끼' || site === '뉴토끼' || site === '북토끼') {
-            this.#instance = new TokiParser(protocolDomain);
+        // Dynamic Generic Parser
+        if (site === 'generic' && matchedRule) {
+            this.#instance = new GenericParser(protocolDomain, matchedRule);
             return this.#instance;
         }
 
-        // Future GenericParser or other site-specific parsers can be added here
         return null;
     }
 }
-

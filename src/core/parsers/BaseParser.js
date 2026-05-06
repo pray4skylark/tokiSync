@@ -31,6 +31,42 @@ export class BaseParser {
     }
 
     /**
+     * Common: Ensure URL is absolute
+     */
+    getAbsoluteUrl(url) {
+        if (!url) return "";
+        if (url.startsWith('http')) return url;
+        if (url.startsWith('//')) return `https:${url}`;
+        if (url.startsWith('/')) return `${this.protocolDomain}${url}`;
+        return url;
+    }
+
+    /**
+     * Helper: Wait for a selector to appear in the DOM
+     */
+    async waitForSelector(selector, timeout = 5000) {
+        return new Promise((resolve) => {
+            const el = document.querySelector(selector);
+            if (el) return resolve(el);
+
+            const observer = new MutationObserver(() => {
+                const el = document.querySelector(selector);
+                if (el) {
+                    observer.disconnect();
+                    resolve(el);
+                }
+            });
+
+            observer.observe(document.body, { childList: true, subtree: true });
+
+            setTimeout(() => {
+                observer.disconnect();
+                resolve(document.querySelector(selector));
+            }, timeout);
+        });
+    }
+
+    /**
      * Interface: Extract list elements (li or similar)
      * @returns {HTMLElement[]}
      */
