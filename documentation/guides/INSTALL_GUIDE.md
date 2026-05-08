@@ -1,12 +1,14 @@
-# TokiSync v1.7.4 설치 가이드
+# TokiSync v1.8.1 설치 및 설정 가이드
 
-이 가이드는 **TokiSync v1.7.4**의 설치 및 설정 방법을 안내합니다.
+이 가이드는 **TokiSync v1.8.1**의 설치 및 설정 방법을 안내합니다. 최신 버전은 구글 드라이브 API v3를 기반으로 더욱 빠르고 안정적인 수집 환경을 제공합니다.
+
+---
 
 ## ✅ 사전 준비
 
-1. **Google 계정**: Google Drive 및 Apps Script 사용.
-2. **Google Drive 폴더**: 만화를 저장할 폴더를 생성하고 **Folder ID**를 메모해두세요.
-   - (폴더 주소 `.../folders/1ABC_xE...` 에서 뒷부분 ID)
+1. **Google 계정**: Google Drive 및 Apps Script 사용을 위해 필요합니다.
+2. **Google Drive 저장 폴더**: 콘텐츠를 저장할 폴더를 생성하고 **Folder ID**를 메모해두세요.
+   - 폴더 URL `.../folders/1ABC_xE...` 에서 뒷부분의 난수 문자열이 ID입니다.
 
 ---
 
@@ -14,24 +16,20 @@
 
 ### 1-1. 프로젝트 생성 및 코드 복사
 
-1. [Google Apps Script](https://script.google.com/) 접속 -> **새 프로젝트**.
-2. 프로젝트 이름: `TokiSync Server v1.7.4`.
-3. 아래 링크 중 원하는 버전을 클릭하여 전체 코드를 복사한 뒤 `Code.gs`에 붙여넣습니다:
+1. [Google Apps Script](https://script.google.com/)에 접속하여 **[새 프로젝트]**를 생성합니다.
+2. 프로젝트 이름 예시: `TokiSync Server v1.8.1`.
+3. 아래 링크에서 최신 번들 코드를 복사하여 `Code.gs`에 붙여넣습니다:
    - 🌟 **[TokiSync_Server_Bundle.gs (Stable 정식 버전)](https://pray4skylark.github.io/tokiSync/TokiSync_Server_Bundle.gs)** (권장)
    - 🧪 **[TokiSync_Server_Bundle.gs (Dev 개발 빌드)](https://pray4skylark.github.io/tokiSync/dev/TokiSync_Server_Bundle.gs)** (최신 기능 테스트)
-4. **저장** (Ctrl+S).
 
-### 1-1-b. appsscript.json 매니페스트 설정 (중요)
+### 1-2. appsscript.json 매니페스트 설정 (중요)
 
-GAS 매니페스트 파일(`appsscript.json`)이 올바르게 설정되어야 Drive API 권한과 웹앱 배포가 정상 작동합니다.
+> [!IMPORTANT]
+> 이 설정이 누락되면 Drive API v3 권한 오류가 발생합니다.
 
-**웹 편집기에서 확인/수정하는 방법:**
-
-1. 좌측 **프로젝트 설정** (톱니바퀴 아이콘) 클릭.
+1. 좌측 **[프로젝트 설정]** (톱니바퀴 아이콘) 클릭.
 2. **「appsscript.json」 매니페스트 파일을 편집기에 표시** 체크박스 활성화.
-3. 편집기 파일 목록에서 `appsscript.json` 클릭 후 아래 내용으로 교체.
-
-**`appsscript.json` 전체 내용:**
+3. 편집기 파일 목록에서 `appsscript.json`을 열고 아래 내용으로 교체합니다:
 
 ```json
 {
@@ -58,133 +56,54 @@ GAS 매니페스트 파일(`appsscript.json`)이 올바르게 설정되어야 Dr
 }
 ```
 
-| 항목                      | 설명                                        |
-| ------------------------- | ------------------------------------------- |
-| `timeZone`                | 한국 시간대 (`Asia/Seoul`)                  |
-| `enabledAdvancedServices` | Drive API v3 고급 서비스 활성화             |
-| `oauthScopes`             | Google Drive 접근 및 외부 HTTP 요청 권한    |
-| `webapp.executeAs`        | 스크립트 소유자(나) 권한으로 실행           |
-| `webapp.access`           | 익명 사용자 접근 허용 (API Key로 실제 보안) |
+### 1-3. 🔒 보안(API Key) 및 배포
 
-> ⚠️ **clasp 사용자:** `google_app_script/TokiSync/appsscript.json` 파일이 이미 위 내용으로 작성되어 있습니다. `clasp push` 시 자동으로 적용됩니다.
-
-### 1-2. 라이브러리 추가 (Drive API)
-
-1. 좌측 **서비스(Services)** 옆 `+` 클릭.
-2. **Drive API** 선택 -> **추가**.
-
-### 1-3. 🔒 API Key 설정 (중요)
-
-**v1.2.0부터 API Key가 필수입니다.**
-
-1. 좌측 **프로젝트 설정** (톱니바퀴 아이콘) 클릭.
-2. 스크롤을 내려 **스크립트 속성 (Script Properties)** 섹션 찾기.
-3. **스크립트 속성 수정** -> **행 추가** 클릭.
-   - **속성 (Property)**: `API_KEY`
-   - **값 (Value)**: `toki_secret_1234` (본인이 원하는 비밀번호 입력)
-4. **스크립트 속성 저장** 클릭.
-
-### 1-4. 배포
-
-1. 우측 상단 **배포 (Deploy)** -> **새 배포**.
-2. 유형: **웹 앱 (Web app)**.
-3. 다음 사용자로 실행: **`나 (Me)`**.
-4. 액세스 권한 승인: **`모든 사용자 (Anyone)`** (⚠️ 필수).
-   - _뷰어에서 로그인 없이 접근하기 위해 '모든 사용자'가 필요하지만, 실제로는 위에서 설정한 API Key가 없으면 접근이 불가능하므로 안전합니다._
-5. **배포** 클릭 -> 권한 승인 진행.
-6. **웹 앱 URL** 복사 (`.../exec`로 끝남).
+1. **[프로젝트 설정]** > **[스크립트 속성]** 섹션에서 아래 항목을 추가합니다.
+   - **속성**: `API_KEY`
+   - **값**: 본인이 사용할 비밀번호 (예: `toki_secret_9999`)
+2. 우측 상단 **[배포]** > **[새 배포]**를 클릭합니다.
+   - 유형: **웹 앱**
+   - 다음 사용자로 실행: **나 (Me)**
+   - 액세스 권한: **모든 사용자 (Anyone)** (⚠️ 필수: 뷰어 접근용)
+3. 배포 완료 후 생성된 **웹 앱 URL**을 복사해둡니다.
 
 ---
 
 ## 2단계: UserScript (수집기) 설치
 
-1. 브라우저에 [Tampermonkey](https://www.tampermonkey.net/) 설치.
-2. 다음 링크 중 하나를 선택하여 스크립트를 설치합니다:
-   - 🌟 **[TokiSync UserScript (Stable 정식 버전)](https://pray4skylark.github.io/tokiSync/tokiSync.user.js)** (권장)
-   - 🧪 **[TokiSync UserScript (Dev 개발 빌드)](https://pray4skylark.github.io/tokiSync/dev/tokiSync.user.js)** (최신 기능 테스트)
-3. Tampermonkey 설치 화면이 뜨면 **설치(Install)**를 클릭합니다.
-4. **동작 확인 및 설정**:
-   - 뉴토끼/북토끼 사이트 접속.
-   - 우측 하단의 **원형 플로팅 메뉴 버튼(⚙️)**을 누르거나, 단축키 **`Ctrl + Shift + T`**를 눌러 **통합 메뉴 모달**을 엽니다.
-   - `Settings` 섹션을 열고 다음 항목을 입력합니다:
-     - **GAS WebApp URL**: 1-4에서 복사한 URL 입력.
-     - **Folder ID**: 사전 준비한 폴더 ID 입력.
-     - **API Key**: 1-3에서 설정한 값 입력.
-   - **설정 저장** 클릭 후 페이지를 새로고침합니다.
+1. 브라우저에 [Tampermonkey](https://www.tampermonkey.net/)를 설치합니다.
+2. 최신 **[TokiSync UserScript](https://pray4skylark.github.io/tokiSync/tokiSync.user.js)**를 설치합니다.
+3. 지원 사이트(뉴토끼 등) 접속 후 통합 메뉴를 엽니다.
+   - 단축키: **`Ctrl + Shift + T`**
+   - 또는 우측 하단 **⚙️ 플로팅 버튼** 클릭.
+4. **Settings** 섹션에서 다음 정보를 입력하고 저장합니다:
+   - **GAS WebApp URL**: 1-3에서 복사한 URL.
+   - **Folder ID**: 저장용 구글 드라이브 폴더 ID.
+   - **API Key**: 1-3에서 설정한 비밀번호.
+
+> [!TIP]
+> **v1.8.1 신규 설정**: 다운로드 속도를 5단계(`빠름` ~ `매우 느림`)로 조절할 수 있습니다. 차단 위험이 있는 사이트에서는 `느림` 설정을 권장합니다.
 
 ---
 
 ## 3단계: 뷰어 (Viewer) 설정
 
-### A. 간편 연동 (UserScript 이용) - 권장
-
-1. 다음 웹 뷰어 주소로 접속합니다:
-   👉 **[TokiSync 웹 뷰어](https://pray4skylark.github.io/tokiSync/)**
-2. **UserScript가 설치된 브라우저**라면, 자동으로 설정이 주입됩니다.
-   - _"⚡️ Auto-Config Injected"_ 메시지와 함께 즉시 사용 가능합니다.
-   - 즐겨찾기(북마크)에 등록해 두고 사용하시면 편리합니다.
-
-### B. 수동 설정 (Standalone)
-
-1. 위 웹 뷰어 페이지 접속 시 설정 패널이 뜹니다.
-2. 설정 패널 톱니바퀴 아이콘을 클릭한 뒤 **GAS App ID**(URL 복사값 전체 가능), **Drive Folder ID**, **Security Key(API Key)**를 직접 입력합니다.
-3. **Save Config(저장)**를 누르면 브라우저에 설정이 영구 보관되며 라이브러리가 로드됩니다.
+1. **[TokiSync 공식 웹 뷰어](https://pray4skylark.github.io/tokiSync/)**에 접속합니다.
+2. UserScript가 설치된 브라우저라면 설정이 자동으로 주입되어 즉시 라이브러리가 로드됩니다.
+3. **소설 뷰어 V2 안내**:
+   - 읽기 중 상단/중앙을 터치하여 **플로팅 툴바**를 호출할 수 있습니다.
+   - 테마, 폰트 크기, 줄 간격을 실시간으로 변경해도 **Locator 엔진**이 읽던 위치를 정확히 고정해줍니다.
 
 ---
 
-## 🔧 문제 해결
+## 🔧 문제 해결 (FAQ)
 
-**Q. 401 Unauthorized 에러가 떠요.**
-A. 입력한 `API Key`가 GAS 스크립트 속성의 `API_KEY` 값과 일치하는지 확인하세요.
+> [!WARNING]
+> **Q. 뷰어 로딩 중 'ReferenceError'가 발생해요.**
+> A. 구형 GAS 코드를 사용 중일 수 있습니다. 1단계의 최신 번들 코드로 업데이트한 후 다시 배포(새 버전) 해주세요.
 
-**Q. 429 Too Many Requests 에러가 떠요.**
-**Q. 429 Too Many Requests 에러가 떠요.**
-A. 구글 API 호출 제한입니다. 잠시 기다리면 해결됩니다. 현재 버전 뷰어는 이미지 로딩 시 자동으로 이를 감지하고 재시도합니다.
+**Q. 소설 다운로드 속도가 너무 느려요.**
+A. v1.8.1부터 소설 복호화(API 모드) 시 안정성을 위해 `매우 느림(10-30초)` 정책이 강제 적용됩니다. 이는 IP 차단을 방지하기 위한 필수 조치입니다.
 
-**Q. 통합 메뉴 창이 안 보여요.**
-A. 지원되는 사이트(뉴토끼 등 본문 환경)에 접속해야 우측 하단 플로팅 버튼과 단축키(`Ctrl+Shift+T`)가 활성화됩니다.
-
----
-
-## 📥 자동 분류 다운로드(Native) 설정 가이드
-
-TokiSync의 **자동 분류 다운로드**는 템퍼몽키의 `GM_download` API를 사용하여 파일을 `다운로드폴더/TokiSync/시리즈명/파일명.cbz` 구조로 자동 정리합니다. 이 기능을 사용하기 위해서는 아래 **두 가지 모드** 중 하나를 선택해야 하며, **각 모드는 서로 다른 장단점**이 있습니다.
-
-### ⚡ 모드 비교 (중요)
-
-| 항목 | 🅐 Native 모드 (권장) | 🅑 Browser API 모드 |
-|------|----------------------|---------------------|
-| **`.cbz` 확장자 보장** | ✅ 완벽 보장 | ⚠️ 브라우저가 `.zip`으로 변조할 수 있음 |
-| **폴더 자동 분류** | ⚠️ 브라우저 기본 다운로드 폴더에 저장 | ✅ `TokiSync/시리즈명/` 구조로 분류 |
-| **추가 설정 필요** | 없음 (바로 사용 가능) | 화이트리스트 등록 필요 |
-
-> **결론**: `.cbz` 확장자와 폴더 자동 분류를 **동시에** 보장하는 단일 모드는 현재 브라우저 보안 정책상 존재하지 않습니다.
-
----
-
-### 🔧 설정 방법 (둘 중 하나 선택)
-
-#### 🅐 Native 모드 — `.cbz` 확장자가 가장 중요한 경우 (권장)
-
-1. 템퍼몽키 **[대시보드]** → **[설정]** 탭 클릭.
-2. 설정 모드를 **[고급(Advanced)]** 으로 변경.
-3. **[다운로드]** 섹션에서 **[Download Mode]** 를 **`Native`** 로 변경.
-4. TokiSync 메뉴에서 **다운로드 정책**을 **`자동 분류 (Native)`** 로 선택.
-
-> 파일이 브라우저 기본 다운로드 폴더에 `.cbz`로 정상 저장됩니다.
-
----
-
-#### 🅑 Browser API 모드 — 폴더 자동 분류가 중요한 경우
-
-1. 템퍼몽키 **[대시보드]** → **[설정]** 탭 클릭.
-2. 설정 모드를 **[고급(Advanced)]** 으로 변경.
-3. **[다운로드]** 섹션에서 **[Download Mode]** 를 **`Browser API`** 로 변경.
-4. **[Whitelisted File Extensions]** 항목에 아래 정규식을 추가:
-   ```
-   /\.(cbz|epub)$/
-   ```
-5. TokiSync 메뉴에서 **다운로드 정책**을 **`자동 분류 (Native)`** 로 선택.
-
-> ⚠️ 주의: Browser API 모드에서는 Chrome/Edge의 보안 정책으로 인해 `.cbz` 확장자가 `.zip`으로 변조될 수 있습니다. 화이트리스트 등록 후에도 동일 증상이 발생하면 **🅐 Native 모드**를 사용하세요.
-
+**Q. 드라이브에 파일은 있는데 뷰어에 안 보여요.**
+A. 뷰어 우측 상단의 **[동기화(Sync)]** 버튼을 눌러 최신 이력을 서버에서 다시 가져오세요.
