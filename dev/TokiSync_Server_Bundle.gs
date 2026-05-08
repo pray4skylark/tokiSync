@@ -1,4 +1,4 @@
-/* ⚙️ TokiSync Server Code Bundle v1.0.0 (Generated: 2026-05-06T17:49:02.177Z) */
+/* ⚙️ TokiSync Server Code Bundle v1.0.0 (Generated: 2026-05-08T05:18:33.255Z) */
 
 /* ========================================================================== */
 /* FILE: Main.gs */
@@ -39,10 +39,10 @@ function doGet(e) {
  * @returns {TextOutput} JSON 응답
  */
 // [CONSTANTS]
-const SERVER_VERSION = "v1.8.0"; // Drive API V3 Migration
+var SERVER_VERSION = "v1.8.0"; // Drive API V3 Migration
 // API Key stored in Script Properties (Project Settings > Script Properties)
 // Set property: API_KEY = your_secret_key
-const API_KEY = PropertiesService.getScriptProperties().getProperty("API_KEY");
+var API_KEY = PropertiesService.getScriptProperties().getProperty("API_KEY");
 
 function doPost(e) {
   Debug.start(); // 🐞 디버그 시작
@@ -1197,8 +1197,8 @@ function View_getFileChunk(fileId, offset, length) {
 // 🚀 Viewer Library Service (Isolated) - v1.4.0 Centralized Thumbnails
 // =======================================================
 
-const INDEX_FILE_NAME = "index.json";
-const THUMB_FOLDER_NAME = "_Thumbnails";
+var INDEX_FILE_NAME = "index.json";
+var THUMB_FOLDER_NAME = "_Thumbnails";
 
 /**
  * 해당 폴더(Libraries)의 시리즈 목록을 반환합니다.
@@ -1617,7 +1617,7 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
 // Merge 로직은 클라이언트(뷰어)에서 처리
 // =======================================================
 
-const HISTORY_FILE_NAME = "read_history.json";
+var HISTORY_FILE_NAME = "read_history.json";
 
 /**
  * read_history.json 불러오기
@@ -1740,7 +1740,7 @@ function View_authorizeCheck() {
 // 🐞 디버깅 모듈 (In-Memory Log Collector)
 // =====================================================
 
-const Debug = {
+var Debug = {
   logs: [],
   startTime: 0,
 
