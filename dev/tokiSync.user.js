@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.8.1
+// @version      1.8.3
 // @description  Toki series sites -> Google Drive syncing tool (Bundled)
 // @author       pray4skylark
 // @updateURL    https://pray4skylark.github.io/tokiSync/tokiSync.user.js
@@ -1040,8 +1040,8 @@ async function uploadViaGASRelay(blob, folderName, fileName, options = {}) {
  * @returns {Promise<string[]>} List of completed episode IDs
  */
 async function fetchHistory(seriesTitle, category = 'Webtoon') {
+    if (!(0,_config_js__WEBPACK_IMPORTED_MODULE_0__/* .isConfigValid */ .Jb)()) return [];
     const config = (0,_config_js__WEBPACK_IMPORTED_MODULE_0__/* .getConfig */ .zj)();
-    if (!config.gasUrl) return [];
     const logger = _ui_js__WEBPACK_IMPORTED_MODULE_2__.LogBox.getInstance();
 
     console.log(`[GAS] 다운로드 기록 조회 중... (${seriesTitle})`);
@@ -1091,8 +1091,8 @@ async function fetchHistory(seriesTitle, category = 'Webtoon') {
  * @returns {Promise<Array>} List of cached episodes
  */
 async function getBooksByCacheId(cacheFileId) {
+    if (!(0,_config_js__WEBPACK_IMPORTED_MODULE_0__/* .isConfigValid */ .Jb)()) return [];
     const config = (0,_config_js__WEBPACK_IMPORTED_MODULE_0__/* .getConfig */ .zj)();
-    if (!config.gasUrl) return [];
     const logger = _ui_js__WEBPACK_IMPORTED_MODULE_2__.LogBox.getInstance();
 
     console.log(`[GAS] 캐시 파일 직행 조회 중... (${cacheFileId})`);
@@ -1459,6 +1459,41 @@ class GenericParser extends BaseParser {
         return val;
     }
 
+    /**
+     * [v1.8.1] 동적 레이지 키 탐지 (Toki 등 보안 우회용)
+     * @private
+     */
+    _detectDynamicKey(doc, config) {
+        if (!config || !config.regex) return null;
+        
+        try {
+            // 1. 스크립트 태그 우선 스캔 (성능 및 정확도 최적화)
+            const scripts = doc.querySelectorAll('script');
+            const regex = new RegExp(config.regex, 'i');
+            
+            for (const script of scripts) {
+                const match = (script.textContent || "").match(regex);
+                if (match) {
+                    const key = match[1] || match[0];
+                    console.log(`[GenericParser] 스크립트 내 동적 키 탐지 성공: ${key}`);
+                    return key;
+                }
+            }
+            
+            // 2. 전체 HTML 스캔 (폴백)
+            const html = doc.documentElement.innerHTML || "";
+            const match = html.match(regex);
+            if (match) {
+                const key = match[1] || match[0];
+                console.log(`[GenericParser] HTML 내 동적 키 탐지 성공: ${key}`);
+                return key;
+            }
+        } catch (e) {
+            console.warn('[GenericParser] 동적 키 탐지 중 오류 발생:', e);
+        }
+        return null;
+    }
+
     async getListItems() {
         const listCfg = this.rule.list || {};
         let container = document.querySelector(listCfg.container);
@@ -1519,6 +1554,15 @@ class GenericParser extends BaseParser {
     getImageList(iframeDocument) {
         const viewerCfg = this.rule.viewer || {};
 
+        // [v1.8.1] 동적 키 탐지 수행
+        let dynamicLazyAttr = null;
+        if (viewerCfg.keyDiscovery) {
+            const key = this._detectDynamicKey(iframeDocument, viewerCfg.keyDiscovery);
+            if (key) {
+                dynamicLazyAttr = (viewerCfg.keyDiscovery.prefix || 'data-') + key;
+            }
+        }
+
         // 1. 헤드리스(Headless) 정규식 추출 지원 (Next.js 페이로드 등 DOM 미렌더링 대응)
         if (viewerCfg.imageRegex) {
             const html = iframeDocument.documentElement.innerHTML || iframeDocument.body.innerHTML;
@@ -1552,7 +1596,11 @@ class GenericParser extends BaseParser {
 
         return imgs.map(img => {
             let foundUrl = null;
-            const lazyAttrs = viewerCfg.lazyAttrOptions || ['data-src', 'data-lazy', 'src'];
+            // [v1.8.1] 동적 키가 발견되면 최우선 순위로 설정하여 탐지 성공률 극대화
+            const lazyAttrs = [
+                ...(dynamicLazyAttr ? [dynamicLazyAttr] : []),
+                ...(viewerCfg.lazyAttrOptions || ['data-src', 'data-lazy', 'src'])
+            ];
 
             for (const attr of lazyAttrs) {
                 const val = img.getAttribute(attr);
@@ -1768,7 +1816,7 @@ async function detectSite() {
 /* harmony export */   Vh: function() { return /* binding */ showConfigModal; },
 /* harmony export */   zj: function() { return /* binding */ getConfig; }
 /* harmony export */ });
-/* unused harmony exports CFG_URL_KEY, CFG_ID_KEY, CFG_FOLDER_ID, CFG_POLICY_KEY, CFG_API_KEY, CFG_SLEEP_MODE, CFG_SMART_SKIP_RATIO, CFG_NOVEL_MODE, CFG_REMOTE_RULE_URL */
+/* unused harmony exports CFG_URL_KEY, CFG_ID_KEY, CFG_FOLDER_ID, CFG_POLICY_KEY, CFG_API_KEY, CFG_SLEEP_MODE, CFG_SMART_SKIP_RATIO, CFG_NOVEL_MODE, CFG_NOVEL_FORMAT, CFG_REMOTE_RULE_URL */
 const CFG_URL_KEY = "TOKI_GAS_URL"; // legacy
 const CFG_ID_KEY = "TOKI_GAS_ID";
 const CFG_FOLDER_ID = "TOKI_FOLDER_ID";
@@ -1777,6 +1825,7 @@ const CFG_API_KEY = "TOKI_API_KEY";
 const CFG_SLEEP_MODE = "TOKI_SLEEP_MODE";
 const CFG_SMART_SKIP_RATIO = "TOKI_SMART_SKIP_RATIO";
 const CFG_NOVEL_MODE = "TOKI_NOVEL_MODE";
+const CFG_NOVEL_FORMAT = "TOKI_NOVEL_FORMAT";
 const CFG_REMOTE_RULE_URL = "TOKI_REMOTE_RULE_URL";
 const CFG_CUSTOM_RULES = "TOKI_CUSTOM_RULES";
 
@@ -1813,6 +1862,7 @@ function getConfig() {
         sleepMode: GM_getValue(CFG_SLEEP_MODE, "agile"), // default: agile
         smartSkipRatio: parseInt(GM_getValue(CFG_SMART_SKIP_RATIO, "50"), 10), // default 50% of Max
         novelMode: GM_getValue(CFG_NOVEL_MODE, "perChapter"), // default: chapter-by-chapter
+        novelFormat: GM_getValue(CFG_NOVEL_FORMAT, "epub"), // default: EPUB
         remoteRuleUrl: GM_getValue(CFG_REMOTE_RULE_URL, ""),
         customRules: GM_getValue(CFG_CUSTOM_RULES, "[]")
     };
@@ -1856,9 +1906,25 @@ function showConfigModal() {
                 border: 1px solid rgba(255, 255, 255, 0.1);
                 box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
                 border-radius: 16px;
-                padding: 24px;
-                width: 400px;
+                padding: 28px;
+                width: 500px;
+                max-height: 85vh;
+                overflow-y: auto;
                 color: #fff;
+            }
+            /* Custom Scrollbar for Modal */
+            .toki-modal-container::-webkit-scrollbar {
+                width: 8px;
+            }
+            .toki-modal-container::-webkit-scrollbar-track {
+                background: transparent;
+            }
+            .toki-modal-container::-webkit-scrollbar-thumb {
+                background: rgba(255, 255, 255, 0.2);
+                border-radius: 4px;
+            }
+            .toki-modal-container::-webkit-scrollbar-thumb:hover {
+                background: rgba(255, 255, 255, 0.4);
             }
             .toki-modal-header {
                 font-size: 20px; font-weight: 600; margin-bottom: 20px;
@@ -1958,10 +2024,18 @@ function showConfigModal() {
             </div>
             
             <div class="toki-input-group">
-                <label class="toki-label">소설 패키징 방식 (Novel EPUB)</label>
+                <label class="toki-label">소설 패키징 방식 (Novel Mode)</label>
                 <select id="toki-cfg-novel-mode" class="toki-select">
                     <option value="perChapter">개별 회차 저장 (1회차 = 1파일)</option>
                     <option value="singleVolume">단행본 합본 저장 (선택 범위 = 1파일)</option>
+                </select>
+            </div>
+
+            <div class="toki-input-group">
+                <label class="toki-label">소설 출력 포맷 (Novel Format)</label>
+                <select id="toki-cfg-novel-format" class="toki-select">
+                    <option value="epub">EPUB (전자책 표준)</option>
+                    <option value="txt">TXT (일반 텍스트)</option>
                 </select>
             </div>
 
@@ -1999,6 +2073,9 @@ function showConfigModal() {
     const novelModeSelect = document.getElementById('toki-cfg-novel-mode');
     if(novelModeSelect) novelModeSelect.value = config.novelMode;
 
+    const novelFormatSelect = document.getElementById('toki-cfg-novel-format');
+    if(novelFormatSelect) novelFormatSelect.value = config.novelFormat;
+
     document.getElementById('toki-btn-cancel').onclick = () => overlay.remove();
     
     document.getElementById('toki-btn-save').onclick = () => {
@@ -2009,6 +2086,7 @@ function showConfigModal() {
         const newSleepMode = document.getElementById('toki-cfg-sleepmode').value;
         const newSmartSkip = document.getElementById('toki-cfg-smartskip').value;
         const newNovelMode = document.getElementById('toki-cfg-novel-mode').value;
+        const newNovelFormat = document.getElementById('toki-cfg-novel-format').value;
         const newRemoteRule = document.getElementById('toki-cfg-remote-rule').value.trim();
         const newCustomRule = document.getElementById('toki-cfg-custom-rule').value.trim() || '[]';
 
@@ -2047,6 +2125,7 @@ function showConfigModal() {
         setConfig(CFG_SLEEP_MODE, newSleepMode);
         setConfig(CFG_SMART_SKIP_RATIO, newSmartSkip);
         setConfig(CFG_NOVEL_MODE, newNovelMode);
+        setConfig(CFG_NOVEL_FORMAT, newNovelFormat);
         setConfig(CFG_REMOTE_RULE_URL, newRemoteRule);
         setConfig(CFG_CUSTOM_RULES, validCustomRule);
 
@@ -2695,7 +2774,7 @@ class LogBox {
                     opacity: 0; animation: tokiFadeIn 0.2s forwards;
                 }
                 .toki-modal {
-                    width: 360px; max-width: 90%;
+                    width: 520px; max-width: 95%;
                     background: rgba(30, 32, 35, 0.95);
                     border: 1px solid rgba(255, 255, 255, 0.1);
                     border-radius: 16px;
@@ -2705,37 +2784,38 @@ class LogBox {
                     transform: translateY(20px); animation: tokiSlideUp 0.3s forwards;
                 }
                 .toki-modal-header {
-                    padding: 16px 20px;
+                    padding: 18px 24px;
                     background: rgba(255, 255, 255, 0.05);
                     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
                     display: flex; justify-content: space-between; align-items: center;
                 }
-                .toki-modal-title { font-size: 18px; font-weight: 600; color: #fff; display: flex; align-items: center; gap: 8px; }
+                .toki-modal-title { font-size: 20px; font-weight: 600; color: #fff; display: flex; align-items: center; gap: 8px; }
                 .toki-modal-close {
                     background: none; border: none; color: #aaa;
                     font-size: 20px; cursor: pointer; padding: 4px;
                 }
                 .toki-modal-close:hover { color: white; }
                 
-                .toki-modal-body { padding: 10px; max-height: 70vh; overflow-y: auto; }
-
-                /* Accordion */
-                details {
-                    background: rgba(255, 255, 255, 0.03);
-                    border-radius: 8px; margin-bottom: 8px; overflow: hidden;
-                    border: 1px solid transparent; transition: border-color 0.2s;
+                .toki-modal-body { padding: 0; max-height: 80vh; overflow-y: auto; }
+                
+                /* Tabs (v1.8.1) */
+                .toki-tabs {
+                    display: flex; background: rgba(0,0,0,0.2);
+                    border-bottom: 1px solid rgba(255,255,255,0.1);
                 }
-                details[open] { border-color: rgba(255,255,255,0.1); background: rgba(0,0,0,0.2); }
-                summary {
-                    padding: 12px 16px; cursor: pointer; list-style: none;
-                    display: flex; justify-content: space-between; align-items: center;
-                    font-weight: 600; font-size: 14px; user-select: none; color: #fff;
+                .toki-tab-btn {
+                    flex: 1; padding: 14px; background: none; border: none;
+                    color: #888; font-size: 14px; font-weight: 600; cursor: pointer;
+                    transition: all 0.2s; border-bottom: 2px solid transparent;
+                    display: flex; justify-content: center; align-items: center; gap: 6px;
                 }
-                summary::-webkit-details-marker { display: none; }
-                summary:hover { background: rgba(255, 255, 255, 0.05); }
-                summary::after { content: '›'; font-size: 18px; transition: transform 0.2s; color: #aaa; }
-                details[open] summary::after { transform: rotate(90deg); }
-                .toki-accordion-content { padding: 10px 16px 16px; border-top: 1px solid rgba(255,255,255,0.05); }
+                .toki-tab-btn:hover { color: #ddd; background: rgba(255,255,255,0.05); }
+                .toki-tab-btn.active {
+                    color: #fff; border-bottom-color: #6a5acd;
+                    background: rgba(106, 90, 205, 0.1);
+                }
+                .toki-tab-content { display: none; padding: 24px; animation: tokiFadeIn 0.2s forwards; }
+                .toki-tab-content.active { display: block; }
 
                 /* Controls */
                 .toki-control-group { margin-bottom: 15px; }
@@ -3078,148 +3158,153 @@ class MenuModal {
         `;
         modal.appendChild(header);
 
+        // -- Tabs Header --
+        const tabsHeader = document.createElement('div');
+        tabsHeader.className = 'toki-tabs';
+        tabsHeader.innerHTML = `
+            <button class="toki-tab-btn active" data-tab="download">📥 다운로드</button>
+            <button class="toki-tab-btn" data-tab="settings">⚙️ 설정</button>
+            <button class="toki-tab-btn" data-tab="system">📝 시스템</button>
+        `;
+        modal.appendChild(tabsHeader);
+
         // -- Body --
         const body = document.createElement('div');
         body.className = 'toki-modal-body';
         
-        // 1. Download Section
-        const downSection = this.createAccordion('📥 다운로드 (Download)', true); // Default Open
-        downSection.innerHTML += `
-                <div class="toki-accordion-content">
-                    <!-- Custom Range Input -->
-                    <div class="toki-control-group">
-                        <label class="toki-label">에피소드 범위 지정</label>
-                        <input type="text" id="toki-range-input" class="toki-range-input"
-                            placeholder="예: 1,2,4-10,15 (비우면 전체)">
-                        <div class="toki-range-hint">쉼표(,)로 개별 번호, 하이픈(-)으로 연속 범위 지정</div>
-                    </div>
-                    <div class="toki-control-group">
-                        <label class="toki-label" style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-                            <input type="checkbox" id="toki-chk-force-overwrite" style="accent-color:#facc15;"> ⚠️ 강제 재다운로드 (기존 파일 덮어쓰기)
-                        </label>
-                    </div>
-                    <button class="toki-btn-action" id="toki-btn-down-range" style="margin-top: 10px;">
-                        <span>선택 다운로드 시작</span>
-                    </button>
-                    <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 12px 0;">
-                    <button class="toki-btn-action toki-btn-secondary" id="toki-btn-down-all">
-                        <span>전체 다운로드 (All)</span>
-                    </button>
+        // 1. Download Tab
+        const tabDown = document.createElement('div');
+        tabDown.className = 'toki-tab-content active';
+        tabDown.id = 'toki-tab-download';
+        tabDown.innerHTML = `
+                <div class="toki-control-group">
+                    <label class="toki-label">에피소드 범위 지정</label>
+                    <input type="text" id="toki-range-input" class="toki-range-input"
+                        placeholder="예: 1,2,4-10,15 (비우면 전체)">
+                    <div class="toki-range-hint">쉼표(,)로 개별 번호, 하이픈(-)으로 연속 범위 지정</div>
                 </div>
+                <div class="toki-control-group">
+                    <label class="toki-label" style="display:flex; align-items:center; gap:8px; cursor:pointer; color: #ddd; font-size: 13px;">
+                        <input type="checkbox" id="toki-chk-force-overwrite" style="accent-color:#facc15; width: 16px; height: 16px;"> ⚠️ 강제 재다운로드 (기존 파일 덮어쓰기)
+                    </label>
+                </div>
+                <button class="toki-btn-action" id="toki-btn-down-range" style="margin-top: 20px; height: 48px;">
+                    <span>선택 다운로드 시작</span>
+                </button>
+                <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 20px 0;">
+                <button class="toki-btn-action toki-btn-secondary" id="toki-btn-down-all" style="height: 44px;">
+                    <span>전체 다운로드 (All Items)</span>
+                </button>
         `;
-        body.appendChild(downSection);
+        body.appendChild(tabDown);
 
-        // 2. Settings Section
-        const setSection = this.createAccordion('⚙️ 설정 (Settings)');
-        setSection.innerHTML += `
-            <div class="toki-accordion-content">
-                <div class="toki-control-group">
-                    <label class="toki-label">다운로드 정책</label>
-                    <select id="toki-sel-policy" class="toki-select">
-                        <option value="individual">1. 개별 파일 (Individual)</option>
-                        <option value="zipOfCbzs">2. 챕터 묶음 (ZIP of CBZs)</option>
-                        <option value="native">3. 자동 분류 (Native)</option>
-                        <option value="drive">4. 드라이브 업로드 (GoogleDrive)</option>
-                    </select>
+        // 2. Settings Tab
+        const tabSettings = document.createElement('div');
+        tabSettings.className = 'toki-tab-content';
+        tabSettings.id = 'toki-tab-settings';
+        tabSettings.innerHTML = `
+            <div class="toki-control-group">
+                <label class="toki-label">다운로드 저장 방식</label>
+                <select id="toki-sel-policy" class="toki-select">
+                    <option value="individual">1. 개별 파일 (Individual)</option>
+                    <option value="zipOfCbzs">2. 챕터 묶음 (ZIP of CBZs)</option>
+                    <option value="native">3. 자동 분류 (Native)</option>
+                    <option value="drive">4. 드라이브 업로드 (GoogleDrive)</option>
+                </select>
+            </div>
+            <div id="toki-native-helper" style="display:none; margin-bottom: 20px; padding: 12px; background: rgba(255,165,0,0.1); border: 1px solid rgba(255,165,0,0.3); border-radius: 8px;">
+                <div style="font-size: 11px; color: #ffa500; margin-bottom: 10px; line-height: 1.4;">
+                    ⚠️ Native 모드는 Tampermonkey 설정에서 <b>'Download Mode: Browser API'</b> 활성화가 필요합니다.
                 </div>
-                <div id="toki-native-helper" style="display:none; margin-top: 10px; padding: 10px; background: rgba(255,165,0,0.1); border: 1px solid rgba(255,165,0,0.3); border-radius: 6px;">
-                    <div style="font-size: 11px; color: #ffa500; margin-bottom: 8px;">
-                        ⚠️ Native 모드는 Tampermonkey 설정에서 <b>'Download Mode: Browser API'</b> 활성화가 필요합니다.
-                    </div>
-                    <button class="toki-btn-action toki-btn-secondary" id="toki-btn-test-native" style="font-size: 12px; height: 30px;">
-                        📂 자동 분류 기능 테스트
-                    </button>
-                </div>
-                <div class="toki-control-group">
-                    <label class="toki-label">다운로드 속도</label>
-                    <select id="toki-sel-speed" class="toki-select">
-                         <option value="agile">빠름 (1-3초)</option>
-                         <option value="cautious">신중 (2-5초)</option>
-                         <option value="thorough">철저 (3-8초)</option>
-                         <option value="slow">느림 (5-15초)</option>
-                         <option value="very_slow">매우 느림 (10-30초)</option>
-                    </select>
-                </div>
-                <div class="toki-control-group">
-                    <label class="toki-label">소설 패키징 방식</label>
-                    <select id="toki-sel-novel-mode" class="toki-select">
-                         <option value="perChapter">개별 회차 저장 (1회차 = 1파일)</option>
-                         <option value="singleVolume">단행본 합본 저장 (선택 범위 = 1파일)</option>
-                    </select>
-                </div>
-                <div class="toki-control-group">
-                    <button class="toki-btn-action toki-btn-secondary" id="toki-btn-advanced" style="font-size: 13px;">
-                        🛠️ 고급 설정 (경로, API키)
-                    </button>
-                </div>
+                <button class="toki-btn-action toki-btn-secondary" id="toki-btn-test-native" style="font-size: 12px; height: 32px;">
+                    📂 자동 분류 기능 테스트
+                </button>
+            </div>
+            <div class="toki-control-group">
+                <label class="toki-label">다운로드 속도 (대기 시간)</label>
+                <select id="toki-sel-speed" class="toki-select">
+                        <option value="agile">빠름 (1-3초)</option>
+                        <option value="cautious">신중 (2-5초)</option>
+                        <option value="thorough">철저 (3-8초)</option>
+                        <option value="slow">느림 (5-15초)</option>
+                        <option value="very_slow">매우 느림 (10-30초)</option>
+                </select>
+            </div>
+            <div class="toki-control-group">
+                <label class="toki-label">소설 패키징 정책</label>
+                <select id="toki-sel-novel-mode" class="toki-select">
+                        <option value="perChapter">개별 회차 저장 (1회차 = 1파일)</option>
+                        <option value="singleVolume">단행본 합본 저장 (범위 = 1파일)</option>
+                </select>
+            </div>
+            <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.05); margin: 20px 0;">
+            <div class="toki-control-group">
+                <button class="toki-btn-action toki-btn-secondary" id="toki-btn-advanced" style="font-size: 13px; height: 40px;">
+                    🛠️ 고급 설정 상세 (경로, API키, 필터)
+                </button>
             </div>
         `;
-        body.appendChild(setSection);
+        body.appendChild(tabSettings);
 
-        // 3. System Section
-        const sysSection = this.createAccordion('📝 시스템 (System)');
-        sysSection.innerHTML += `
-            <div class="toki-accordion-content">
-                 <button class="toki-btn-action toki-btn-secondary" id="toki-btn-log">
-                    <span>로그창 토글</span>
-                </button>
-                <div style="margin-top: 10px;">
-                     <button class="toki-btn-action toki-btn-secondary" id="toki-btn-migration" style="font-size: 13px;">
-                        📂 파일명 표준화 (Migration)
+        // 3. System Tab
+        const tabSystem = document.createElement('div');
+        tabSystem.className = 'toki-tab-content';
+        tabSystem.id = 'toki-tab-system';
+        tabSystem.innerHTML = `
+                <div class="toki-control-group">
+                    <button class="toki-btn-action toki-btn-secondary" id="toki-btn-log" style="height: 40px;">
+                        <span>로그창 표시/숨기기</span>
                     </button>
                 </div>
-                <div style="margin-top: 10px;">
-                    <button class="toki-btn-action toki-btn-secondary" id="toki-btn-thumb-optim" style="font-size: 12px;">
-                        🔄 썸네일 최적화 (v1.4.0)
+                <div class="toki-control-group">
+                        <button class="toki-btn-action toki-btn-secondary" id="toki-btn-migration" style="font-size: 13px; height: 40px;">
+                        📂 기존 파일명 표준화 (Migration)
                     </button>
                 </div>
-                <div style="margin-top: 10px;">
-                    <button class="toki-btn-action toki-btn-secondary" id="toki-btn-debug-extract" style="font-size: 12px; background: rgba(255, 255, 255, 0.05); border: 1px dashed rgba(255, 255, 255, 0.2);">
+                <div class="toki-control-group">
+                    <button class="toki-btn-action toki-btn-secondary" id="toki-btn-thumb-optim" style="font-size: 13px; height: 40px;">
+                        🔄 썸네일 최적화 및 캐시 갱신
+                    </button>
+                </div>
+                <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.05); margin: 20px 0;">
+                <div class="toki-control-group" style="display: flex; gap: 10px;">
+                    <button class="toki-btn-action toki-btn-secondary" id="toki-btn-debug-extract" style="flex: 1; font-size: 12px; background: rgba(255, 255, 255, 0.05); border: 1px dashed rgba(255, 255, 255, 0.2);">
                         🧪 추출 테스트 (Debug)
                     </button>
-                </div>
-                <div style="margin-top: 10px;">
-                    <button class="toki-btn-action" id="toki-btn-debug-download" style="font-size: 13px; background: #2563eb; color: white;">
-                        🚀 현재 회차 다운로드 (Test)
+                    <button class="toki-btn-action" id="toki-btn-debug-download" style="flex: 1.5; font-size: 13px; background: #2563eb; color: white;">
+                        🚀 현재 회차 즉시 다운로드
                     </button>
                 </div>
-            </div>
         `;
-        body.appendChild(sysSection);
+        body.appendChild(tabSystem);
 
         modal.appendChild(body);
         document.body.appendChild(overlay);
 
         // --- Bind Events & Init Logic ---
-        this.initExclusiveAccordion();
         this.bindEvents(overlay);
     }
 
-    createAccordion(title, open = false) {
-        const details = document.createElement('details');
-        if (open) details.open = true;
-        const summary = document.createElement('summary');
-        summary.innerText = title;
-        details.appendChild(summary);
-        return details;
-    }
-
-    initExclusiveAccordion() {
-        const details = document.querySelectorAll('.toki-modal-body details');
-        details.forEach((detail) => {
-            detail.addEventListener('toggle', (e) => {
-                if (detail.open) {
-                    details.forEach((other) => {
-                        if (other !== detail && other.open) {
-                            other.open = false;
-                        }
-                    });
-                }
-            });
-        });
-    }
+    // Helper removed as no longer using accordion
 
     bindEvents(overlay) {
+        // Tab Switching Logic
+        const tabBtns = overlay.querySelectorAll('.toki-tab-btn');
+        const tabContents = overlay.querySelectorAll('.toki-tab-content');
+
+        tabBtns.forEach(btn => {
+            btn.onclick = () => {
+                const target = btn.getAttribute('data-tab');
+                
+                // Toggle Buttons
+                tabBtns.forEach(b => b.classList.toggle('active', b === btn));
+                // Toggle Contents
+                tabContents.forEach(c => {
+                    c.classList.toggle('active', c.id === `toki-tab-${target}`);
+                });
+            };
+        });
+
         // Headers
         document.getElementById('toki-btn-menu-close').onclick = () => this.close(overlay);
         document.getElementById('toki-btn-viewer-link').onclick = () => {
@@ -3925,6 +4010,38 @@ class CbzBuilder {
     }
 }
 
+;// ./src/core/txt.js
+class TxtBuilder {
+    constructor() {
+        this.content = "";
+    }
+
+    addChapter(title, textContent) {
+        this.content += `\n\n=== ${title} ===\n\n`;
+        this.content += textContent;
+    }
+
+    async build(metadata = {}) {
+        try {
+            // Return an object that duck-types JSZip's generateAsync
+            return {
+                generateAsync: async () => {
+                    // Prepend metadata title at the top if available
+                    let finalContent = this.content;
+                    if (metadata.title) {
+                        finalContent = `[ ${metadata.title} ]\n` + finalContent;
+                    }
+                    return new Blob([finalContent], { type: 'text/plain;charset=utf-8' });
+                }
+            };
+        } catch (e) {
+            const { LogBox } = await Promise.resolve(/* import() */).then(__webpack_require__.bind(__webpack_require__, 963));
+            LogBox.getInstance().critical(`TXT 빌드 실패: ${e.message} (${metadata.title || 'unknown'})`, 'Builder:TXT');
+            throw e;
+        }
+    }
+}
+
 // EXTERNAL MODULE: ./src/core/config.js
 var core_config = __webpack_require__(899);
 // EXTERNAL MODULE: ./src/core/anti_sleep.js
@@ -3934,6 +4051,7 @@ var gas = __webpack_require__(488);
 // EXTERNAL MODULE: ./src/core/network.js
 var network = __webpack_require__(391);
 ;// ./src/core/downloader.js
+
 
 
 
@@ -3972,19 +4090,30 @@ async function processItem(item, builder, siteInfo, iframe, parser, seriesTitle 
 
     // [전략 B] fetchMethod === 'api'는 targetDoc 여부와 무관하게 항상 API 경로 우선
     if (fetchMethod === 'api') {
-        // [v2.1] novel-decryptor.js를 통한 API 다운로드는 DDos 감지를 피하기 위해 무조건 매우 느림(10-30초) 고정
-        policy = SLEEP_POLICIES.very_slow;
-
         const logger = ui.LogBox.getInstance();
         logger.log(`[API] 직접 복호화 시도 중 (대기: ${policy.min / 1000}~${policy.max / 1000}초): ${item.title}`, 'Downloader');
 
         const text = await fetchNovelText(item.src, viewerCfg.decryptApi || {});
 
         if (text) {
-            builder.addChapter(item.title, text);
+            let cleanText = text;
+            
+            // 1. 앞부분 껍데기 제거 (text 또는 html 형식을 모두 지원하며, 문자열 시작 부분만 타겟팅)
+            cleanText = cleanText.replace(/^\{"kind"\s*:\s*"(text|html)"\s*,\s*"(text|html)"\s*:\s*"/, '');
+            
+            // 2. 뒷부분 껍데기 제거 (", "css":"" } 또는 "} 로 끝나는 모든 경우 대응)
+            cleanText = cleanText.replace(/"\s*(,\s*"css"\s*:\s*""\s*)?\}$/, '');
+            
+            // 3. 줄바꿈 이스케이프(\n)를 실제 줄바꿈으로 변환
+            cleanText = cleanText.replace(/\\n/g, '\n');
+            
+            // 4. 따옴표 이스케이프(\")를 실제 쌍따옴표로 변환
+            cleanText = cleanText.replace(/\\"/g, '"');
+
+            builder.addChapter(item.title, cleanText);
             logger.log(`✅ 복호화 성공: ${item.title}`, 'Downloader');
         } else {
-            logger.error(`⚠️ 복호화 실패 (스킵): ${item.title}`, 'Downloader');
+            throw new Error(`복호화 실패 (API 응답 없음)`);
         }
 
         await (0,utils/* sleep */.yy)(policy.min, policy.max);
@@ -4059,8 +4188,7 @@ async function processItem(item, builder, siteInfo, iframe, parser, seriesTitle 
 
     if (isNovel) {
         if (!extractedData.content) {
-            ui.LogBox.getInstance().error(`⚠️ 텍스트 추출 실패: ${finalTitle}`, 'Downloader');
-            return;
+            throw new Error(`텍스트 본문 추출 실패 (DOM 또는 API 모두 감지 불가)`);
         }
         builder.addChapter(finalTitle, extractedData.content);
     } 
@@ -4069,8 +4197,7 @@ async function processItem(item, builder, siteInfo, iframe, parser, seriesTitle 
         const mergedUrls = extractedData.urls;
 
         if (mergedUrls.length === 0) {
-            logger.error(`⚠️ 이미지 감지 실패: ${finalTitle} — 해당 챕터 건너뜀`, 'Parser');
-            return;
+            throw new Error(`이미지 URL 감지 실패 (뷰어 컨테이너 또는 속성 탐색 불가)`);
         }
 
         // Fetch Images Parallel
@@ -4137,6 +4264,8 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
         logger.log('[Anti-Sleep] 자동 시작 실패 (사용자 상호작용 필요)', 'error');
     }
 
+    const failedEpisodes = [];  // [v1.8.1] 완전 실패 리스트
+    const partialFailures = []; // [v1.8.1] 부분 실패 리스트 (이미지 일부 누락)
     const siteInfo = await (0,detector/* detectSite */.T)();
     if (!siteInfo) {
         alert("지원하지 않는 사이트이거나 다운로드 페이지가 아닙니다.");
@@ -4187,9 +4316,18 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
             logger.log('⚠️ folderInCbz 정책이 폐기되어 zipOfCbzs(배치)로 전환되었습니다.', 'warn');
         }
 
+        // [v1.8.2] Graceful Fallback for missing Drive configuration
+        if (destination === 'drive' && !(0,core_config/* isConfigValid */.Jb)()) {
+            alert('구글 드라이브 설정(Folder ID 등)이 누락되었습니다. 임시로 개별 로컬 다운로드 정책으로 전환합니다.');
+            logger.warn('⚠️ 구글 드라이브 설정 누락 감지. 정책을 개별 로컬 다운로드로 자동 전환합니다.', 'System');
+            buildingPolicy = 'individual';
+            destination = 'local';
+        }
+
+        const configNovelFormat = (0,core_config/* getConfig */.zj)().novelFormat || 'epub';
         const EXTENSION_MAP = {
-            'Novel': 'epub',
-            'novel': 'epub',
+            'Novel': configNovelFormat,
+            'novel': configNovelFormat,
             'Webtoon': 'cbz',
             'webtoon': 'cbz',
             'Manga': 'cbz',
@@ -4411,12 +4549,14 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
         document.body.appendChild(iframe);
 
         // [v1.7.1] Novel Single Volume Mode Init
-        const novelMode = (0,core_config/* getConfig */.zj)().novelMode;
+        const configParams = (0,core_config/* getConfig */.zj)();
+        const novelMode = configParams.novelMode;
+        const novelFormat = configParams.novelFormat || 'epub';
         const isSingleVolume = isNovel && novelMode === 'singleVolume';
-        let masterEpubBuilder = null;
+        let masterNovelBuilder = null;
         if (isSingleVolume) {
-            masterEpubBuilder = new EpubBuilder();
-            logger.log('📙 소설 단행본 합본 모드 활성화 (마지막에 한 번에 저장됩니다)');
+            masterNovelBuilder = novelFormat === 'txt' ? new TxtBuilder() : new EpubBuilder();
+            logger.log(`📙 소설 단행본 합본 모드 활성화 (${novelFormat.toUpperCase()}) (마지막에 한 번에 저장됩니다)`);
         }
 
         // --- Processing Loop ---
@@ -4452,21 +4592,47 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
             // [v1.6.0] Strategy: Always use a FRESH builder per item for Kavita compatibility
             // [v1.7.1] Except for Novel Single Volume Mode
             if (isSingleVolume) {
-                currentBuilder = masterEpubBuilder;
+                currentBuilder = masterNovelBuilder;
             } else {
-                if (isNovel) currentBuilder = new EpubBuilder();
+                if (isNovel) currentBuilder = novelFormat === 'txt' ? new TxtBuilder() : new EpubBuilder();
                 else currentBuilder = new CbzBuilder();
             }
 
             // Process Item
             try {
-                await processItem(item, currentBuilder, siteInfo, iframe, parser, seriesTitle);
+                const result = await processItem(item, currentBuilder, siteInfo, iframe, parser, seriesTitle);
+                
+                // [v1.8.1] 부분 실패 체크 (이미지 누락 여부)
+                if (currentBuilder && currentBuilder.chapters) {
+                    const latestChapter = currentBuilder.chapters[currentBuilder.chapters.length - 1];
+                    if (latestChapter && Array.isArray(latestChapter.images)) {
+                        const missingCount = latestChapter.images.filter(img => img.isMissing).length;
+                        if (missingCount > 0) {
+                            console.warn(`[Downloader] 부분 실패 감지: ${item.title} (이미지 ${missingCount}개 누락)`);
+                            partialFailures.push({
+                                num: item.num,
+                                title: item.title,
+                                missingCount: missingCount
+                            });
+                        }
+                    }
+                }
+
                 if (isSingleVolume) {
-                    logger.log(`📥 챕터 추가 완료: ${item.title} (현재 ${masterEpubBuilder.chapters.length}개)`, 'Downloader');
+                    const currentSize = currentBuilder.chapters ? currentBuilder.chapters.length : (currentBuilder.content ? currentBuilder.content.split('===').length - 1 : 0);
+                    logger.log(`📥 챕터 추가 완료: ${item.title} (현재 ${currentSize}개)`, 'Downloader');
                 }
             } catch (err) {
                 console.error(err);
-                logger.error(`항목 처리 실패 (${item.title}): ${err.message}`, 'Downloader');
+                const errorMsg = err.message || "알 수 없는 오류";
+                logger.error(`항목 처리 실패 (${item.title}): ${errorMsg}`, 'Downloader');
+                
+                // [v1.8.1] 실패 내역 저장
+                failedEpisodes.push({
+                    num: item.num,
+                    title: item.title,
+                    error: errorMsg
+                });
                 continue; // Skip faulty item but continue loop
             }
 
@@ -4514,13 +4680,13 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                     console.log(`[MasterZip] 추가 중: ${fullFilename}.${extension}`);
                     masterZip.file(`${fullFilename}.${extension}`, blob);
                     
-                    // [v1.6.0] 5-Chapter Batching Logic
-                    // Every 5 items (or at the end), save the batch and clear memory
+                    // [v1.8.2] Batching Logic
+                    // Novel: Infinite batch. Webtoon: 20 per batch to prevent OOM
                     const processedCount = i + 1;
                     const isLastItem = (i === list.length - 1);
-                    const BATCH_SIZE = 5;
+                    const BATCH_SIZE = isNovel ? Infinity : 20;
 
-                    if (processedCount % BATCH_SIZE === 0 || isLastItem) {
+                    if ((BATCH_SIZE !== Infinity && processedCount % BATCH_SIZE === 0) || isLastItem) {
                         const batchNum = Math.ceil(processedCount / BATCH_SIZE);
                         const batchFilename = `${rootFolder}_Part${batchNum}`;
                         
@@ -4643,9 +4809,10 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
         }
 
 
-        // [v1.7.1] Finalize Single Volume EPUB
-        if (isSingleVolume && masterEpubBuilder) {
-            if (masterEpubBuilder.chapters.length > 0) {
+        // [v1.7.1] Finalize Single Volume EPUB/TXT
+        if (isSingleVolume && masterNovelBuilder) {
+            const hasContent = masterNovelBuilder.chapters ? masterNovelBuilder.chapters.length > 0 : masterNovelBuilder.content.length > 0;
+            if (hasContent) {
                 try {
                     // [v1.7.1 Update] Use Chapter Range for Filename instead of "(합본)"
                     // [v1.7.1 Update] Use Chapter Range for Filename instead of "(합본)" - Safe Parsing
@@ -4665,14 +4832,14 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                     
                     logger.log(`📚 단행본 조립 및 저장 중... (${finalFilename})`);
                     
-                    const finalZip = await masterEpubBuilder.build({
+                    const finalZip = await masterNovelBuilder.build({
                         series: seriesTitle || rootFolder,
                         title: seriesTitle || rootFolder,
                         writer: siteName
                     });
                     const finalBlob = await finalZip.generateAsync({ type: "blob" });
                     
-                    await (0,utils/* saveFile */.OJ)(finalBlob, finalFilename, destination, 'epub', {
+                    await (0,utils/* saveFile */.OJ)(finalBlob, finalFilename, destination, extension, {
                         folderName: rootFolder,
                         category: category
                     });
@@ -4701,8 +4868,11 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
             );
         }
 
-        logger.success(`✅ 다운로드 완료!`);
-        ui/* Notifier */.ze.notify('TokiSync', `다운로드 완료! (${list.length}개 항목)`);
+        logger.success(`✅ 모든 작업 완료!`);
+        ui/* Notifier */.ze.notify('TokiSync', `다운로드 완료! (${list.length - failedEpisodes.length}개 성공, ${failedEpisodes.length}개 실패)`);
+
+        // [v1.8.1] 고도화된 실패 리포트 생성 및 저장 (MCP 검토 반영)
+        await generateDownloadReport(seriesTitle || rootFolder, seriesId, list.length, failedEpisodes, partialFailures);
 
     } catch (error) {
         console.error(error);
@@ -4809,9 +4979,63 @@ async function fetchImages(imageUrls) {
     return await Promise.all(promises);
 }
 
+/**
+ * [v1.8.1] 다운로드 실패 리포트 생성 및 다운로드 (MCP 검토 의견 반영)
+ * @private
+ */
+async function generateDownloadReport(seriesTitle, seriesId, listCount, failedEpisodes, partialFailures) {
+    const logger = ui.LogBox.getInstance();
+    if (failedEpisodes.length === 0 && partialFailures.length === 0) return;
+
+    logger.warn(`⚠️ 다운로드 중 일부 오류가 발견되었습니다. 리포트를 생성합니다.`, 'System');
+
+    const timestamp = new Date().toLocaleString();
+    const lines = [
+        `[TokiSync 다운로드 리포트]`,
+        `작품명: ${seriesTitle}`,
+        `일시: ${timestamp}`,
+        `--------------------------------------------------`,
+        `■ 요약 (Summary)`,
+        `- 총 시도: ${listCount}개`,
+        `- 성공: ${listCount - failedEpisodes.length}개`,
+        `- 완전 실패: ${failedEpisodes.length}개 (파일이 생성되지 않음)`,
+        `- 부분 실패: ${partialFailures.length}개 (파일은 생성되었으나 일부 데이터 누락)`,
+        `--------------------------------------------------`,
+    ];
+
+    if (failedEpisodes.length > 0) {
+        lines.push(``, `■ 완전 실패 목록 (Critical Failures)`, `(원인 분석 후 해당 회차만 재시도해 보세요)`);
+        failedEpisodes.forEach(fail => {
+            lines.push(`- [${fail.num}] ${fail.title} : ${fail.error}`);
+        });
+    }
+
+    if (partialFailures.length > 0) {
+        lines.push(``, `■ 부분 실패 목록 (Warnings/Partial Success)`, `(다운로드는 완료되었으나 일부 페이지가 누락된 항목입니다)`);
+        partialFailures.forEach(fail => {
+            lines.push(`- [${fail.num}] ${fail.title} : 이미지 ${fail.missingCount}개 누락`);
+        });
+    }
+
+    lines.push(``, `--------------------------------------------------`, `위 리포트를 참고하여 누락된 회차를 확인하시기 바랍니다.`);
+
+    const reportContent = lines.join('\n');
+    const reportBlob = new Blob([reportContent], { type: 'text/plain;charset=utf-8' });
+    const cleanSeriesTitle = (seriesTitle || "Unknown").replace(/[<>:"/\\|?*]/g, '').trim();
+    const reportFilename = `${cleanSeriesTitle}_다운로드_실패_리포트`;
+
+    try {
+        await (0,utils/* saveFile */.OJ)(reportBlob, reportFilename, 'local', 'txt');
+        logger.success(`✅ 실패 리포트 다운로드 완료: ${reportFilename}.txt`);
+    } catch (e) {
+        console.error('[Downloader] 리포트 저장 실패:', e);
+    }
+}
+
 ;// ./src/core/main.js
 
  
+
 
 
 
@@ -5047,8 +5271,11 @@ async function main() {
                 // 2. 빌더 생성 (카테고리에 따라)
                 const isNovel = (siteInfo.category === 'Novel' || siteInfo.category === 'novel');
                 let builder;
+                let extension = 'cbz';
                 if (isNovel) {
-                    builder = new EpubBuilder(seriesTitle, { author: "TokiSync" });
+                    const novelFormat = (0,core_config/* getConfig */.zj)().novelFormat || 'epub';
+                    builder = novelFormat === 'txt' ? new TxtBuilder() : new EpubBuilder(seriesTitle, { author: "TokiSync" });
+                    extension = novelFormat;
                 } else {
                     builder = new CbzBuilder(title);
                 }
@@ -5074,7 +5301,6 @@ async function main() {
                 });
                 
                 const blob = await zip.generateAsync({ type: "blob" });
-                const extension = isNovel ? 'epub' : 'cbz';
                 const filename = `${tempItem.num} - ${title}`;
 
                 await (0,utils/* saveFile */.OJ)(blob, filename, 'local', extension, { category: siteInfo.category });
@@ -5196,6 +5422,11 @@ async function main() {
             let category = 'Webtoon';
             if (siteInfo.site === '북토끼') category = 'Novel';
             else if (siteInfo.site === '마나토끼') category = 'Manga';
+
+            if (!(0,core_config/* isConfigValid */.Jb)()) {
+                console.log('[TokiSync] GAS 설정을 찾을 수 없어 이력 동기화를 건너뜁니다.');
+                return;
+            }
 
             console.log(`[TokiSync] Fetching history for: ${rootFolder} (${category})`);
             const history = await (0,gas/* fetchHistory */.Ny)(rootFolder, category);
