@@ -1462,6 +1462,7 @@ async function uploadViaGASRelay(blob, folderName, fileName, options = {}) {
                 data: JSON.stringify({ 
                     folderId: config.folderId, 
                     type: "upload", 
+                    protocolVersion: 3,
                     clientVersion: CLIENT_VERSION, 
                     uploadUrl: uploadUrl, 
                     chunkData: chunkBase64, 
@@ -4826,7 +4827,7 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                 const indexResponse = await new Promise((resolve, reject) => {
                     GM_xmlhttpRequest({
                         method: "POST", url: config.gasUrl,
-                        data: JSON.stringify({ type: "get_library", folderId: config.folderId, apiKey: config.apiKey }),
+                        data: JSON.stringify({ type: "get_library", folderId: config.folderId, apiKey: config.apiKey, protocolVersion: 3 }),
                         headers: { "Content-Type": "text/plain" },
                         onload: (r) => {
                             try { resolve(JSON.parse(r.responseText)); } 
@@ -5081,11 +5082,12 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                                 await new Promise((res, rej) => {
                                     GM_xmlhttpRequest({
                                         method: "POST", url: (0,core_config/* getConfig */.zj)().gasUrl,
-                                        data: JSON.stringify({ 
-                                            type: "upload", uploadUrl: updateUrl, chunkData: chunkBase64, 
-                                            folderId: (0,core_config/* getConfig */.zj)().folderId,
-                                            start: start, end: end, total: totalSize, apiKey: (0,core_config/* getConfig */.zj)().apiKey
-                                        }),
+                                            data: JSON.stringify({ 
+                                                type: "upload", uploadUrl: updateUrl, chunkData: chunkBase64, 
+                                                folderId: (0,core_config/* getConfig */.zj)().folderId,
+                                                protocolVersion: 3,
+                                                start: start, end: end, total: totalSize, apiKey: (0,core_config/* getConfig */.zj)().apiKey
+                                            }),
                                         headers: { "Content-Type": "text/plain" },
                                         timeout: 300000,
                                         onload: (resp) => {
@@ -5436,7 +5438,8 @@ async function main() {
                 data: JSON.stringify({
                     type: 'view_migrate_thumbnails',
                     folderId: config.folderId,
-                    apiKey: config.apiKey
+                    apiKey: config.apiKey,
+                    protocolVersion: 3
                 }),
                 onload: (res) => {
                     try {
@@ -5494,7 +5497,8 @@ async function main() {
                     type: 'view_migrate_filenames',
                     seriesId: seriesId,
                     folderId: config.folderId,
-                    apiKey: config.apiKey
+                    apiKey: config.apiKey,
+                    protocolVersion: 3
                 }),
                 headers: {
                     // "Authorization": `Bearer ${token}`, // If using OAuth
