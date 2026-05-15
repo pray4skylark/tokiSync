@@ -279,6 +279,7 @@ export async function getBooksByCacheId(cacheFileId) {
             url: config.gasUrl,
             data: JSON.stringify({
                 type: "view_get_books_by_cache",
+                folderId: config.folderId,
                 cacheFileId: cacheFileId,
                 apiKey: config.apiKey,
                 protocolVersion: 3
@@ -328,6 +329,7 @@ export async function initUpdateUploadViaGASRelay(fileId, fileName) {
             url: config.gasUrl,
             data: JSON.stringify({ 
                 type: "init_update", 
+                folderId: config.folderId,
                 fileId: fileId,
                 fileName: fileName,
                 apiKey: config.apiKey,
