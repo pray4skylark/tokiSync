@@ -292,19 +292,22 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
         // Get List
         let list = await parser.getListItems();
 
-        // [v2.0] 커스텀 범위 필터 ("1,2,4-10" 형식)
+        // [v1.9.1] 정렬 로직 통합: 범위 필터 여부와 상관없이 항상 오름차순(1화~N화)으로 정렬
         const rangeSet = parseRangeSpec(rangeSpec);
-        if (rangeSet) {
-            // 필터링 및 번호 오름차순 정렬 (1부터 다운로드 되도록)
-            const mappedList = list.map(li => {
-                const item = parser.parseListItem(li.element || li);
-                return { li, num: parseInt(item.num) };
-            }).filter(item => rangeSet.has(item.num));
+        const mappedList = list.map(li => {
+            const item = parser.parseListItem(li.element || li);
+            return { li, num: parseInt(item.num) || 0 }; // 숫자가 아니면 0으로 처리하여 상단 배치
+        });
 
-            mappedList.sort((a, b) => a.num - b.num);
-            list = mappedList.map(item => item.li);
-            
+        if (rangeSet) {
+            list = mappedList.filter(item => rangeSet.has(item.num))
+                             .sort((a, b) => a.num - b.num)
+                             .map(item => item.li);
             logger.log(`범위 필터 적용 및 오름차순 정렬 완료: ${rangeSpec} → ${list.length}개 항목`);
+        } else {
+            list = mappedList.sort((a, b) => a.num - b.num)
+                             .map(item => item.li);
+            logger.log(`전체 항목 오름차순 정렬 완료: ${list.length}개 항목`);
         }
         
         // Log episode range
