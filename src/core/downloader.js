@@ -427,7 +427,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                 const indexResponse = await new Promise((resolve, reject) => {
                     GM_xmlhttpRequest({
                         method: "POST", url: config.gasUrl,
-                        data: JSON.stringify({ type: "get_library", folderId: config.folderId, apiKey: config.apiKey }),
+                        data: JSON.stringify({ type: "get_library", folderId: config.folderId, apiKey: config.apiKey, protocolVersion: 3 }),
                         headers: { "Content-Type": "text/plain" },
                         onload: (r) => {
                             try { resolve(JSON.parse(r.responseText)); } 
@@ -682,11 +682,12 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                                 await new Promise((res, rej) => {
                                     GM_xmlhttpRequest({
                                         method: "POST", url: getConfig().gasUrl,
-                                        data: JSON.stringify({ 
-                                            type: "upload", uploadUrl: updateUrl, chunkData: chunkBase64, 
-                                            folderId: getConfig().folderId,
-                                            start: start, end: end, total: totalSize, apiKey: getConfig().apiKey
-                                        }),
+                                            data: JSON.stringify({ 
+                                                type: "upload", uploadUrl: updateUrl, chunkData: chunkBase64, 
+                                                folderId: getConfig().folderId,
+                                                protocolVersion: 3,
+                                                start: start, end: end, total: totalSize, apiKey: getConfig().apiKey
+                                            }),
                                         headers: { "Content-Type": "text/plain" },
                                         timeout: 300000,
                                         onload: (resp) => {

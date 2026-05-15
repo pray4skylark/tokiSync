@@ -54,7 +54,8 @@ export async function main() {
                 data: JSON.stringify({
                     type: 'view_migrate_thumbnails',
                     folderId: config.folderId,
-                    apiKey: config.apiKey
+                    apiKey: config.apiKey,
+                    protocolVersion: 3
                 }),
                 onload: (res) => {
                     try {
@@ -112,7 +113,8 @@ export async function main() {
                     type: 'view_migrate_filenames',
                     seriesId: seriesId,
                     folderId: config.folderId,
-                    apiKey: config.apiKey
+                    apiKey: config.apiKey,
+                    protocolVersion: 3
                 }),
                 headers: {
                     // "Authorization": `Bearer ${token}`, // If using OAuth

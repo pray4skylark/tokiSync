@@ -170,6 +170,7 @@ async function uploadViaGASRelay(blob, folderName, fileName, options = {}) {
                 data: JSON.stringify({ 
                     folderId: config.folderId, 
                     type: "upload", 
+                    protocolVersion: 3,
                     clientVersion: CLIENT_VERSION, 
                     uploadUrl: uploadUrl, 
                     chunkData: chunkBase64, 
