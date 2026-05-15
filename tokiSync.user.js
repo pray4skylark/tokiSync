@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.8.0
+// @version      1.9.1
 // @description  Toki series sites -> Google Drive syncing tool (Bundled)
 // @author       pray4skylark
 // @updateURL    https://pray4skylark.github.io/tokiSync/tokiSync.user.js
@@ -175,7 +175,8 @@ async function fetchToken() {
             data: JSON.stringify({
                 folderId: config.folderId,
                 type: 'view_get_token',
-                apiKey: config.apiKey
+                apiKey: config.apiKey,
+                protocolVersion: 3
             }),
             headers: { 'Content-Type': 'text/plain' },
             timeout: 30000,
@@ -253,7 +254,7 @@ async function getOrCreateFolder(folderName, parentId, token, category = 'Webtoo
     // 1. Check for legacy folder in root (migration compatibility)
     const legacySearchUrl = `https://www.googleapis.com/drive/v3/files?` +
         `q=name='${encodeURIComponent(folderName)}' and '${parentId}' in parents and trashed=false and mimeType='application/vnd.google-apps.folder'` +
-        `&fields=files(id,name)`;
+        `&fields=files(id,name)&supportsAllDrives=true&includeItemsFromAllDrives=true`;
     
     const legacyResult = await new Promise((resolve, reject) => {
         GM_xmlhttpRequest({
@@ -282,7 +283,7 @@ async function getOrCreateFolder(folderName, parentId, token, category = 'Webtoo
     const categoryName = category || 'Webtoon';
     const categorySearchUrl = `https://www.googleapis.com/drive/v3/files?` +
         `q=name='${categoryName}' and '${parentId}' in parents and trashed=false and mimeType='application/vnd.google-apps.folder'` +
-        `&fields=files(id,name)`;
+        `&fields=files(id,name)&supportsAllDrives=true&includeItemsFromAllDrives=true`;
     
     const categoryResult = await new Promise((resolve, reject) => {
         GM_xmlhttpRequest({
@@ -312,7 +313,7 @@ async function getOrCreateFolder(folderName, parentId, token, category = 'Webtoo
         const createCategoryResult = await new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method: 'POST',
-                url: 'https://www.googleapis.com/drive/v3/files',
+                url: 'https://www.googleapis.com/drive/v3/files?supportsAllDrives=true',
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
@@ -354,7 +355,7 @@ async function getOrCreateFolder(folderName, parentId, token, category = 'Webtoo
 
     const seriesSearchUrl = `https://www.googleapis.com/drive/v3/files?` +
         `q=${queryPart} and '${categoryFolderId}' in parents and trashed=false and mimeType='application/vnd.google-apps.folder'` +
-        `&fields=files(id,name)`;
+        `&fields=files(id,name)&supportsAllDrives=true&includeItemsFromAllDrives=true`;
     
     const seriesResult = await new Promise((resolve, reject) => {
         GM_xmlhttpRequest({
@@ -395,7 +396,7 @@ async function getOrCreateFolder(folderName, parentId, token, category = 'Webtoo
     const createResult = await new Promise((resolve, reject) => {
         GM_xmlhttpRequest({
             method: 'POST',
-            url: 'https://www.googleapis.com/drive/v3/files',
+            url: 'https://www.googleapis.com/drive/v3/files?supportsAllDrives=true',
             headers: {
                 'Authorization': `Bearer ${token}`,
                 'Content-Type': 'application/json'
@@ -428,7 +429,7 @@ async function getOrCreateThumbnailFolder(token, parentId) {
     const thumbName = '_Thumbnails';
     const searchUrl = `https://www.googleapis.com/drive/v3/files?` +
         `q=name='${thumbName}' and '${parentId}' in parents and trashed=false and mimeType='application/vnd.google-apps.folder'` +
-        `&fields=files(id,name)`;
+        `&fields=files(id,name)&supportsAllDrives=true&includeItemsFromAllDrives=true`;
     
     const result = await new Promise((resolve, reject) => {
         GM_xmlhttpRequest({
@@ -451,7 +452,7 @@ async function getOrCreateThumbnailFolder(token, parentId) {
     const createResult = await new Promise((resolve, reject) => {
         GM_xmlhttpRequest({
             method: 'POST',
-            url: 'https://www.googleapis.com/drive/v3/files',
+            url: 'https://www.googleapis.com/drive/v3/files?supportsAllDrives=true',
             headers: {
                 'Authorization': `Bearer ${token}`,
                 'Content-Type': 'application/json'
@@ -553,7 +554,7 @@ async function uploadDirect(blob, folderName, fileName, metadata = {}) {
         try {
             const searchUrl = `https://www.googleapis.com/drive/v3/files?` +
                 `q=name='${finalFileName}' and '${targetFolderId}' in parents and trashed=false` +
-                `&fields=files(id,name)`;
+                `&fields=files(id,name)&supportsAllDrives=true&includeItemsFromAllDrives=true`;
             
             const searchRes = await new Promise((res, rej) => {
                 GM_xmlhttpRequest({
@@ -581,8 +582,8 @@ async function uploadDirect(blob, folderName, fileName, metadata = {}) {
         };
 
         const sessionUrl = existingFileId 
-            ? `https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=resumable`
-            : `https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable`;
+            ? `https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=resumable&supportsAllDrives=true`
+            : `https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true`;
 
         uploadUrl = await new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
@@ -668,7 +669,7 @@ async function fetchHistoryDirect(seriesTitle, category = 'Webtoon') {
         const searchUrl = `https://www.googleapis.com/drive/v3/files?` +
             `q='${currentSeriesFolderId}' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'` +
             `&fields=files(id,name,size)` +
-            `&pageSize=1000`;
+            `&pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true`;
             
         const result = await new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
@@ -771,7 +772,7 @@ async function checkSingleHistoryDirect(folderId, episodeNumStr) {
         const searchUrl = `https://www.googleapis.com/drive/v3/files?` +
             `q=${encodeURIComponent(query)} and '${folderId}' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'` +
             `&fields=files(id,size,name)` +
-            `&pageSize=10`; // Safe margin if multiple files contain the number
+            `&pageSize=10&supportsAllDrives=true&includeItemsFromAllDrives=true`; // Safe margin if multiple files contain the number
             
         const result = await new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
@@ -809,442 +810,50 @@ async function checkSingleHistoryDirect(folderId, episodeNumStr) {
 
 /***/ }),
 
-/***/ 488:
+/***/ 419:
 /***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
 
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
-/* harmony export */   B0: function() { return /* binding */ getBooksByCacheId; },
-/* harmony export */   Jb: function() { return /* binding */ getMergeIndexFragment; },
-/* harmony export */   Ny: function() { return /* binding */ fetchHistory; },
-/* harmony export */   fA: function() { return /* binding */ initUpdateUploadViaGASRelay; },
-/* harmony export */   jz: function() { return /* binding */ refreshCacheAfterUpload; },
-/* harmony export */   yv: function() { return /* binding */ uploadToGAS; }
+/* harmony export */   T: function() { return /* binding */ detectSite; }
 /* harmony export */ });
-/* harmony import */ var _config_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(899);
-/* harmony import */ var _network_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(391);
-/* harmony import */ var _ui_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(963);
+/* harmony import */ var _parsers_RuleManager_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(543);
 
-
-
-
-function arrayBufferToBase64(buffer) {
-    const bytes = new Uint8Array(buffer);
-    let binary = "";
-    const chunk_size = 0x8000; // 32KB
-    for (let i = 0; i < bytes.length; i += chunk_size) {
-        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk_size));
-    }
-    return window.btoa(binary);
-}
 
 /**
- * Uploads a Blob to Google Drive via Direct Access (primary) or GAS Relay (fallback)
- * @param {Blob} blob File content
- * @param {string} folderName Target folder name (e.g. "[123] Title")
- * @param {string} fileName Target file name (e.g. "[123] Title.zip")
+ * detectSite
+ * Detects the current site and returns site info.
+ * Now supports both dynamic rules and legacy hardcoded patterns.
+ * @returns {Promise<Object|null>}
  */
-async function uploadToGAS(blob, folderName, fileName, options = {}) {
-    const config = (0,_config_js__WEBPACK_IMPORTED_MODULE_0__/* .getConfig */ .zj)();
-    if (!(0,_config_js__WEBPACK_IMPORTED_MODULE_0__/* .isConfigValid */ .Jb)()) throw new Error("GAS 설정이 누락되었습니다. 메뉴에서 설정을 완료해주세요.");
-    
-    // Try Direct Upload first
-    try {
-        console.log('[Upload] Attempting Direct Drive API upload...');
-        await (0,_network_js__WEBPACK_IMPORTED_MODULE_1__/* .uploadDirect */ .r9)(blob, folderName, fileName, options);
-        console.log('[Upload] ✅ Direct upload succeeded');
-        return; // Success!
-    } catch (directError) {
-        console.warn('[Upload] ⚠️  Direct upload failed, falling back to GAS relay:', directError.message);
-        _ui_js__WEBPACK_IMPORTED_MODULE_2__.LogBox.getInstance().warn('Direct 업로드 실패 → GAS 릴레이 폴백: ' + directError.message + ' (' + fileName + ')', 'GAS:Upload');
-    }
-    
-    // Fallback to GAS Relay
-    console.log('[Upload] Using GAS relay fallback...');
-    await uploadViaGASRelay(blob, folderName, fileName, options);
-}
+async function detectSite() {
+    const url = window.location.href;
+    const domain = window.location.hostname;
+    const protocolDomain = `${window.location.protocol}//${domain}`;
 
-/**
- * 업로드 완료 후 GAS의 _toki_cache.json을 갱신합니다 (비동기, fire-and-forget)
- * 에피소드 c30치 다운로드 완료 후 한 번만 호출하세요.
- */
-async function refreshCacheAfterUpload(folderName, category = 'Unknown', metadata = {}) {
-    const config = (0,_config_js__WEBPACK_IMPORTED_MODULE_0__/* .getConfig */ .zj)();
-    if (!config.gasUrl || !config.folderId) return;
-    const logger = _ui_js__WEBPACK_IMPORTED_MODULE_2__.LogBox.getInstance();
-    console.log(`[Cache] 업로드 완료 → Drive 캐시 갱신 요청 (${folderName})`);
-    return new Promise((resolve) => {
-        GM_xmlhttpRequest({
-            method: 'POST',
-            url: config.gasUrl,
-            data: JSON.stringify({
-                type: 'view_update_cache',
-                folderId: config.folderId,
-                folderName,
-                category,
-                metadata, // [v1.7.0] Pass full metadata
-                apiKey: config.apiKey,
-                protocolVersion: 3,
-            }),
-            headers: { 'Content-Type': 'text/plain' },
-            timeout: 30000,
-            onload: (res) => {
-                try {
-                    const json = JSON.parse(res.responseText);
-                    console.log('[Cache] 갱신 요청 완료. 병합 파편 생성됨:', json.body);
-                } catch (e) {
-                    console.log('[Cache] 갱신 완료 응답 수신 (상세없음)');
-                }
-                resolve();
-            },
-            onerror: () => {
-                logger.warn(`캐시 갱신 네트워크 오류 (${folderName}) — 다음 실행 시 자동 복구됨`, 'GAS:Cache');
-                resolve();
-            },
-            ontimeout: () => {
-                logger.warn(`캐시 갱신 타임아웃 30초 (${folderName}) — 스킬폭 포함 가능`, 'GAS:Cache');
-                resolve();
-            },
-        });
-    });
-}
-
-/**
- * Legacy GAS Relay Upload (Fallback)
- * @param {Blob} blob File content
- * @param {string} folderName Target folder name
- * @param {string} fileName Target file name
- */
-async function uploadViaGASRelay(blob, folderName, fileName, options = {}) {
-    const config = (0,_config_js__WEBPACK_IMPORTED_MODULE_0__/* .getConfig */ .zj)();
-    if (!(0,_config_js__WEBPACK_IMPORTED_MODULE_0__/* .isConfigValid */ .Jb)()) throw new Error("GAS 설정이 누락되었습니다. 메뉴에서 설정을 완료해주세요.");
-    const logger = _ui_js__WEBPACK_IMPORTED_MODULE_2__.LogBox.getInstance();
-    
-    // Constants
-    const CHUNK_SIZE = 20 * 1024 * 1024; // 20MB
-    const CLIENT_VERSION = "1.2.2";
-    const totalSize = blob.size;
-    let uploadUrl = "";
-
-    console.log(`[GAS] 업로드 초기화 중... (${fileName})`);
-    
-    // Determine Category
-    // Default to Webtoon if not provided
-    const category = options.category || (fileName.endsWith('.epub') ? 'Novel' : 'Webtoon');
-
-    // 1. Init Session
-    await new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-            method: "POST", 
-            url: config.gasUrl,
-            data: JSON.stringify({ 
-                folderId: config.folderId, 
-                type: "init", 
-                protocolVersion: 3, 
-                clientVersion: CLIENT_VERSION, 
-                folderName: folderName, 
-                fileName: fileName,
-                category: category,
-                apiKey: config.apiKey
-            }),
-            headers: { "Content-Type": "text/plain" },
-            timeout: 30000,
-            onload: (res) => {
-                try {
-                    const json = JSON.parse(res.responseText);
-                    if (json.status === 'success') { 
-                        uploadUrl = (typeof json.body === 'object') ? json.body.uploadUrl : json.body;
-                        resolve(); 
-                    } else {
-                        logger.critical(`GAS 릴레이 세션 초기화 실패: ${json.body || 'Init failed'} (${fileName})`, 'GAS:Relay');
-                        reject(new Error(json.body || "Init failed"));
-                    }
-                } catch (e) { 
-                    logger.critical(`GAS 서버 응답 파싱 실패 (Init): ${res.responseText?.substring(0, 80)}`, 'GAS:Relay');
-                    reject(new Error("GAS 응답 오류(Init): " + res.responseText)); 
-                }
-            },
-            onerror: (e) => {
-                logger.critical(`GAS 릴레이 네트워크 오류 (Init) — ${fileName}`, 'GAS:Relay');
-                reject(new Error("네트워크 오류(Init)"));
-            },
-            ontimeout: () => {
-                logger.critical(`GAS 릴레이 세션 초기화 타임아웃 (30초) — ${fileName}`, 'GAS:Relay');
-                reject(new Error("[GAS] 업로드 초기화 타임아웃 (30초)"));
-            }
-        });
-    });
-
-    console.log(`[GAS] 세션 생성 완료. 업로드 시작...`);
-
-    // 2. Chunk Upload Loop
-    let start = 0;
-    const buffer = await blob.arrayBuffer();
-    
-    while (start < totalSize) {
-        const end = Math.min(start + CHUNK_SIZE, totalSize);
-        const chunkBuffer = buffer.slice(start, end);
-        const chunkBase64 = arrayBufferToBase64(chunkBuffer);
-        const percentage = Math.floor((end / totalSize) * 100);
-        
-        console.log(`[GAS] 전송 중... ${percentage}% (${start} ~ ${end} / ${totalSize})`);
-
-        await new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-                method: "POST", 
-                url: config.gasUrl,
-                data: JSON.stringify({ 
-                    folderId: config.folderId, 
-                    type: "upload", 
-                    clientVersion: CLIENT_VERSION, 
-                    uploadUrl: uploadUrl, 
-                    chunkData: chunkBase64, 
-                    start: start, end: end, total: totalSize,
-                    apiKey: config.apiKey
-                }),
-                headers: { "Content-Type": "text/plain" },
-                timeout: 300000,
-                onload: (res) => {
-                    try { 
-                        const json = JSON.parse(res.responseText); 
-                        if (json.status === 'success') resolve(); 
-                        else {
-                            logger.critical(`GAS 청크 업로드 실패: ${json.body || 'Upload failed'} (${start}~${end})`, 'GAS:Relay');
-                            reject(new Error(json.body || "Upload failed")); 
-                        }
-                    } catch (e) { 
-                        logger.critical(`GAS 청크 응답 파싱 실패 (${start}~${end})`, 'GAS:Relay');
-                        reject(new Error("GAS 응답 오류(Upload): " + res.responseText)); 
-                    }
-                },
-                onerror: (e) => {
-                    logger.critical(`GAS 청크 네트워크 오류 (${start}~${end} / ${totalSize})`, 'GAS:Relay');
-                    reject(new Error("네트워크 오류(Upload)"));
-                },
-                ontimeout: () => {
-                    logger.critical(`GAS 청크 타임아웃 5분 (${start}~${end} / ${totalSize})`, 'GAS:Relay');
-                    reject(new Error(`[GAS] 청크 업로드 타임아웃 (5분): ${start}~${end}`));
-                }
-            });
-        });
-        
-        start = end;
+    // Dynamic Rule Matching
+    const matchedRule = await _parsers_RuleManager_js__WEBPACK_IMPORTED_MODULE_0__/* .RuleManager */ .u.matchRule(url);
+    if (matchedRule) {
+        return { 
+            site: 'generic', 
+            protocolDomain, 
+            matchedRule,
+            category: matchedRule.category || 'Webtoon'
+        };
     }
 
-    console.log(`[GAS] 업로드 완료!`);
+    return null;
 }
-
-/**
- * Fetch download history from GAS
- * @param {string} seriesTitle
- * @param {string} category 
- * @returns {Promise<string[]>} List of completed episode IDs
- */
-async function fetchHistory(seriesTitle, category = 'Webtoon') {
-    const config = (0,_config_js__WEBPACK_IMPORTED_MODULE_0__/* .getConfig */ .zj)();
-    if (!config.gasUrl) return [];
-    const logger = _ui_js__WEBPACK_IMPORTED_MODULE_2__.LogBox.getInstance();
-
-    console.log(`[GAS] 다운로드 기록 조회 중... (${seriesTitle})`);
-
-    return new Promise((resolve) => {
-        GM_xmlhttpRequest({
-            method: "POST",
-            url: config.gasUrl,
-            data: JSON.stringify({
-                type: "check_history",
-                folderId: config.folderId,
-                folderName: seriesTitle,
-                category: category,
-                apiKey: config.apiKey
-            }),
-            headers: { "Content-Type": "text/plain" },
-            timeout: 30000,
-            onload: (res) => {
-                try {
-                    const json = JSON.parse(res.responseText);
-                    if (json.status === 'success') {
-                        resolve(Array.isArray(json.body) ? json.body : []);
-                    } else {
-                        logger.warn(`다운로드 기록 조회 실패: ${json.body}`, 'GAS:History');
-                        resolve([]);
-                    }
-                } catch (e) {
-                    logger.warn(`다운로드 기록 응답 파싱 실패`, 'GAS:History');
-                    resolve([]);
-                }
-            },
-            onerror: () => {
-                logger.warn(`다운로드 기록 조회 네트워크 오류`, 'GAS:History');
-                resolve([]);
-            },
-            ontimeout: () => {
-                logger.warn(`다운로드 기록 조회 타임아웃 (30초)`, 'GAS:History');
-                resolve([]);
-            }
-        });
-    });
-}
-
-/**
- * [v1.6.0] Fetch cached episode list directly using cacheFileId
- * @param {string} cacheFileId 
- * @returns {Promise<Array>} List of cached episodes
- */
-async function getBooksByCacheId(cacheFileId) {
-    const config = (0,_config_js__WEBPACK_IMPORTED_MODULE_0__/* .getConfig */ .zj)();
-    if (!config.gasUrl) return [];
-    const logger = _ui_js__WEBPACK_IMPORTED_MODULE_2__.LogBox.getInstance();
-
-    console.log(`[GAS] 캐시 파일 직행 조회 중... (${cacheFileId})`);
-
-    return new Promise((resolve) => {
-        GM_xmlhttpRequest({
-            method: "POST",
-            url: config.gasUrl,
-            data: JSON.stringify({
-                type: "view_get_books_by_cache",
-                cacheFileId: cacheFileId,
-                apiKey: config.apiKey
-            }),
-            headers: { "Content-Type": "text/plain" },
-            timeout: 10000,
-            onload: (res) => {
-                try {
-                    const json = JSON.parse(res.responseText);
-                    if (json.status === 'success') {
-                        resolve(Array.isArray(json.body) ? json.body : []);
-                    } else {
-                        logger.warn(`Fast Path 캐시 직행 조회 실패: ${json.body}`, 'GAS:FastPath');
-                        resolve([]);
-                    }
-                } catch (e) {
-                    logger.warn(`Fast Path 캐시 응답 파싱 실패`, 'GAS:FastPath');
-                    resolve([]);
-                }
-            },
-            onerror: () => {
-                logger.warn(`Fast Path 캐시 네트워크 오류`, 'GAS:FastPath');
-                resolve([]);
-            },
-            ontimeout: () => {
-                logger.warn(`Fast Path 캐시 조회 타임아웃 (10초)`, 'GAS:FastPath');
-                resolve([]);
-            }
-        });
-    });
-}
-
-/**
- * [v1.6.0] Initialize an update upload session via GAS using fileId (Fast Path)
- * @param {string} fileId 
- * @param {string} fileName 
- */
-async function initUpdateUploadViaGASRelay(fileId, fileName) {
-    const config = (0,_config_js__WEBPACK_IMPORTED_MODULE_0__/* .getConfig */ .zj)();
-    if (!(0,_config_js__WEBPACK_IMPORTED_MODULE_0__/* .isConfigValid */ .Jb)()) throw new Error("GAS 설정이 누락되었습니다.");
-
-    console.log(`[GAS] 빠른 덮어쓰기(PUT) 세션 초기화 중... (${fileName} -> ${fileId})`);
-
-    return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-            method: "POST", 
-            url: config.gasUrl,
-            data: JSON.stringify({ 
-                type: "init_update", 
-                fileId: fileId,
-                fileName: fileName,
-                apiKey: config.apiKey
-            }),
-            headers: { "Content-Type": "text/plain" },
-            timeout: 30000,
-            onload: (res) => {
-                try {
-                    const json = JSON.parse(res.responseText);
-                    if (json.status === 'success') { 
-                        resolve((typeof json.body === 'object') ? json.body.uploadUrl : json.body);
-                    } else {
-                        _ui_js__WEBPACK_IMPORTED_MODULE_2__.LogBox.getInstance().critical(`Fast Path PUT 세션 초기화 실패: ${json.body || 'Init Update failed'} (${fileName})`, 'GAS:FastPath');
-                        reject(new Error(json.body || "Init Update failed"));
-                    }
-                } catch (e) { 
-                    _ui_js__WEBPACK_IMPORTED_MODULE_2__.LogBox.getInstance().critical(`Fast Path PUT 레스폰스 파싱 실패 (${fileName})`, 'GAS:FastPath');
-                    reject(new Error("GAS 응답 오류(Init Update): " + res.responseText)); 
-                }
-            },
-            onerror: (e) => {
-                _ui_js__WEBPACK_IMPORTED_MODULE_2__.LogBox.getInstance().critical(`Fast Path PUT 네트워크 오류 (${fileName})`, 'GAS:FastPath');
-                reject(new Error("네트워크 오류(Init Update)"));
-            },
-            ontimeout: () => {
-                _ui_js__WEBPACK_IMPORTED_MODULE_2__.LogBox.getInstance().critical(`Fast Path PUT 타임아웃 30초 (${fileName})`, 'GAS:FastPath');
-                reject(new Error("[GAS] 덧쓰기 세션 초기화 타임아웃 (30초)"));
-            }
-        });
-    });
-}
-
-/**
- * [v1.6.1] Fetch Series-specific Merge Index Fragment
- * Retrieves the temporary cacheFileId generated after recent uploads without needing a full master_index rebuild.
- * @param {string} sourceId The `12345` ID of the series
- * @returns {Promise<Object>} { found: boolean, data: { cacheFileId: string, ... } }
- */
-async function getMergeIndexFragment(sourceId) {
-    const config = (0,_config_js__WEBPACK_IMPORTED_MODULE_0__/* .getConfig */ .zj)();
-    if (!config.gasUrl || !config.folderId) return { found: false, data: null };
-    const logger = _ui_js__WEBPACK_IMPORTED_MODULE_2__.LogBox.getInstance();
-
-    console.log(`[GAS] 병합 인덱스 파편 조회 중... (Source ID: ${sourceId})`);
-
-    return new Promise((resolve) => {
-        GM_xmlhttpRequest({
-            method: "POST",
-            url: config.gasUrl,
-            data: JSON.stringify({
-                type: "view_get_merge_index",
-                folderId: config.folderId,
-                sourceId: sourceId,
-                apiKey: config.apiKey
-            }),
-            headers: { "Content-Type": "text/plain" },
-            timeout: 10000,
-            onload: (res) => {
-                try {
-                    const json = JSON.parse(res.responseText);
-                    if (json.status === 'success') {
-                        resolve(json.body);
-                    } else {
-                        logger.warn(`MergeIndex 파편 조회 실패: ${json.body} (ID: ${sourceId})`, 'GAS:FastPath');
-                        resolve({ found: false, data: null });
-                    }
-                } catch (e) {
-                    logger.warn(`MergeIndex 파편 응답 파싱 실패`, 'GAS:FastPath');
-                    resolve({ found: false, data: null });
-                }
-            },
-            onerror: () => {
-                logger.warn(`MergeIndex 파편 조회 네트워크 오류`, 'GAS:FastPath');
-                resolve({ found: false, data: null });
-            },
-            ontimeout: () => {
-                logger.warn(`MergeIndex 파편 조회 타임아웃 (10초)`, 'GAS:FastPath');
-                resolve({ found: false, data: null });
-            }
-        });
-    });
-}
-
 
 
 /***/ }),
 
-/***/ 729:
+/***/ 443:
 /***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
 
 
 // EXPORTS
 __webpack_require__.d(__webpack_exports__, {
-  O: function() { return /* binding */ ParserFactory; }
+  b: function() { return /* binding */ GenericParser; }
 });
 
 ;// ./src/core/parsers/BaseParser.js
@@ -1459,6 +1068,41 @@ class GenericParser extends BaseParser {
         return val;
     }
 
+    /**
+     * [v1.8.1] 동적 레이지 키 탐지 (Toki 등 보안 우회용)
+     * @private
+     */
+    _detectDynamicKey(doc, config) {
+        if (!config || !config.regex) return null;
+        
+        try {
+            // 1. 스크립트 태그 우선 스캔 (성능 및 정확도 최적화)
+            const scripts = doc.querySelectorAll('script');
+            const regex = new RegExp(config.regex, 'i');
+            
+            for (const script of scripts) {
+                const match = (script.textContent || "").match(regex);
+                if (match) {
+                    const key = match[1] || match[0];
+                    console.log(`[GenericParser] 스크립트 내 동적 키 탐지 성공: ${key}`);
+                    return key;
+                }
+            }
+            
+            // 2. 전체 HTML 스캔 (폴백)
+            const html = doc.documentElement.innerHTML || "";
+            const match = html.match(regex);
+            if (match) {
+                const key = match[1] || match[0];
+                console.log(`[GenericParser] HTML 내 동적 키 탐지 성공: ${key}`);
+                return key;
+            }
+        } catch (e) {
+            console.warn('[GenericParser] 동적 키 탐지 중 오류 발생:', e);
+        }
+        return null;
+    }
+
     async getListItems() {
         const listCfg = this.rule.list || {};
         let container = document.querySelector(listCfg.container);
@@ -1519,6 +1163,15 @@ class GenericParser extends BaseParser {
     getImageList(iframeDocument) {
         const viewerCfg = this.rule.viewer || {};
 
+        // [v1.8.1] 동적 키 탐지 수행
+        let dynamicLazyAttr = null;
+        if (viewerCfg.keyDiscovery) {
+            const key = this._detectDynamicKey(iframeDocument, viewerCfg.keyDiscovery);
+            if (key) {
+                dynamicLazyAttr = (viewerCfg.keyDiscovery.prefix || 'data-') + key;
+            }
+        }
+
         // 1. 헤드리스(Headless) 정규식 추출 지원 (Next.js 페이로드 등 DOM 미렌더링 대응)
         if (viewerCfg.imageRegex) {
             const html = iframeDocument.documentElement.innerHTML || iframeDocument.body.innerHTML;
@@ -1552,7 +1205,11 @@ class GenericParser extends BaseParser {
 
         return imgs.map(img => {
             let foundUrl = null;
-            const lazyAttrs = viewerCfg.lazyAttrOptions || ['data-src', 'data-lazy', 'src'];
+            // [v1.8.1] 동적 키가 발견되면 최우선 순위로 설정하여 탐지 성공률 극대화
+            const lazyAttrs = [
+                ...(dynamicLazyAttr ? [dynamicLazyAttr] : []),
+                ...(viewerCfg.lazyAttrOptions || ['data-src', 'data-lazy', 'src'])
+            ];
 
             for (const attr of lazyAttrs) {
                 const val = img.getAttribute(attr);
@@ -1616,60 +1273,452 @@ class GenericParser extends BaseParser {
     }
 }
 
-// EXTERNAL MODULE: ./src/core/detector.js + 1 modules
-var detector = __webpack_require__(739);
-;// ./src/core/parsers/ParserFactory.js
+
+/***/ }),
+
+/***/ 488:
+/***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
+
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   B0: function() { return /* binding */ getBooksByCacheId; },
+/* harmony export */   Jb: function() { return /* binding */ getMergeIndexFragment; },
+/* harmony export */   Ny: function() { return /* binding */ fetchHistory; },
+/* harmony export */   fA: function() { return /* binding */ initUpdateUploadViaGASRelay; },
+/* harmony export */   jz: function() { return /* binding */ refreshCacheAfterUpload; },
+/* harmony export */   yv: function() { return /* binding */ uploadToGAS; }
+/* harmony export */ });
+/* harmony import */ var _config_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(899);
+/* harmony import */ var _network_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(391);
+/* harmony import */ var _ui_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(963);
 
 
+
+
+function arrayBufferToBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    const chunk_size = 0x8000; // 32KB
+    for (let i = 0; i < bytes.length; i += chunk_size) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk_size));
+    }
+    return window.btoa(binary);
+}
 
 /**
- * ParserFactory
- * Creates and provides the appropriate parser for the current site.
+ * Uploads a Blob to Google Drive via Direct Access (primary) or GAS Relay (fallback)
+ * @param {Blob} blob File content
+ * @param {string} folderName Target folder name (e.g. "[123] Title")
+ * @param {string} fileName Target file name (e.g. "[123] Title.zip")
  */
-class ParserFactory {
-    static #instance = null;
-
-    /**
-     * Get the appropriate parser for the current site (Singleton)
-     * @returns {Promise<BaseParser|null>}
-     */
-    static async getParser() {
-        if (this.#instance) return this.#instance;
-
-        const siteInfo = await (0,detector/* detectSite */.T)();
-        if (!siteInfo) {
-            console.error('[ParserFactory] Failed to detect site');
-            alert("TokiSync 파서 에러: 매칭되는 파싱 룰이 없습니다.\n\n해당 사이트를 지원하려면 설정에서 커스텀 파싱 룰(JSON)을 등록해야 합니다.\n(자세한 방법은 Github의 rules.sample.json을 참조하세요)");
-            return null;
-        }
-
-        const { site, protocolDomain, matchedRule } = siteInfo;
-
-        // Dynamic Generic Parser
-        if (site === 'generic' && matchedRule) {
-            this.#instance = new GenericParser(protocolDomain, matchedRule);
-            return this.#instance;
-        }
-
-        return null;
+async function uploadToGAS(blob, folderName, fileName, options = {}) {
+    const config = (0,_config_js__WEBPACK_IMPORTED_MODULE_0__/* .getConfig */ .zj)();
+    if (!(0,_config_js__WEBPACK_IMPORTED_MODULE_0__/* .isConfigValid */ .Jb)()) throw new Error("GAS 설정이 누락되었습니다. 메뉴에서 설정을 완료해주세요.");
+    
+    // Try Direct Upload first
+    try {
+        console.log('[Upload] Attempting Direct Drive API upload...');
+        await (0,_network_js__WEBPACK_IMPORTED_MODULE_1__/* .uploadDirect */ .r9)(blob, folderName, fileName, options);
+        console.log('[Upload] ✅ Direct upload succeeded');
+        return; // Success!
+    } catch (directError) {
+        console.warn('[Upload] ⚠️  Direct upload failed, falling back to GAS relay:', directError.message);
+        _ui_js__WEBPACK_IMPORTED_MODULE_2__.LogBox.getInstance().warn('Direct 업로드 실패 → GAS 릴레이 폴백: ' + directError.message + ' (' + fileName + ')', 'GAS:Upload');
     }
+    
+    // Fallback to GAS Relay
+    console.log('[Upload] Using GAS relay fallback...');
+    await uploadViaGASRelay(blob, folderName, fileName, options);
 }
+
+/**
+ * 업로드 완료 후 GAS의 _toki_cache.json을 갱신합니다 (비동기, fire-and-forget)
+ * 에피소드 c30치 다운로드 완료 후 한 번만 호출하세요.
+ */
+async function refreshCacheAfterUpload(folderName, category = 'Unknown', metadata = {}) {
+    const config = (0,_config_js__WEBPACK_IMPORTED_MODULE_0__/* .getConfig */ .zj)();
+    if (!config.gasUrl || !config.folderId) return;
+    const logger = _ui_js__WEBPACK_IMPORTED_MODULE_2__.LogBox.getInstance();
+    console.log(`[Cache] 업로드 완료 → Drive 캐시 갱신 요청 (${folderName})`);
+    return new Promise((resolve) => {
+        GM_xmlhttpRequest({
+            method: 'POST',
+            url: config.gasUrl,
+            data: JSON.stringify({
+                type: 'view_update_cache',
+                folderId: config.folderId,
+                folderName,
+                category,
+                metadata, // [v1.7.0] Pass full metadata
+                apiKey: config.apiKey,
+                protocolVersion: 3,
+            }),
+            headers: { 'Content-Type': 'text/plain' },
+            timeout: 30000,
+            onload: (res) => {
+                try {
+                    const json = JSON.parse(res.responseText);
+                    console.log('[Cache] 갱신 요청 완료. 병합 파편 생성됨:', json.body);
+                } catch (e) {
+                    console.log('[Cache] 갱신 완료 응답 수신 (상세없음)');
+                }
+                resolve();
+            },
+            onerror: () => {
+                logger.warn(`캐시 갱신 네트워크 오류 (${folderName}) — 다음 실행 시 자동 복구됨`, 'GAS:Cache');
+                resolve();
+            },
+            ontimeout: () => {
+                logger.warn(`캐시 갱신 타임아웃 30초 (${folderName}) — 스킬폭 포함 가능`, 'GAS:Cache');
+                resolve();
+            },
+        });
+    });
+}
+
+/**
+ * Legacy GAS Relay Upload (Fallback)
+ * @param {Blob} blob File content
+ * @param {string} folderName Target folder name
+ * @param {string} fileName Target file name
+ */
+async function uploadViaGASRelay(blob, folderName, fileName, options = {}) {
+    const config = (0,_config_js__WEBPACK_IMPORTED_MODULE_0__/* .getConfig */ .zj)();
+    if (!(0,_config_js__WEBPACK_IMPORTED_MODULE_0__/* .isConfigValid */ .Jb)()) throw new Error("GAS 설정이 누락되었습니다. 메뉴에서 설정을 완료해주세요.");
+    const logger = _ui_js__WEBPACK_IMPORTED_MODULE_2__.LogBox.getInstance();
+    
+    // Constants
+    const CHUNK_SIZE = 20 * 1024 * 1024; // 20MB
+    const CLIENT_VERSION = "1.2.2";
+    const totalSize = blob.size;
+    let uploadUrl = "";
+
+    console.log(`[GAS] 업로드 초기화 중... (${fileName})`);
+    
+    // Determine Category
+    // Default to Webtoon if not provided
+    const category = options.category || (fileName.endsWith('.epub') ? 'Novel' : 'Webtoon');
+
+    // 1. Init Session
+    await new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+            method: "POST", 
+            url: config.gasUrl,
+            data: JSON.stringify({ 
+                folderId: config.folderId, 
+                type: "init", 
+                protocolVersion: 3, 
+                clientVersion: CLIENT_VERSION, 
+                folderName: folderName, 
+                fileName: fileName,
+                category: category,
+                apiKey: config.apiKey
+            }),
+            headers: { "Content-Type": "text/plain" },
+            timeout: 30000,
+            onload: (res) => {
+                try {
+                    const json = JSON.parse(res.responseText);
+                    if (json.status === 'success') { 
+                        uploadUrl = (typeof json.body === 'object') ? json.body.uploadUrl : json.body;
+                        resolve(); 
+                    } else {
+                        logger.critical(`GAS 릴레이 세션 초기화 실패: ${json.body || 'Init failed'} (${fileName})`, 'GAS:Relay');
+                        reject(new Error(json.body || "Init failed"));
+                    }
+                } catch (e) { 
+                    logger.critical(`GAS 서버 응답 파싱 실패 (Init): ${res.responseText?.substring(0, 80)}`, 'GAS:Relay');
+                    reject(new Error("GAS 응답 오류(Init): " + res.responseText)); 
+                }
+            },
+            onerror: (e) => {
+                logger.critical(`GAS 릴레이 네트워크 오류 (Init) — ${fileName}`, 'GAS:Relay');
+                reject(new Error("네트워크 오류(Init)"));
+            },
+            ontimeout: () => {
+                logger.critical(`GAS 릴레이 세션 초기화 타임아웃 (30초) — ${fileName}`, 'GAS:Relay');
+                reject(new Error("[GAS] 업로드 초기화 타임아웃 (30초)"));
+            }
+        });
+    });
+
+    console.log(`[GAS] 세션 생성 완료. 업로드 시작...`);
+
+    // 2. Chunk Upload Loop
+    let start = 0;
+    const buffer = await blob.arrayBuffer();
+    
+    while (start < totalSize) {
+        const end = Math.min(start + CHUNK_SIZE, totalSize);
+        const chunkBuffer = buffer.slice(start, end);
+        const chunkBase64 = arrayBufferToBase64(chunkBuffer);
+        const percentage = Math.floor((end / totalSize) * 100);
+        
+        console.log(`[GAS] 전송 중... ${percentage}% (${start} ~ ${end} / ${totalSize})`);
+
+        await new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method: "POST", 
+                url: config.gasUrl,
+                data: JSON.stringify({ 
+                    folderId: config.folderId, 
+                    type: "upload", 
+                    protocolVersion: 3,
+                    clientVersion: CLIENT_VERSION, 
+                    uploadUrl: uploadUrl, 
+                    chunkData: chunkBase64, 
+                    start: start, end: end, total: totalSize,
+                    apiKey: config.apiKey
+                }),
+                headers: { "Content-Type": "text/plain" },
+                timeout: 300000,
+                onload: (res) => {
+                    try { 
+                        const json = JSON.parse(res.responseText); 
+                        if (json.status === 'success') resolve(); 
+                        else {
+                            logger.critical(`GAS 청크 업로드 실패: ${json.body || 'Upload failed'} (${start}~${end})`, 'GAS:Relay');
+                            reject(new Error(json.body || "Upload failed")); 
+                        }
+                    } catch (e) { 
+                        logger.critical(`GAS 청크 응답 파싱 실패 (${start}~${end})`, 'GAS:Relay');
+                        reject(new Error("GAS 응답 오류(Upload): " + res.responseText)); 
+                    }
+                },
+                onerror: (e) => {
+                    logger.critical(`GAS 청크 네트워크 오류 (${start}~${end} / ${totalSize})`, 'GAS:Relay');
+                    reject(new Error("네트워크 오류(Upload)"));
+                },
+                ontimeout: () => {
+                    logger.critical(`GAS 청크 타임아웃 5분 (${start}~${end} / ${totalSize})`, 'GAS:Relay');
+                    reject(new Error(`[GAS] 청크 업로드 타임아웃 (5분): ${start}~${end}`));
+                }
+            });
+        });
+        
+        start = end;
+    }
+
+    console.log(`[GAS] 업로드 완료!`);
+}
+
+/**
+ * Fetch download history from GAS
+ * @param {string} seriesTitle
+ * @param {string} category 
+ * @returns {Promise<string[]>} List of completed episode IDs
+ */
+async function fetchHistory(seriesTitle, category = 'Webtoon') {
+    if (!(0,_config_js__WEBPACK_IMPORTED_MODULE_0__/* .isConfigValid */ .Jb)()) return [];
+    const config = (0,_config_js__WEBPACK_IMPORTED_MODULE_0__/* .getConfig */ .zj)();
+    const logger = _ui_js__WEBPACK_IMPORTED_MODULE_2__.LogBox.getInstance();
+
+    console.log(`[GAS] 다운로드 기록 조회 중... (${seriesTitle})`);
+
+    return new Promise((resolve) => {
+        GM_xmlhttpRequest({
+            method: "POST",
+            url: config.gasUrl,
+            data: JSON.stringify({
+                type: "check_history",
+                folderId: config.folderId,
+                folderName: seriesTitle,
+                category: category,
+                apiKey: config.apiKey,
+                protocolVersion: 3
+            }),
+            headers: { "Content-Type": "text/plain" },
+            timeout: 30000,
+            onload: (res) => {
+                try {
+                    const json = JSON.parse(res.responseText);
+                    if (json.status === 'success') {
+                        resolve(Array.isArray(json.body) ? json.body : []);
+                    } else {
+                        logger.warn(`다운로드 기록 조회 실패: ${json.body}`, 'GAS:History');
+                        resolve([]);
+                    }
+                } catch (e) {
+                    logger.warn(`다운로드 기록 응답 파싱 실패`, 'GAS:History');
+                    resolve([]);
+                }
+            },
+            onerror: () => {
+                logger.warn(`다운로드 기록 조회 네트워크 오류`, 'GAS:History');
+                resolve([]);
+            },
+            ontimeout: () => {
+                logger.warn(`다운로드 기록 조회 타임아웃 (30초)`, 'GAS:History');
+                resolve([]);
+            }
+        });
+    });
+}
+
+/**
+ * [v1.6.0] Fetch cached episode list directly using cacheFileId
+ * @param {string} cacheFileId 
+ * @returns {Promise<Array>} List of cached episodes
+ */
+async function getBooksByCacheId(cacheFileId) {
+    if (!(0,_config_js__WEBPACK_IMPORTED_MODULE_0__/* .isConfigValid */ .Jb)()) return [];
+    const config = (0,_config_js__WEBPACK_IMPORTED_MODULE_0__/* .getConfig */ .zj)();
+    const logger = _ui_js__WEBPACK_IMPORTED_MODULE_2__.LogBox.getInstance();
+
+    console.log(`[GAS] 캐시 파일 직행 조회 중... (${cacheFileId})`);
+
+    return new Promise((resolve) => {
+        GM_xmlhttpRequest({
+            method: "POST",
+            url: config.gasUrl,
+            data: JSON.stringify({
+                type: "view_get_books_by_cache",
+                folderId: config.folderId,
+                cacheFileId: cacheFileId,
+                apiKey: config.apiKey,
+                protocolVersion: 3
+            }),
+            headers: { "Content-Type": "text/plain" },
+            timeout: 10000,
+            onload: (res) => {
+                try {
+                    const json = JSON.parse(res.responseText);
+                    if (json.status === 'success') {
+                        resolve(Array.isArray(json.body) ? json.body : []);
+                    } else {
+                        logger.warn(`Fast Path 캐시 직행 조회 실패: ${json.body}`, 'GAS:FastPath');
+                        resolve([]);
+                    }
+                } catch (e) {
+                    logger.warn(`Fast Path 캐시 응답 파싱 실패`, 'GAS:FastPath');
+                    resolve([]);
+                }
+            },
+            onerror: () => {
+                logger.warn(`Fast Path 캐시 네트워크 오류`, 'GAS:FastPath');
+                resolve([]);
+            },
+            ontimeout: () => {
+                logger.warn(`Fast Path 캐시 조회 타임아웃 (10초)`, 'GAS:FastPath');
+                resolve([]);
+            }
+        });
+    });
+}
+
+/**
+ * [v1.6.0] Initialize an update upload session via GAS using fileId (Fast Path)
+ * @param {string} fileId 
+ * @param {string} fileName 
+ */
+async function initUpdateUploadViaGASRelay(fileId, fileName) {
+    const config = (0,_config_js__WEBPACK_IMPORTED_MODULE_0__/* .getConfig */ .zj)();
+    if (!(0,_config_js__WEBPACK_IMPORTED_MODULE_0__/* .isConfigValid */ .Jb)()) throw new Error("GAS 설정이 누락되었습니다.");
+
+    console.log(`[GAS] 빠른 덮어쓰기(PUT) 세션 초기화 중... (${fileName} -> ${fileId})`);
+
+    return new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+            method: "POST", 
+            url: config.gasUrl,
+            data: JSON.stringify({ 
+                type: "init_update", 
+                folderId: config.folderId,
+                fileId: fileId,
+                fileName: fileName,
+                apiKey: config.apiKey,
+                protocolVersion: 3
+            }),
+            headers: { "Content-Type": "text/plain" },
+            timeout: 30000,
+            onload: (res) => {
+                try {
+                    const json = JSON.parse(res.responseText);
+                    if (json.status === 'success') { 
+                        resolve((typeof json.body === 'object') ? json.body.uploadUrl : json.body);
+                    } else {
+                        _ui_js__WEBPACK_IMPORTED_MODULE_2__.LogBox.getInstance().critical(`Fast Path PUT 세션 초기화 실패: ${json.body || 'Init Update failed'} (${fileName})`, 'GAS:FastPath');
+                        reject(new Error(json.body || "Init Update failed"));
+                    }
+                } catch (e) { 
+                    _ui_js__WEBPACK_IMPORTED_MODULE_2__.LogBox.getInstance().critical(`Fast Path PUT 레스폰스 파싱 실패 (${fileName})`, 'GAS:FastPath');
+                    reject(new Error("GAS 응답 오류(Init Update): " + res.responseText)); 
+                }
+            },
+            onerror: (e) => {
+                _ui_js__WEBPACK_IMPORTED_MODULE_2__.LogBox.getInstance().critical(`Fast Path PUT 네트워크 오류 (${fileName})`, 'GAS:FastPath');
+                reject(new Error("네트워크 오류(Init Update)"));
+            },
+            ontimeout: () => {
+                _ui_js__WEBPACK_IMPORTED_MODULE_2__.LogBox.getInstance().critical(`Fast Path PUT 타임아웃 30초 (${fileName})`, 'GAS:FastPath');
+                reject(new Error("[GAS] 덧쓰기 세션 초기화 타임아웃 (30초)"));
+            }
+        });
+    });
+}
+
+/**
+ * [v1.6.1] Fetch Series-specific Merge Index Fragment
+ * Retrieves the temporary cacheFileId generated after recent uploads without needing a full master_index rebuild.
+ * @param {string} sourceId The `12345` ID of the series
+ * @returns {Promise<Object>} { found: boolean, data: { cacheFileId: string, ... } }
+ */
+async function getMergeIndexFragment(sourceId) {
+    const config = (0,_config_js__WEBPACK_IMPORTED_MODULE_0__/* .getConfig */ .zj)();
+    if (!config.gasUrl || !config.folderId) return { found: false, data: null };
+    const logger = _ui_js__WEBPACK_IMPORTED_MODULE_2__.LogBox.getInstance();
+
+    console.log(`[GAS] 병합 인덱스 파편 조회 중... (Source ID: ${sourceId})`);
+
+    return new Promise((resolve) => {
+        GM_xmlhttpRequest({
+            method: "POST",
+            url: config.gasUrl,
+            data: JSON.stringify({
+                type: "view_get_merge_index",
+                folderId: config.folderId,
+                sourceId: sourceId,
+                apiKey: config.apiKey,
+                protocolVersion: 3
+            }),
+            headers: { "Content-Type": "text/plain" },
+            timeout: 10000,
+            onload: (res) => {
+                try {
+                    const json = JSON.parse(res.responseText);
+                    if (json.status === 'success') {
+                        resolve(json.body);
+                    } else {
+                        logger.warn(`MergeIndex 파편 조회 실패: ${json.body} (ID: ${sourceId})`, 'GAS:FastPath');
+                        resolve({ found: false, data: null });
+                    }
+                } catch (e) {
+                    logger.warn(`MergeIndex 파편 응답 파싱 실패`, 'GAS:FastPath');
+                    resolve({ found: false, data: null });
+                }
+            },
+            onerror: () => {
+                logger.warn(`MergeIndex 파편 조회 네트워크 오류`, 'GAS:FastPath');
+                resolve({ found: false, data: null });
+            },
+            ontimeout: () => {
+                logger.warn(`MergeIndex 파편 조회 타임아웃 (10초)`, 'GAS:FastPath');
+                resolve({ found: false, data: null });
+            }
+        });
+    });
+}
+
 
 
 /***/ }),
 
-/***/ 739:
+/***/ 543:
 /***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
 
-
-// EXPORTS
-__webpack_require__.d(__webpack_exports__, {
-  T: function() { return /* binding */ detectSite; }
-});
-
-// EXTERNAL MODULE: ./src/core/config.js
-var config = __webpack_require__(899);
-;// ./src/core/parsers/RuleManager.js
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   u: function() { return /* binding */ RuleManager; }
+/* harmony export */ });
+/* harmony import */ var _config_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(899);
 
 
 /**
@@ -1689,7 +1738,7 @@ class RuleManager {
 
         // 1. Load Custom Rules from GM storage
         if (typeof GM_getValue !== 'undefined') {
-            const customStr = GM_getValue(config/* CFG_CUSTOM_RULES */.PT, '[]');
+            const customStr = GM_getValue(_config_js__WEBPACK_IMPORTED_MODULE_0__/* .CFG_CUSTOM_RULES */ .PT, '[]');
             try {
                 const customRules = JSON.parse(customStr);
                 if (Array.isArray(customRules)) {
@@ -1702,6 +1751,85 @@ class RuleManager {
         }
 
         return rules;
+    }
+
+    /**
+     * Get only custom rules
+     */
+    static getCustomRules() {
+        if (typeof GM_getValue === 'undefined') return [];
+        const str = GM_getValue(_config_js__WEBPACK_IMPORTED_MODULE_0__/* .CFG_CUSTOM_RULES */ .PT, '[]');
+        try {
+            return JSON.parse(str) || [];
+        } catch (e) {
+            return [];
+        }
+    }
+
+    /**
+     * Save custom rules
+     */
+    static saveCustomRules(rules) {
+        if (typeof GM_setValue === 'undefined') return;
+        GM_setValue(_config_js__WEBPACK_IMPORTED_MODULE_0__/* .CFG_CUSTOM_RULES */ .PT, JSON.stringify(rules, null, 2));
+    }
+
+    /**
+     * Add a new rule
+     */
+    static addRule(rule) {
+        const rules = this.getCustomRules();
+        if (rules.find(r => r.id === rule.id)) return false;
+        rules.push(rule);
+        this.saveCustomRules(rules);
+        return true;
+    }
+
+    /**
+     * Update an existing rule
+     */
+    static updateRule(id, updatedRule) {
+        const rules = this.getCustomRules();
+        const idx = rules.findIndex(r => r.id === id);
+        if (idx === -1) return false;
+        rules[idx] = updatedRule;
+        this.saveCustomRules(rules);
+        return true;
+    }
+
+    /**
+     * Delete a rule
+     */
+    static deleteRule(id) {
+        const rules = this.getCustomRules();
+        const filtered = rules.filter(r => r.id !== id);
+        this.saveCustomRules(filtered);
+        return true;
+    }
+
+    /**
+     * Bulk import rules
+     */
+    static bulkImport(newRules, mode = 'merge') {
+        const current = this.getCustomRules();
+        let imported = 0, updated = 0, skipped = 0;
+
+        newRules.forEach(rule => {
+            if (!rule.id) { skipped++; return; }
+            const idx = current.findIndex(r => r.id === rule.id);
+            if (idx === -1) {
+                current.push(rule);
+                imported++;
+            } else if (mode === 'overwrite') {
+                current[idx] = rule;
+                updated++;
+            } else {
+                skipped++;
+            }
+        });
+
+        this.saveCustomRules(current);
+        return { imported, updated, skipped };
     }
 
     /**
@@ -1727,32 +1855,173 @@ class RuleManager {
     }
 }
 
-;// ./src/core/detector.js
 
+/***/ }),
+
+/***/ 602:
+/***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
+
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   U: function() { return /* binding */ fetchNovelText; }
+/* harmony export */ });
+/**
+ * [전략 B] 소설 API 기반 복호화 모듈
+ * Closed Shadow DOM 및 XOR 암호화를 우회하여 API를 통해 직접 평문을 추출합니다.
+ */
+
+// 이스케이프 유무 모두 대응: "token":"eyJ..." 또는 \"token\":\"eyJ...\"
+const RE_TOKEN = /\\?"token\\?":\\?"(eyJ[A-Za-z0-9_-]+[A-Za-z0-9_=.-]*)\\?"/;
 
 /**
- * detectSite
- * Detects the current site and returns site info.
- * Now supports both dynamic rules and legacy hardcoded patterns.
- * @returns {Promise<Object|null>}
+ * Base64URL 디코딩
  */
-async function detectSite() {
-    const url = window.location.href;
-    const domain = window.location.hostname;
-    const protocolDomain = `${window.location.protocol}//${domain}`;
+function b64urlDecode(str) {
+    const pad = str.length % 4 === 0 ? '' : '='.repeat(4 - str.length % 4);
+    const bin = atob(str.replace(/-/g, '+').replace(/_/g, '/') + pad);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+}
 
-    // Dynamic Rule Matching
-    const matchedRule = await RuleManager.matchRule(url);
-    if (matchedRule) {
-        return { 
-            site: 'generic', 
-            protocolDomain, 
-            matchedRule,
-            category: matchedRule.category || 'Webtoon'
-        };
+/**
+ * Base64URL 인코딩
+ */
+function b64urlEncode(bytes) {
+    let bin = '';
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/**
+ * HMAC-SHA256 서명 (Proof 생성용)
+ */
+async function hmacSign(secret, message) {
+    const enc = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+        'raw', enc.encode(secret),
+        { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+    );
+    const sig = await crypto.subtle.sign('HMAC', key, enc.encode(message));
+    return b64urlEncode(new Uint8Array(sig));
+}
+
+/**
+ * XOR 복호화
+ */
+function xorDecrypt(payloadB64, keyB64) {
+    const payload = b64urlDecode(payloadB64);
+    const key = b64urlDecode(keyB64);
+    const result = new Uint8Array(payload.length);
+    for (let i = 0; i < payload.length; i++) {
+        result[i] = payload[i] ^ key[i % key.length];
     }
+    return new TextDecoder('utf-8').decode(result);
+}
 
-    return null;
+/**
+ * document.cookie에서 특정 쿠키 값 가져오기
+ */
+function getCookie(name) {
+    const match = document.cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
+    return match ? decodeURIComponent(match[1]) : null;
+}
+
+/**
+ * nv 쿠키 삭제 후 새로 발급 (세션 차단 복구용)
+ */
+async function resetNvCookie(cookieName) {
+    console.log(`[Decryptor] ${cookieName} 쿠키 리셋 중...`);
+    // 모든 경로에 대해 쿠키 삭제
+    document.cookie = `${cookieName}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
+    // 새 쿠키 발급
+    await fetch('/api/nv-issue', { method: 'POST', credentials: 'same-origin' });
+    console.log(`[Decryptor] ${cookieName} 쿠키 재발급 완료`);
+}
+
+/**
+ * URL에서 novelId와 episodeId 추출
+ */
+function getIdsFromUrl(url) {
+    const match = url.match(/\/novel\/(\d+)\/(\d+)/);
+    if (!match) return null;
+    return { novelId: match[1], episodeId: match[2] };
+}
+
+/**
+ * [Main] 에피소드 URL로부터 평문 텍스트를 직접 추출하여 반환
+ * @param {string} episodeUrl 에피소드 주소
+ * @param {Object} config 규칙의 decryptApi 설정
+ * @param {boolean} _isRetry 내부 재시도 여부 (외부에서 사용 금지)
+ * @returns {Promise<string|null>} 복호화된 평문 (실패 시 null)
+ */
+async function fetchNovelText(episodeUrl, config = {}, _isRetry = false) {
+    const endpoint = config.endpoint || '/api/novel-content';
+    const cookieName = config.cookieName || 'nv';
+    const clientHeader = config.clientHeader || 'shadow-v2';
+
+    try {
+        const ids = getIdsFromUrl(episodeUrl);
+        if (!ids) return null;
+
+        // 1. Fresh Token 추출 (토큰은 에피소드별 + 짧은 TTL이므로 항상 새로 가져옴)
+        const html = await fetch(episodeUrl, { credentials: 'same-origin' }).then(r => r.text());
+        const tokenMatch = html.match(RE_TOKEN);
+        if (!tokenMatch) {
+            console.warn('[Decryptor] 토큰 추출 실패 (API 호출 중단)');
+            return null;
+        }
+        const token = tokenMatch[1];
+
+        // 2. 쿠키 확인 (XOR 키)
+        let cookie = getCookie(cookieName);
+        if (!cookie) {
+            console.log('[Decryptor] 쿠키 없음 - nv-issue 시도');
+            await fetch('/api/nv-issue', { method: 'POST', credentials: 'same-origin' });
+            cookie = getCookie(cookieName);
+        }
+        if (!cookie) return null;
+        const xorKey = cookie.split('.')[0];
+
+        // 3. Proof 생성 (HMAC)
+        const nonce = b64urlEncode(crypto.getRandomValues(new Uint8Array(24)));
+        const proof = await hmacSign(cookie, `${token}.${nonce}.${navigator.userAgent}`);
+
+        // 4. API 호출
+        const resp = await fetch(endpoint, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'content-type': 'application/json',
+                'x-novel-client': clientHeader
+            },
+            body: JSON.stringify({
+                novelId: ids.novelId,
+                episodeId: ids.episodeId,
+                token, nonce, proof
+            })
+        });
+
+        // 5. API 실패 시 — 세션 차단 감지 → 쿠키 리셋 후 1회 재시도
+        if (!resp.ok) {
+            if (!_isRetry) {
+                console.warn(`[Decryptor] API 실패 (${resp.status}) → 세션 차단 의심, 쿠키 리셋 후 재시도`);
+                await resetNvCookie(cookieName);
+                return fetchNovelText(episodeUrl, config, true); // 재시도는 딱 1회
+            }
+            console.error(`[Decryptor] 재시도 후에도 실패 (${resp.status})`);
+            return null;
+        }
+
+        const data = await resp.json();
+        if (!data.ok || !data.payload) return null;
+
+        // 6. XOR 복호화
+        return xorDecrypt(data.payload, xorKey);
+
+    } catch (e) {
+        console.error('[Decryptor] 복호화 과정 중 예외 발생:', e);
+        return null;
+    }
 }
 
 
@@ -1768,7 +2037,7 @@ async function detectSite() {
 /* harmony export */   Vh: function() { return /* binding */ showConfigModal; },
 /* harmony export */   zj: function() { return /* binding */ getConfig; }
 /* harmony export */ });
-/* unused harmony exports CFG_URL_KEY, CFG_ID_KEY, CFG_FOLDER_ID, CFG_POLICY_KEY, CFG_API_KEY, CFG_SLEEP_MODE, CFG_SMART_SKIP_RATIO, CFG_NOVEL_MODE, CFG_REMOTE_RULE_URL */
+/* unused harmony exports CFG_URL_KEY, CFG_ID_KEY, CFG_FOLDER_ID, CFG_POLICY_KEY, CFG_API_KEY, CFG_SLEEP_MODE, CFG_SMART_SKIP_RATIO, CFG_NOVEL_MODE, CFG_NOVEL_FORMAT, CFG_REMOTE_RULE_URL */
 const CFG_URL_KEY = "TOKI_GAS_URL"; // legacy
 const CFG_ID_KEY = "TOKI_GAS_ID";
 const CFG_FOLDER_ID = "TOKI_FOLDER_ID";
@@ -1777,6 +2046,7 @@ const CFG_API_KEY = "TOKI_API_KEY";
 const CFG_SLEEP_MODE = "TOKI_SLEEP_MODE";
 const CFG_SMART_SKIP_RATIO = "TOKI_SMART_SKIP_RATIO";
 const CFG_NOVEL_MODE = "TOKI_NOVEL_MODE";
+const CFG_NOVEL_FORMAT = "TOKI_NOVEL_FORMAT";
 const CFG_REMOTE_RULE_URL = "TOKI_REMOTE_RULE_URL";
 const CFG_CUSTOM_RULES = "TOKI_CUSTOM_RULES";
 
@@ -1813,6 +2083,7 @@ function getConfig() {
         sleepMode: GM_getValue(CFG_SLEEP_MODE, "agile"), // default: agile
         smartSkipRatio: parseInt(GM_getValue(CFG_SMART_SKIP_RATIO, "50"), 10), // default 50% of Max
         novelMode: GM_getValue(CFG_NOVEL_MODE, "perChapter"), // default: chapter-by-chapter
+        novelFormat: GM_getValue(CFG_NOVEL_FORMAT, "epub"), // default: EPUB
         remoteRuleUrl: GM_getValue(CFG_REMOTE_RULE_URL, ""),
         customRules: GM_getValue(CFG_CUSTOM_RULES, "[]")
     };
@@ -1837,149 +2108,96 @@ function showConfigModal() {
 
     const config = getConfig();
 
-    // -- Styles --
-    const styleId = 'toki-config-style';
-    if (!document.getElementById(styleId)) {
-        const style = document.createElement('style');
-        style.id = styleId;
-        style.innerHTML = `
-            .toki-modal-overlay {
-                position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-                background: rgba(0, 0, 0, 0.6);
-                backdrop-filter: blur(5px);
-                z-index: 10000;
-                display: flex; justify-content: center; align-items: center;
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            }
-            .toki-modal-container {
-                background: rgba(30, 32, 35, 0.85);
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-                border-radius: 16px;
-                padding: 24px;
-                width: 400px;
-                color: #fff;
-            }
-            .toki-modal-header {
-                font-size: 20px; font-weight: 600; margin-bottom: 20px;
-                text-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
-            }
-            .toki-input-group { margin-bottom: 16px; }
-            .toki-label { display: block; font-size: 12px; color: #aaa; margin-bottom: 6px; }
-            .toki-input, .toki-select, .toki-textarea {
-                width: 100%; padding: 10px;
-                background: rgba(0, 0, 0, 0.3);
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                border-radius: 8px;
-                color: #fff; font-size: 14px;
-                box-sizing: border-box;
-            }
-            .toki-textarea {
-                font-family: monospace;
-                font-size: 12px;
-                resize: vertical;
-                min-height: 100px;
-            }
-            .toki-input:focus, .toki-select:focus, .toki-textarea:focus {
-                outline: none; border-color: #6a5acd;
-                box-shadow: 0 0 0 2px rgba(106, 90, 205, 0.3);
-            }
-            .toki-modal-footer {
-                display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px;
-            }
-            .toki-btn {
-                padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer;
-                font-size: 14px; font-weight: 500; transition: all 0.2s;
-            }
-            .toki-btn-cancel { background: transparent; color: #aaa; border: 1px solid rgba(255,255,255,0.1); }
-            .toki-btn-cancel:hover { background: rgba(255,255,255,0.05); color: #fff; }
-            .toki-btn-save {
-                background: linear-gradient(135deg, #6a5acd, #483d8b);
-                color: #fff;
-                box-shadow: 0 4px 15px rgba(106, 90, 205, 0.4);
-            }
-            .toki-btn-save:hover { filter: brightness(1.1); transform: translateY(-1px); }
-        `;
-        document.head.appendChild(style);
-    }
-
-    // -- HTML Structure --
+    // -- HTML Structure (v1.9.1 Glassmorphism) --
     const overlay = document.createElement('div');
     overlay.id = 'toki-config-modal';
     overlay.className = 'toki-modal-overlay';
     
     overlay.innerHTML = `
-        <div class="toki-modal-container">
-            <div class="toki-modal-header">TokiSync 설정</div>
+        <div class="toki-modal toki-modal-container" style="padding: 32px; width: 520px; max-height: 85vh; overflow-y: auto;">
+            <div class="toki-modal-header" style="border:none; margin-bottom: 24px;">
+                <div class="toki-modal-title" style="font-size: 20px;">🛠️ 상세 설정 (Advanced)</div>
+            </div>
             
-            <div class="toki-input-group">
+            <div class="toki-section-title" style="margin-top:0;">Cloud & Storage</div>
+            <div class="toki-control-group">
                 <label class="toki-label">GAS Script ID</label>
                 <input type="text" id="toki-cfg-gas-id" class="toki-input" placeholder="AKfycb..." value="${config.gasId}">
             </div>
 
-            <div class="toki-input-group">
+            <div class="toki-control-group">
                 <label class="toki-label">Google Drive Folder ID</label>
                 <input type="text" id="toki-cfg-folder" class="toki-input" placeholder="Folder ID" value="${config.folderId}">
             </div>
 
-            <div class="toki-input-group">
+            <div class="toki-control-group">
                 <label class="toki-label">API Key (보안)</label>
                 <input type="password" id="toki-cfg-apikey" class="toki-input" placeholder="API Key" value="${config.apiKey}">
             </div>
 
-            <div class="toki-input-group">
+            <div class="toki-section-title">Global Policies</div>
+            <div class="toki-control-group">
                 <label class="toki-label">다운로드 정책</label>
                 <select id="toki-cfg-policy" class="toki-select">
-                    <option value="individual">1. 개별 파일 (Individual)</option>
-                    <option value="zipOfCbzs">2. 챕터 묶음 (ZIP of CBZs)</option>
-                    <option value="native">3. 자동 분류 (Native)</option>
-                    <option value="drive">4. 드라이브 업로드 (GoogleDrive)</option>
-                    <option value="folderInCbz" style="display:none;">[구버전] 통합 파일 (Folder in CBZ/EPUB)</option>
+                    <option value="individual">개별 파일 (Individual)</option>
+                    <option value="zipOfCbzs">챕터 묶음 (ZIP of CBZs)</option>
+                    <option value="native">자동 분류 (Native)</option>
+                    <option value="drive">드라이브 업로드 (GoogleDrive)</option>
                 </select>
             </div>
 
-            <div class="toki-input-group">
+            <div class="toki-control-group">
                 <label class="toki-label">다운로드 속도</label>
                 <select id="toki-cfg-sleepmode" class="toki-select">
                     <option value="agile">빠름 (1-3초)</option>
                     <option value="cautious">신중 (2-5초)</option>
                     <option value="thorough">철저 (3-8초)</option>
+                    <option value="slow">느림 (5-15초)</option>
+                    <option value="very_slow">매우 느림 (10-30초)</option>
                 </select>
             </div>
 
-            <div class="toki-input-group">
-                <label class="toki-label">Smart Skip 민감도 (최고 용량 기준)</label>
+            <div class="toki-control-group">
+                <label class="toki-label">Smart Skip 민감도</label>
                 <select id="toki-cfg-smartskip" class="toki-select">
-                    <option value="90">90% (매우 민감: 최고 용량의 90% 미만 재다운로드)</option>
-                    <option value="80">80% (민감: 최고 용량의 80% 미만 재다운로드)</option>
-                    <option value="70">70% (보통: 최고 용량의 70% 미만 재다운로드)</option>
-                    <option value="50">50% (기본: 최고 용량 대비 반토막 난 파일만 감지)</option>
+                    <option value="90">90% (매우 민감)</option>
+                    <option value="80">80% (민감)</option>
+                    <option value="70">70% (보통)</option>
+                    <option value="50">50% (기본)</option>
                 </select>
             </div>
             
-            <div class="toki-input-group">
-                <label class="toki-label">소설 패키징 방식 (Novel EPUB)</label>
-                <select id="toki-cfg-novel-mode" class="toki-select">
-                    <option value="perChapter">개별 회차 저장 (1회차 = 1파일)</option>
-                    <option value="singleVolume">단행본 합본 저장 (선택 범위 = 1파일)</option>
-                </select>
+            <div class="toki-section-title">Format & Rules</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                <div class="toki-control-group">
+                    <label class="toki-label">소설 포맷</label>
+                    <select id="toki-cfg-novel-format" class="toki-select">
+                        <option value="epub">EPUB</option>
+                        <option value="txt">TXT</option>
+                    </select>
+                </div>
+                <div class="toki-control-group">
+                    <label class="toki-label">소설 패키징</label>
+                    <select id="toki-cfg-novel-mode" class="toki-select">
+                        <option value="perChapter">개별 회차</option>
+                        <option value="singleVolume">범위 합본</option>
+                    </select>
+                </div>
             </div>
 
-            <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 20px 0;">
-
-            <div class="toki-input-group">
+            <div class="toki-control-group">
                 <label class="toki-label">원격 파싱 룰 URL (JSON)</label>
                 <input type="text" id="toki-cfg-remote-rule" class="toki-input" placeholder="https://example.com/rules.json" value="${config.remoteRuleUrl}">
             </div>
 
-            <div class="toki-input-group">
+            <div class="toki-control-group">
                 <label class="toki-label">커스텀 파싱 룰 (JSON Array)</label>
-                <textarea id="toki-cfg-custom-rule" class="toki-textarea" placeholder="[{...}]">${config.customRules}</textarea>
+                <textarea id="toki-cfg-custom-rule" class="toki-textarea" style="min-height: 120px; font-family: monospace;" placeholder="[{...}]">${config.customRules}</textarea>
             </div>
 
-            <div class="toki-modal-footer">
-                <button id="toki-btn-cancel" class="toki-btn toki-btn-cancel">취소</button>
-                <button id="toki-btn-save" class="toki-btn toki-btn-save">저장</button>
+            <div class="toki-modal-footer" style="display: flex; gap: 12px; margin-top: 32px;">
+                <button id="toki-btn-cancel" class="toki-btn-action toki-btn-secondary" style="flex: 1; height: 52px;">취소</button>
+                <button id="toki-btn-save" class="toki-btn-action" style="flex: 1; height: 52px; background: var(--toki-primary);">설정 저장하기</button>
             </div>
         </div>
     `;
@@ -1999,6 +2217,9 @@ function showConfigModal() {
     const novelModeSelect = document.getElementById('toki-cfg-novel-mode');
     if(novelModeSelect) novelModeSelect.value = config.novelMode;
 
+    const novelFormatSelect = document.getElementById('toki-cfg-novel-format');
+    if(novelFormatSelect) novelFormatSelect.value = config.novelFormat;
+
     document.getElementById('toki-btn-cancel').onclick = () => overlay.remove();
     
     document.getElementById('toki-btn-save').onclick = () => {
@@ -2009,6 +2230,7 @@ function showConfigModal() {
         const newSleepMode = document.getElementById('toki-cfg-sleepmode').value;
         const newSmartSkip = document.getElementById('toki-cfg-smartskip').value;
         const newNovelMode = document.getElementById('toki-cfg-novel-mode').value;
+        const newNovelFormat = document.getElementById('toki-cfg-novel-format').value;
         const newRemoteRule = document.getElementById('toki-cfg-remote-rule').value.trim();
         const newCustomRule = document.getElementById('toki-cfg-custom-rule').value.trim() || '[]';
 
@@ -2047,6 +2269,7 @@ function showConfigModal() {
         setConfig(CFG_SLEEP_MODE, newSleepMode);
         setConfig(CFG_SMART_SKIP_RATIO, newSmartSkip);
         setConfig(CFG_NOVEL_MODE, newNovelMode);
+        setConfig(CFG_NOVEL_FORMAT, newNovelFormat);
         setConfig(CFG_REMOTE_RULE_URL, newRemoteRule);
         setConfig(CFG_CUSTOM_RULES, validCustomRule);
 
@@ -2076,6 +2299,7 @@ function isConfigValid() {
 /***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
 
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   Kt: function() { return /* binding */ fetchBlobWithXHR; },
 /* harmony export */   OJ: function() { return /* binding */ saveFile; },
 /* harmony export */   Vs: function() { return /* binding */ scrollToLoad; },
 /* harmony export */   _L: function() { return /* binding */ blobToArrayBuffer; },
@@ -2606,6 +2830,143 @@ async function getImageDimensions(blob) {
     }
 }
 
+/**
+ * [v1.8.4] GM_xmlhttpRequest 기반의 안전한 Blob Fetcher
+ * 브라우저 fetch()로 인해 발생하는 CORS 및 Referer 차단을 우회합니다.
+ * @param {string} url 
+ * @returns {Promise<Blob>}
+ */
+async function fetchBlobWithXHR(url) {
+    return new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+            method: 'GET',
+            url: url,
+            headers: {
+                "Referer": window.location.origin,
+                "User-Agent": navigator.userAgent
+            },
+            responseType: 'blob',
+            timeout: 30000,
+            onload: (res) => {
+                if (res.status >= 200 && res.status < 300) {
+                    resolve(res.response);
+                } else {
+                    reject(new Error(`HTTP ${res.status}: ${url}`));
+                }
+            },
+            onerror: (err) => reject(new Error(`Network Error: ${url}`)),
+            ontimeout: () => reject(new Error(`Timeout: ${url}`))
+        });
+    });
+}
+
+
+/***/ }),
+
+/***/ 929:
+/***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
+
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   d: function() { return /* binding */ extractEpisodeData; }
+/* harmony export */ });
+/* harmony import */ var _utils_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(924);
+/* harmony import */ var _ui_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(963);
+/* harmony import */ var _novel_decryptor_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(602);
+
+
+
+
+/**
+ * 뷰어 페이지(또는 팝업 워커) 내에서 직접 데이터를 추출하는 범용 모듈
+ * 
+ * @param {Document} targetDoc 대상 문서 객체 (현재 창의 document 또는 iframe 내부 document)
+ * @param {Object} parser 선택된 사이트의 GenericParser 인스턴스
+ * @param {Object} siteInfo 사이트 메타데이터 (category 등)
+ * @param {boolean} isStaticDoc XHR로 가져온 정적 HTML인지 여부
+ * @param {string} episodeUrl 에피소드 URL (API 복호화 폴백용)
+ * @returns {Promise<Object>} 추출 결과 { urls: string[], content: string, title: string, episodeTitle: string }
+ */
+async function extractEpisodeData(targetDoc, parser, siteInfo, isStaticDoc = false, episodeUrl = null) {
+    const logger = _ui_js__WEBPACK_IMPORTED_MODULE_1__.LogBox.getInstance();
+    const isNovel = (siteInfo.category === 'Novel' || siteInfo.category === 'novel');
+    const viewerCfg = parser.rule.viewer || {};
+
+    let extractedData = {
+        urls: [],
+        content: "",
+        seriesTitle: "",
+        episodeTitle: "",
+        episodeNum: ""
+    };
+
+    // 1. 소설 텍스트 추출 로직
+    if (isNovel) {
+        extractedData.content = parser.getNovelContent(targetDoc);
+
+        // [전략 B] DOM 추출 실패 + API 복호화 설정이 있는 경우 폴백 시도
+        if (!extractedData.content && viewerCfg.decryptApi && episodeUrl) {
+            logger.log('[Extractor] DOM 추출 실패 - API 복호화 폴백 시도...', 'Extractor');
+            extractedData.content = await (0,_novel_decryptor_js__WEBPACK_IMPORTED_MODULE_2__/* .fetchNovelText */ .U)(episodeUrl, viewerCfg.decryptApi);
+            if (extractedData.content) {
+                logger.log('✅ API 복호화 폴백 성공', 'Extractor');
+            }
+        }
+    } 
+    // 2. 웹툰 이미지 추출 로직
+    else {
+        // 초기 파싱 (정규식/DOM)
+        const initialUrls = parser.getImageList(targetDoc);
+
+        // 물리 스크롤 대기 (정적 문서는 스킵)
+        if (!isStaticDoc && targetDoc.defaultView) {
+            await (0,_utils_js__WEBPACK_IMPORTED_MODULE_0__/* .scrollToLoad */ .Vs)(targetDoc, 20000, viewerCfg);
+        } else {
+            console.log('[Extractor] 정적 문서이거나 Window 객체가 없어 스크롤을 건너뜁니다.');
+        }
+
+        // 스크롤 후 최종 파싱
+        let finalUrls = isStaticDoc ? initialUrls : parser.getImageList(targetDoc);
+
+        // Dummy(Placeholder) 우회 병합
+        const mergedUrls = finalUrls.map((final, idx) => {
+            const initial = initialUrls[idx];
+            if (final.isDummy && initial && !initial.isDummy) {
+                console.log(`[Extractor] Placeholder 우회: ${final.url.split('/').pop()} -> ${initial.url.split('/').pop()}`);
+                return initial.url;
+            }
+            return final.url;
+        }).filter(url => url !== "");
+
+        logger.log(`[Extractor] 이미지 ${mergedUrls.length}개 감지`, 'Extractor');
+
+        // 이미지 감지 0개 시 1.5초 대기 후 재시도
+        if (mergedUrls.length === 0 && !isStaticDoc) {
+            logger.warn('[Extractor] 이미지 0개 — 1.5초 후 재파싱 시도', 'Extractor');
+            await (0,_utils_js__WEBPACK_IMPORTED_MODULE_0__/* .sleep */ .yy)(1500);
+            const retryUrls = parser.getImageList(targetDoc);
+            if (retryUrls.length > 0) mergedUrls.push(...retryUrls.map(u => u.url).filter(u => u !== ""));
+            logger.log(`[Extractor] 재파싱 결과: ${mergedUrls.length}개`, 'Extractor');
+        }
+
+        extractedData.urls = mergedUrls;
+    }
+
+    // 3. 메타데이터 (작품명, 에피소드 제목) 자체 추출 시도
+    // 뷰어 페이지에서 직접 단건 실행하거나 팝업 워커일 경우를 대비함
+    try {
+        if (parser.getViewerMetadata) {
+            const metadata = parser.getViewerMetadata(targetDoc);
+            extractedData.seriesTitle = metadata.seriesTitle;
+            extractedData.episodeTitle = metadata.episodeTitle;
+            extractedData.episodeNum = metadata.episodeNum;
+        }
+    } catch (e) {
+        console.warn("[Extractor] 뷰어 메타데이터 추출 실패:", e);
+    }
+
+    return extractedData;
+}
+
 
 /***/ }),
 
@@ -2613,6 +2974,7 @@ async function getImageDimensions(blob) {
 /***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
 
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   AC: function() { return /* binding */ TreeRuleEditor; },
 /* harmony export */   LogBox: function() { return /* binding */ LogBox; },
 /* harmony export */   fo: function() { return /* binding */ MenuModal; },
 /* harmony export */   hV: function() { return /* binding */ markDownloadedItems; },
@@ -2620,11 +2982,17 @@ async function getImageDimensions(blob) {
 /* harmony export */ });
 /* harmony import */ var _anti_sleep_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(209);
 /* harmony import */ var _config_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(899);
-/* harmony import */ var _parsers_ParserFactory_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(729);
+/* harmony import */ var _parsers_ParserFactory_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(969);
+/* harmony import */ var _parsers_RuleManager_js__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(543);
+/* harmony import */ var _parsers_GenericParser_js__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(443);
+/* harmony import */ var _extractor_js__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(929);
 /**
  * UI Module for TokiSync
  * Handles Logging Overlay and OS Notifications
  */
+
+
+
 
 
 
@@ -2649,143 +3017,7 @@ class LogBox {
         if (!document.getElementById(styleId)) {
             const style = document.createElement('style');
             style.id = styleId;
-            style.innerHTML = `
-                #toki-logbox {
-                    position: fixed; bottom: 90px; right: 100px;
-                    width: 320px; height: 200px;
-                    background: rgba(0, 0, 0, 0.85);
-                    color: #0f0; font-family: monospace; font-size: 11px;
-                    border: 1px solid #333; border-radius: 8px;
-                    padding: 0; z-index: 9999;
-                    display: none; flex-direction: column;
-                    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-                    backdrop-filter: blur(2px);
-                }
-                #toki-logbox-header {
-                    padding: 5px 10px; background: rgba(255,255,255,0.1);
-                    border-bottom: 1px solid #333;
-                    display: flex; justify-content: space-between; align-items: center;
-                    cursor: move; /* Dragging not implemented yet but visual cue */
-                }
-                #toki-logbox-title { font-weight: bold; color: #fff; }
-                #toki-logbox-controls span { cursor: pointer; margin-left: 8px; color: #aaa; }
-                #toki-logbox-controls span:hover { color: #fff; }
-                #toki-logbox-content {
-                    flex: 1; overflow-y: auto; padding: 10px; margin: 0;
-                    list-style: none;
-                }
-                #toki-logbox-content li { margin-bottom: 2px; word-break: break-all; }
-                #toki-logbox-content li.critical { color: #ff3333; font-weight: bold; background: rgba(255,50,50,0.1); padding: 1px 3px; border-radius: 2px; }
-                #toki-logbox-content li.error { color: #ff5555; }
-                #toki-logbox-content li.warn { color: #ffaa00; }
-                #toki-logbox-content li.success { color: #55ff55; }
-                
-                /* Scrollbar */
-                #toki-logbox-content::-webkit-scrollbar { width: 6px; }
-                #toki-logbox-content::-webkit-scrollbar-track { background: transparent; }
-                #toki-logbox-content::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
-
-                /* --- MenuModal Styles (v1.5.0) --- */
-                .toki-modal-overlay {
-                    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-                    background: rgba(0, 0, 0, 0.6);
-                    backdrop-filter: blur(4px);
-                    z-index: 9999;
-                    display: flex; justify-content: center; align-items: center;
-                    opacity: 0; animation: tokiFadeIn 0.2s forwards;
-                }
-                .toki-modal {
-                    width: 360px; max-width: 90%;
-                    background: rgba(30, 32, 35, 0.95);
-                    border: 1px solid rgba(255, 255, 255, 0.1);
-                    border-radius: 16px;
-                    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-                    overflow: hidden;
-                    display: flex; flex-direction: column;
-                    transform: translateY(20px); animation: tokiSlideUp 0.3s forwards;
-                }
-                .toki-modal-header {
-                    padding: 16px 20px;
-                    background: rgba(255, 255, 255, 0.05);
-                    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-                    display: flex; justify-content: space-between; align-items: center;
-                }
-                .toki-modal-title { font-size: 18px; font-weight: 600; color: #fff; display: flex; align-items: center; gap: 8px; }
-                .toki-modal-close {
-                    background: none; border: none; color: #aaa;
-                    font-size: 20px; cursor: pointer; padding: 4px;
-                }
-                .toki-modal-close:hover { color: white; }
-                
-                .toki-modal-body { padding: 10px; max-height: 70vh; overflow-y: auto; }
-
-                /* Accordion */
-                details {
-                    background: rgba(255, 255, 255, 0.03);
-                    border-radius: 8px; margin-bottom: 8px; overflow: hidden;
-                    border: 1px solid transparent; transition: border-color 0.2s;
-                }
-                details[open] { border-color: rgba(255,255,255,0.1); background: rgba(0,0,0,0.2); }
-                summary {
-                    padding: 12px 16px; cursor: pointer; list-style: none;
-                    display: flex; justify-content: space-between; align-items: center;
-                    font-weight: 600; font-size: 14px; user-select: none; color: #fff;
-                }
-                summary::-webkit-details-marker { display: none; }
-                summary:hover { background: rgba(255, 255, 255, 0.05); }
-                summary::after { content: '›'; font-size: 18px; transition: transform 0.2s; color: #aaa; }
-                details[open] summary::after { transform: rotate(90deg); }
-                .toki-accordion-content { padding: 10px 16px 16px; border-top: 1px solid rgba(255,255,255,0.05); }
-
-                /* Controls */
-                .toki-control-group { margin-bottom: 15px; }
-                .toki-control-group:last-child { margin-bottom: 0px; }
-                .toki-label { display: block; font-size: 11px; color: #aaa; margin-bottom: 6px; }
-                .toki-select {
-                    width: 100%; padding: 8px;
-                    background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.1);
-                    border-radius: 6px; color: #fff; font-size: 13px;
-                }
-                .toki-btn-action {
-                    width: 100%; padding: 10px;
-                    background: linear-gradient(135deg, #6a5acd, #483d8b);
-                    border: none; border-radius: 6px;
-                    color: #fff; font-size: 14px; font-weight: 500;
-                    cursor: pointer; display: flex; justify-content: center; align-items: center; gap: 8px;
-                    transition: filter 0.2s;
-                }
-                .toki-btn-action:hover { filter: brightness(1.1); }
-                .toki-btn-secondary { background: rgba(255,255,255,0.1); color: #ddd; }
-                .toki-btn-secondary:hover { background: rgba(255,255,255,0.15); color: #fff; }
-                
-                /* Range Input */
-                .toki-range-input {
-                    width: 100%; padding: 8px 10px;
-                    background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.15);
-                    border-radius: 6px; color: #fff; font-size: 13px; font-family: monospace;
-                    transition: border-color 0.2s;
-                    box-sizing: border-box;
-                }
-                .toki-range-input:focus { outline: none; border-color: #6a5acd; }
-                .toki-range-hint { font-size: 11px; color: #666; margin-top: 5px; }
-
-                /* FAB */
-                .toki-fab {
-                    position: fixed; bottom: 30px; right: 100px;
-                    width: 56px; height: 56px;
-                    background: #6a5acd; border-radius: 50%;
-                    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-                    display: flex; justify-content: center; align-items: center;
-                    cursor: pointer; transition: transform 0.2s, background 0.2s;
-                    z-index: 9998;
-                }
-                .toki-fab:hover { background: #483d8b; transform: scale(1.05); }
-                .toki-fab svg { width: 24px; height: 24px; fill: white; }
-
-                @keyframes tokiFadeIn { to { opacity: 1; } }
-                @keyframes tokiSlideUp { to { transform: translateY(0); } }
-            `;
-            document.head.appendChild(style);
+            style.innerHTML = `@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');:root{--toki-primary:#2563eb;--toki-primary-dark:#1d4ed8;--toki-accent:#facc15;--toki-bg:rgba(248,250,252,.9);--toki-text:#1e293b;--toki-text-muted:#64748b;--toki-border:rgba(255,255,255,.6);--toki-shadow:0 25px 50px -12px rgba(0,0,0,.25);--toki-font:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}#toki-logbox{position:fixed;bottom:100px;right:30px;width:480px;height:350px;background:var(--toki-bg);color:var(--toki-text);font-family:'Cascadia Code',Consolas,monospace;font-size:12px;border:1px solid var(--toki-border);border-radius:16px;z-index:9999;display:none;flex-direction:column;box-shadow:var(--toki-shadow);backdrop-filter:blur(20px);transition:all .3s cubic-bezier(.4,0,.2,1)}#toki-logbox-header{padding:12px 16px;background:rgba(255,255,255,.4);border-bottom:1px solid rgba(0,0,0,.05);display:flex;justify-content:space-between;align-items:center;border-top-left-radius:16px;border-top-right-radius:16px;cursor:move}#toki-logbox-title{font-weight:700;font-size:13px;letter-spacing:-.01em}#toki-logbox-controls span{cursor:pointer;margin-left:12px;color:var(--toki-text-muted);font-size:14px;transition:transform .2s,color .2s;display:inline-block}#toki-logbox-controls span:hover{color:var(--toki-primary);transform:scale(1.15)}#toki-logbox-content{flex:1;overflow-y:auto;padding:12px;margin:0;list-style:none}#toki-logbox-content li{margin-bottom:4px;word-break:break-all;padding:4px 8px;border-radius:6px;line-height:1.4}#toki-logbox-content li.critical{color:#be123c;font-weight:700;background:rgba(225,29,72,.1);border-left:3px solid #e11d48}#toki-logbox-content li.error{color:#e11d48}#toki-logbox-content li.warn{color:#d97706}#toki-logbox-content li.success{color:#059669;font-weight:600}.toki-modal-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(15,23,42,.2);backdrop-filter:blur(12px);z-index:9999;display:flex;justify-content:center;align-items:center;opacity:0;animation:tokiFadeIn .3s cubic-bezier(.4,0,.2,1) forwards}.toki-modal{width:520px;max-width:95%;background:var(--toki-bg);border:1px solid var(--toki-border);border-radius:28px;box-shadow:var(--toki-shadow);overflow:hidden;display:flex;flex-direction:column;transform:translateY(30px) scale(.95);animation:tokiSlideUp .4s cubic-bezier(.16,1,.3,1) forwards;backdrop-filter:blur(30px);color:var(--toki-text);font-family:var(--toki-font)}.toki-modal-header{padding:24px 32px;background:rgba(255,255,255,.4);border-bottom:1px solid rgba(0,0,0,.05);display:flex;justify-content:space-between;align-items:center}.toki-modal-title{font-size:24px;font-weight:800;color:#0f172a;display:flex;align-items:center;gap:12px;letter-spacing:-.03em}.toki-modal-close{background:rgba(0,0,0,.05);border:none;color:var(--toki-text-muted);width:36px;height:36px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .3s cubic-bezier(.4,0,.2,1);font-size:20px}.toki-modal-close:hover{background:#ef4444;color:#fff;transform:rotate(90deg)}.toki-btn-ghost{background:rgba(0,0,0,.05);border:none;color:var(--toki-text-muted);padding:6px 14px;border-radius:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;font-size:13px;font-weight:600;gap:6px}.toki-btn-ghost:hover{background:rgba(0,0,0,.08);color:var(--toki-text)}.toki-modal-body{padding:0;max-height:75vh;overflow-y:auto}.toki-tabs{display:flex;background:rgba(255,255,255,.3);padding:8px;gap:6px;border-bottom:1px solid rgba(0,0,0,.05)}.toki-tab-btn{flex:1;padding:12px;background:none;border:none;color:var(--toki-text-muted);font-size:14px;font-weight:700;cursor:pointer;transition:all .3s;border-radius:14px;display:flex;justify-content:center;align-items:center;gap:8px}.toki-tab-btn:hover{color:var(--toki-text);background:rgba(255,255,255,.6)}.toki-tab-btn.active{background:#fff;color:var(--toki-primary);box-shadow:0 4px 12px rgba(37,99,235,.15)}.toki-tab-content{display:none;padding:32px;animation:tokiTabFadeIn .4s ease-out}.toki-tab-content.active{display:block}.toki-section-title{font-size:11px;font-weight:800;color:var(--toki-primary);text-transform:uppercase;letter-spacing:.1em;margin:24px 0 12px 4px;opacity:.8}.toki-control-group{margin-bottom:20px;position:relative}.toki-label{display:block;font-size:13px;font-weight:700;color:var(--toki-text-muted);margin-bottom:8px;margin-left:4px}.toki-input,.toki-select{width:100%;padding:14px 18px;background:rgba(255,255,255,.8);border:1px solid rgba(0,0,0,.08);border-radius:16px;color:var(--toki-text)!important;font-size:15px;font-weight:600;appearance:none;transition:all .2s cubic-bezier(.4,0,.2,1);box-shadow:0 2px 4px rgba(0,0,0,.02)}.toki-input:hover,.toki-select:hover{border-color:var(--toki-primary);background-color:#fff;box-shadow:0 4px 12px rgba(37,99,235,.08);color:var(--toki-text)!important}.toki-input:focus,.toki-select:focus{outline:none;border-color:var(--toki-primary);box-shadow:0 0 0 4px rgba(37,99,235,.1);background-color:#fff;color:var(--toki-text)!important}.toki-select{cursor:pointer;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2364748b'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 16px center;background-size:16px}.toki-checkbox-wrapper{display:flex;align-items:center;gap:12px;cursor:pointer;padding:8px 4px;user-select:none}.toki-checkbox{width:22px;height:22px;border:2px solid rgba(0,0,0,.1);border-radius:6px;display:flex;align-items:center;justify-content:center;transition:all .2s;background:#fff;position:relative}.toki-checkbox-input{display:none}.toki-checkbox-input:checked + .toki-checkbox{background:var(--toki-primary);border-color:var(--toki-primary)}.toki-checkbox-input:checked + .toki-checkbox::after{content:'✓';color:#fff;font-size:14px;font-weight:900}.toki-checkbox-label{font-size:14px;font-weight:600;color:var(--toki-text)}.toki-btn-action{width:100%;height:56px;background:var(--toki-primary);color:#fff!important;border:none;border-radius:18px;font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:12px;transition:all .3s cubic-bezier(.175,.885,.32,1.275);box-shadow:0 8px 15px rgba(37,99,235,.2)}.toki-btn-action:hover{transform:translateY(-3px);box-shadow:0 12px 20px rgba(37,99,235,.35);filter:brightness(1.05);color:#fff!important}.toki-btn-action:active{transform:translateY(-1px)}.toki-btn-secondary{background:rgba(255,255,255,.8);color:#475569!important;border:1px solid rgba(0,0,0,.05);box-shadow:0 1px 2px rgba(0,0,0,.05)}.toki-btn-secondary:hover{background:#fff;color:var(--toki-text)!important}.toki-info-card{background:rgba(255,255,255,.6);border:1px solid rgba(0,0,0,.03);border-radius:20px;padding:20px;margin-bottom:20px;display:flex;flex-direction:column;gap:12px}.toki-info-row{display:flex;justify-content:space-between;align-items:center}.toki-info-label{font-size:13px;color:var(--toki-text-muted)}.toki-info-val{font-size:14px;font-weight:700;color:var(--toki-text)}.toki-status-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}.toki-status-online{background:#10b981;box-shadow:0 0 8px #10b981}.toki-fab{position:fixed;bottom:30px;right:30px;width:64px;height:64px;background:linear-gradient(135deg,#2563eb,#0ea5e9);border-radius:20px;box-shadow:0 10px 15px -3px rgba(37,99,235,.4);display:flex;justify-content:center;align-items:center;cursor:pointer;transition:all .3s cubic-bezier(.175,.885,.32,1.275);z-index:9998}.toki-fab:hover{transform:translateY(-5px) rotate(5deg);box-shadow:0 20px 25px -5px rgba(37,99,235,.5)}.toki-fab:active{transform:scale(.9)}.toki-fab svg{width:28px;height:28px;fill:#fff}.toki-tree-modal{width:1100px!important;height:85vh!important}.toki-tree-container{display:flex;flex:1;overflow:hidden;gap:24px;padding:24px;background:rgba(255,255,255,.2)}.toki-tree-view{flex:1.5;overflow-y:auto;background:rgba(255,255,255,.5);border-radius:16px;padding:20px;border:1px solid rgba(0,0,0,.05);font-family:monospace;font-size:13px}.toki-tree-node{margin-left:20px;position:relative;border-left:1px dashed rgba(0,0,0,.1);padding-left:12px}.toki-tree-item{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;transition:all .2s}.toki-tree-item:hover{background:rgba(37,99,235,.05)}.toki-tree-key{color:#2563eb;font-weight:700;cursor:pointer;min-width:90px}.toki-tree-val{color:#1e293b;background:0 0;border:none;border-bottom:1px solid transparent;width:100%}.toki-tree-val:focus{border-bottom-color:#2563eb;outline:none;background:rgba(37,99,235,.05)}.toki-tree-toggle{cursor:pointer;user-select:none;width:18px;text-align:center;color:#94a3b8;font-weight:700}.toki-tree-toggle:hover{color:#2563eb}.toki-tree-right-panel{flex:1;display:flex;flex-direction:column;gap:20px;background:rgba(255,255,255,.4);padding:20px;border-radius:16px}.toki-tree-json-preview{flex:1;background:#0f172a;color:#e2e8f0;padding:20px;border-radius:16px;font-size:12px;font-family:monospace;border:1px solid rgba(255,255,255,.1);resize:none}.toki-btn-rule{background:0 0;border:1px solid #ddd;padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;transition:all .2s}.toki-btn-rule:hover{background:#f8fafc;border-color:#94a3b8}@keyframes tokiFadeIn{from{opacity:0}to{opacity:1}}@keyframes tokiTabFadeIn{from{opacity:0;transform:translateX(10px)}to{opacity:1;transform:translateX(0)}}@keyframes tokiSlideUp{from{opacity:0;transform:translateY(30px) scale(.95)}to{opacity:1;transform:translateY(0) scale(1)}}`;            document.head.appendChild(style);
         }
 
         // -- HTML --
@@ -2811,6 +3043,13 @@ class LogBox {
         document.getElementById('toki-btn-report').onclick = () => this.exportReport();
         document.getElementById('toki-btn-clear').onclick = () => this.clear();
         document.getElementById('toki-btn-close').onclick = () => this.hide();
+
+        // ESC Key Support for LogBox
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && this.container.style.display === 'flex') {
+                this.hide();
+            }
+        });
         
         // Anti-Sleep Button
         const audioBtn = document.getElementById('toki-btn-audio');
@@ -2832,7 +3071,20 @@ class LogBox {
                     this.error(`[Anti-Sleep] 실패: ${e.message}`);
                 }
             };
+
+            // Sync UI with initial state (if auto-started by downloader)
+            setInterval(() => {
+                const running = (0,_anti_sleep_js__WEBPACK_IMPORTED_MODULE_0__/* .isAudioRunning */ .S2)();
+                if (running && audioBtn.textContent === '🔊') {
+                    audioBtn.textContent = '🔇';
+                    audioBtn.title = '백그라운드 모드 (켜짐)';
+                } else if (!running && audioBtn.textContent === '🔇') {
+                    audioBtn.textContent = '🔊';
+                    audioBtn.title = '백그라운드 모드 (꺼짐)';
+                }
+            }, 1000);
         }
+
     }
 
     static getInstance() {
@@ -3030,11 +3282,15 @@ class MenuModal {
         // 1. Create FAB
         this.createFAB();
         
-        // 2. Keyboard Shortcut (Ctrl+Shift+T)
+        // 2. Keyboard Shortcut (Ctrl+Shift+T & ESC)
         window.addEventListener('keydown', (e) => {
             if (e.ctrlKey && e.shiftKey && (e.key === 'T' || e.key === 't' || e.code === 'KeyT')) {
                 e.preventDefault();
                 this.toggle();
+            }
+            if (e.key === 'Escape') {
+                const overlay = document.querySelector('.toki-modal-overlay');
+                if (overlay) this.close(overlay);
             }
         });
     }
@@ -3070,169 +3326,238 @@ class MenuModal {
         header.innerHTML = `
             <div class="toki-modal-title"><span>⚡ TokiSync</span></div>
             <div style="display: flex; gap: 10px; align-items: center;">
-                <button class="toki-modal-close" style="font-size: 14px; background: rgba(255,255,255,0.1); padding: 4px 8px; border-radius: 4px; display: flex; align-items: center; gap: 4px;" id="toki-btn-viewer-link" title="Open Viewer">
-                    🌐 <span style="font-size: 12px;">Viewer</span>
+                <button class="toki-btn-ghost" id="toki-btn-viewer-link" title="Open Viewer">
+                    🌐 <span>Viewer</span>
                 </button>
                 <button class="toki-modal-close" id="toki-btn-menu-close" title="Close">&times;</button>
             </div>
         `;
         modal.appendChild(header);
 
+        // -- Tabs Header --
+        const tabsHeader = document.createElement('div');
+        tabsHeader.className = 'toki-tabs';
+        tabsHeader.innerHTML = `
+            <button class="toki-tab-btn active" data-tab="download">📥 다운로드</button>
+            <button class="toki-tab-btn" data-tab="settings">⚙️ 설정</button>
+            <button class="toki-tab-btn" data-tab="history">📊 기록</button>
+            <button class="toki-tab-btn" data-tab="tools">🛠️ 도구</button>
+        `;
+        modal.appendChild(tabsHeader);
+
         // -- Body --
         const body = document.createElement('div');
         body.className = 'toki-modal-body';
         
-        // 1. Download Section
-        const downSection = this.createAccordion('📥 다운로드 (Download)', true); // Default Open
-        downSection.innerHTML += `
-                <div class="toki-accordion-content">
-                    <!-- Custom Range Input -->
-                    <div class="toki-control-group">
-                        <label class="toki-label">에피소드 범위 지정</label>
-                        <input type="text" id="toki-range-input" class="toki-range-input"
-                            placeholder="예: 1,2,4-10,15 (비우면 전체)">
-                        <div class="toki-range-hint">쉼표(,)로 개별 번호, 하이픈(-)으로 연속 범위 지정</div>
-                    </div>
-                    <div class="toki-control-group">
-                        <label class="toki-label" style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-                            <input type="checkbox" id="toki-chk-force-overwrite" style="accent-color:#facc15;"> ⚠️ 강제 재다운로드 (기존 파일 덮어쓰기)
-                        </label>
-                    </div>
-                    <button class="toki-btn-action" id="toki-btn-down-range" style="margin-top: 10px;">
-                        <span>선택 다운로드 시작</span>
+        // 1. Download Tab
+        const tabDown = document.createElement('div');
+        tabDown.className = 'toki-tab-content active';
+        tabDown.id = 'toki-tab-download';
+        tabDown.innerHTML = `
+                <div class="toki-control-group">
+                    <label class="toki-label">빠른 작업</label>
+                    <button class="toki-btn-action" id="toki-btn-down-current" style="height: 52px; background: linear-gradient(135deg, #10b981, #059669); box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);">
+                        <span>🚀 현재 회차 즉시 다운로드</span>
                     </button>
-                    <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 12px 0;">
-                    <button class="toki-btn-action toki-btn-secondary" id="toki-btn-down-all">
-                        <span>전체 다운로드 (All)</span>
+                </div>
+                <hr style="border: 0; border-top: 1px solid rgba(0,0,0,0.05); margin: 24px 0;">
+                <div class="toki-control-group">
+                    <label class="toki-label">에피소드 범위 지정</label>
+                    <input type="text" id="toki-range-input" class="toki-input"
+                        placeholder="예: 1,2,4-10,15 (비우면 전체)">
+                    <div style="font-size: 11px; margin-top: 8px; color: #94a3b8; margin-left: 4px;">쉼표(,)로 개별 번호, 하이픈(-)으로 연속 범위 지정</div>
+                </div>
+                <div class="toki-control-group" style="margin-bottom: 24px;">
+                    <label class="toki-checkbox-wrapper">
+                        <input type="checkbox" id="toki-chk-force-overwrite" class="toki-checkbox-input">
+                        <span class="toki-checkbox"></span>
+                        <span class="toki-checkbox-label">⚠️ 강제 재다운로드 (파일 덮어쓰기)</span>
+                    </label>
+                </div>
+                <div style="display: flex; gap: 12px;">
+                    <button class="toki-btn-action" id="toki-btn-down-range" style="flex: 1.4; height: 52px;">
+                        <span>선택 다운로드</span>
+                    </button>
+                    <button class="toki-btn-action toki-btn-secondary" id="toki-btn-down-all" style="flex: 1; height: 52px;">
+                        <span>전체</span>
                     </button>
                 </div>
         `;
-        body.appendChild(downSection);
+        body.appendChild(tabDown);
 
-        // 2. Settings Section
-        const setSection = this.createAccordion('⚙️ 설정 (Settings)');
-        setSection.innerHTML += `
-            <div class="toki-accordion-content">
-                <div class="toki-control-group">
-                    <label class="toki-label">다운로드 정책</label>
-                    <select id="toki-sel-policy" class="toki-select">
-                        <option value="individual">1. 개별 파일 (Individual)</option>
-                        <option value="zipOfCbzs">2. 챕터 묶음 (ZIP of CBZs)</option>
-                        <option value="native">3. 자동 분류 (Native)</option>
-                        <option value="drive">4. 드라이브 업로드 (GoogleDrive)</option>
-                    </select>
-                </div>
-                <div id="toki-native-helper" style="display:none; margin-top: 10px; padding: 10px; background: rgba(255,165,0,0.1); border: 1px solid rgba(255,165,0,0.3); border-radius: 6px;">
-                    <div style="font-size: 11px; color: #ffa500; margin-bottom: 8px;">
-                        ⚠️ Native 모드는 Tampermonkey 설정에서 <b>'Download Mode: Browser API'</b> 활성화가 필요합니다.
-                    </div>
-                    <button class="toki-btn-action toki-btn-secondary" id="toki-btn-test-native" style="font-size: 12px; height: 30px;">
-                        📂 자동 분류 기능 테스트
-                    </button>
-                </div>
-                <div class="toki-control-group">
-                    <label class="toki-label">다운로드 속도</label>
-                    <select id="toki-sel-speed" class="toki-select">
-                         <option value="agile">빠름 (1-3초)</option>
-                         <option value="cautious">신중 (2-5초)</option>
-                         <option value="thorough">철저 (3-8초)</option>
-                         <option value="slow">느림 (5-15초)</option>
-                         <option value="very_slow">매우 느림 (10-30초)</option>
-                    </select>
-                </div>
-                <div class="toki-control-group">
-                    <label class="toki-label">소설 패키징 방식</label>
-                    <select id="toki-sel-novel-mode" class="toki-select">
-                         <option value="perChapter">개별 회차 저장 (1회차 = 1파일)</option>
-                         <option value="singleVolume">단행본 합본 저장 (선택 범위 = 1파일)</option>
-                    </select>
-                </div>
-                <div class="toki-control-group">
-                    <button class="toki-btn-action toki-btn-secondary" id="toki-btn-advanced" style="font-size: 13px;">
-                        🛠️ 고급 설정 (경로, API키)
-                    </button>
-                </div>
+        // 2. Settings Tab (Unified v1.9.1)
+        const tabSettings = document.createElement('div');
+        tabSettings.className = 'toki-tab-content';
+        tabSettings.id = 'toki-tab-settings';
+        tabSettings.innerHTML = `
+            <div class="toki-section-title" style="margin-top:0;">Download Settings</div>
+            <div class="toki-control-group">
+                <label class="toki-label">저장 정책</label>
+                <select id="toki-sel-policy" class="toki-select">
+                    <option value="individual">개별 파일</option>
+                    <option value="zipOfCbzs">챕터 묶음</option>
+                    <option value="native">자동 분류</option>
+                    <option value="drive">드라이브</option>
+                </select>
             </div>
-        `;
-        body.appendChild(setSection);
+            
+            <div class="toki-control-group">
+                <label class="toki-label">다운로드 속도</label>
+                <select id="toki-sel-speed" class="toki-select">
+                    <option value="agile">빠름</option>
+                    <option value="cautious">신중</option>
+                    <option value="thorough">철저</option>
+                    <option value="slow">느림</option>
+                    <option value="very_slow">매우 느림</option>
+                </select>
+            </div>
 
-        // 3. System Section
-        const sysSection = this.createAccordion('📝 시스템 (System)');
-        sysSection.innerHTML += `
-            <div class="toki-accordion-content">
-                 <button class="toki-btn-action toki-btn-secondary" id="toki-btn-log">
-                    <span>로그창 토글</span>
+            <div id="toki-native-helper" style="display:none; margin: -10px 0 20px 0; padding: 14px; background: rgba(37, 99, 235, 0.05); border: 1px solid rgba(37, 99, 235, 0.1); border-radius: 18px;">
+                <div style="font-size: 12px; color: var(--toki-primary); margin-bottom: 10px; line-height: 1.5; font-weight: 500;">
+                    ⚠️ Native 모드는 브라우저 설정 변경이 필요합니다.
+                </div>
+                <button class="toki-btn-action toki-btn-secondary" id="toki-btn-test-native" style="height: 36px; font-size: 12px; border-radius: 12px;">
+                    📂 기능 동작 테스트 실행
                 </button>
-                <div style="margin-top: 10px;">
-                     <button class="toki-btn-action toki-btn-secondary" id="toki-btn-migration" style="font-size: 13px;">
-                        📂 파일명 표준화 (Migration)
-                    </button>
+            </div>
+
+            <div class="toki-section-title">Novel Settings</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                <div class="toki-control-group">
+                    <label class="toki-label">소설 포맷</label>
+                    <select id="toki-sel-novel-format" class="toki-select">
+                        <option value="epub">EPUB</option>
+                        <option value="txt">TXT</option>
+                    </select>
                 </div>
-                <div style="margin-top: 10px;">
-                    <button class="toki-btn-action toki-btn-secondary" id="toki-btn-thumb-optim" style="font-size: 12px;">
-                        🔄 썸네일 최적화 (v1.4.0)
-                    </button>
-                </div>
-                <div style="margin-top: 10px;">
-                    <button class="toki-btn-action toki-btn-secondary" id="toki-btn-debug-extract" style="font-size: 12px; background: rgba(255, 255, 255, 0.05); border: 1px dashed rgba(255, 255, 255, 0.2);">
-                        🧪 추출 테스트 (Debug)
-                    </button>
-                </div>
-                <div style="margin-top: 10px;">
-                    <button class="toki-btn-action" id="toki-btn-debug-download" style="font-size: 13px; background: #2563eb; color: white;">
-                        🚀 현재 회차 다운로드 (Test)
-                    </button>
+                <div class="toki-control-group">
+                    <label class="toki-label">Smart Skip</label>
+                    <select id="toki-sel-smartskip" class="toki-select">
+                        <option value="90">90% (민감)</option>
+                        <option value="70">70% (보통)</option>
+                        <option value="50">50% (기본)</option>
+                    </select>
                 </div>
             </div>
+
+            <div class="toki-control-group">
+                <label class="toki-label">소설 패키징</label>
+                <select id="toki-sel-novel-mode" class="toki-select">
+                    <option value="perChapter">회차별 개별 저장</option>
+                    <option value="singleVolume">범위 합본 저장</option>
+                </select>
+            </div>
+
+            <div class="toki-section-title">Configuration</div>
+            <button class="toki-btn-action toki-btn-secondary" id="toki-btn-advanced" style="height: 52px; font-size: 14px; font-weight: 700; border-style: dashed; background: rgba(0,0,0,0.02); border-radius: 20px;">
+                🛠️ 상세 주소 및 API 키 설정 (Advanced)
+            </button>
         `;
-        body.appendChild(sysSection);
+        body.appendChild(tabSettings);
+
+        // 3. History Tab (NEW)
+        const tabHistory = document.createElement('div');
+        tabHistory.className = 'toki-tab-content';
+        tabHistory.id = 'toki-tab-history';
+        tabHistory.innerHTML = `
+            <div class="toki-info-card">
+                <div class="toki-info-row">
+                    <span class="toki-info-label">동기화 상태</span>
+                    <span class="toki-info-val"><span class="toki-status-dot toki-status-online"></span>연결됨</span>
+                </div>
+                <div class="toki-info-row">
+                    <span class="toki-info-label">마지막 동기화</span>
+                    <span class="toki-info-val" id="toki-txt-last-sync">-</span>
+                </div>
+            </div>
+            <div class="toki-control-group">
+                <button class="toki-btn-action" id="toki-btn-sync-now" style="height: 48px;">
+                    <span>🔄 지금 즉시 동기화</span>
+                </button>
+            </div>
+            <p style="font-size: 11px; color: #94a3b8; text-align: center; line-height: 1.6;">
+                구글 드라이브의 데이터를 기반으로 목록에 완료 표시(✅)를 업데이트합니다.
+            </p>
+        `;
+        body.appendChild(tabHistory);
+
+        // 4. Tools Tab (Renamed from System)
+        const tabTools = document.createElement('div');
+        tabTools.className = 'toki-tab-content';
+        tabTools.id = 'toki-tab-tools';
+        tabTools.innerHTML = `
+                <div class="toki-control-group">
+                    <label class="toki-label">파일 관리</label>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <button class="toki-btn-action toki-btn-secondary" id="toki-btn-migration" style="height: 44px; justify-content: flex-start; padding-left: 20px;">
+                            📂 기존 파일명 표준화 (Migration)
+                        </button>
+                        <button class="toki-btn-action toki-btn-secondary" id="toki-btn-thumb-optim" style="height: 44px; justify-content: flex-start; padding-left: 20px;">
+                            🔄 썸네일 통합 및 캐 최적화
+                        </button>
+                    </div>
+                </div>
+                <hr style="border: 0; border-top: 1px solid rgba(0,0,0,0.05); margin: 24px 0;">
+                <div class="toki-control-group">
+                    <label class="toki-label">시스템 도구</label>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <button class="toki-btn-action toki-btn-secondary" id="toki-btn-log" style="height: 44px; justify-content: flex-start; padding-left: 20px;">
+                            📝 실시간 로그창 토글
+                        </button>
+                        <button class="toki-btn-action" id="toki-btn-tree-editor" style="height: 44px; background: #6366f1; justify-content: flex-start; padding-left: 20px;">
+                            🧩 파싱 규칙 편집기 (Tree Editor)
+                        </button>
+                    </div>
+                </div>
+        `;
+        body.appendChild(tabTools);
 
         modal.appendChild(body);
         document.body.appendChild(overlay);
 
         // --- Bind Events & Init Logic ---
-        this.initExclusiveAccordion();
         this.bindEvents(overlay);
     }
 
-    createAccordion(title, open = false) {
-        const details = document.createElement('details');
-        if (open) details.open = true;
-        const summary = document.createElement('summary');
-        summary.innerText = title;
-        details.appendChild(summary);
-        return details;
-    }
-
-    initExclusiveAccordion() {
-        const details = document.querySelectorAll('.toki-modal-body details');
-        details.forEach((detail) => {
-            detail.addEventListener('toggle', (e) => {
-                if (detail.open) {
-                    details.forEach((other) => {
-                        if (other !== detail && other.open) {
-                            other.open = false;
-                        }
-                    });
-                }
-            });
-        });
-    }
+    // Helper removed as no longer using accordion
 
     bindEvents(overlay) {
+        // Tab Switching Logic
+        const tabBtns = overlay.querySelectorAll('.toki-tab-btn');
+        const tabContents = overlay.querySelectorAll('.toki-tab-content');
+
+        tabBtns.forEach(btn => {
+            btn.onclick = () => {
+                const target = btn.getAttribute('data-tab');
+                
+                // Toggle Buttons
+                tabBtns.forEach(b => b.classList.toggle('active', b === btn));
+                // Toggle Contents
+                tabContents.forEach(c => {
+                    c.classList.toggle('active', c.id === `toki-tab-${target}`);
+                });
+            };
+        });
+
         // Headers
-        document.getElementById('toki-btn-menu-close').onclick = () => this.close(overlay);
-        document.getElementById('toki-btn-viewer-link').onclick = () => {
+        const closeBtn = document.getElementById('toki-btn-menu-close');
+        if (closeBtn) closeBtn.onclick = () => this.close(overlay);
+        
+        const viewerLink = document.getElementById('toki-btn-viewer-link');
+        if (viewerLink) viewerLink.onclick = () => {
              if(this.handlers.openViewer) this.handlers.openViewer();
         };
 
-        // Download
-        document.getElementById('toki-btn-down-all').onclick = () => {
+        // 1. Download Tab
+        const downAllBtn = document.getElementById('toki-btn-down-all');
+        if (downAllBtn) downAllBtn.onclick = () => {
             const force = document.getElementById('toki-chk-force-overwrite').checked;
             if(this.handlers.downloadAll) this.handlers.downloadAll(force);
             this.close(overlay);
         };
-        document.getElementById('toki-btn-down-range').onclick = () => {
+
+        const downRangeBtn = document.getElementById('toki-btn-down-range');
+        if (downRangeBtn) downRangeBtn.onclick = () => {
             const spec = document.getElementById('toki-range-input').value.trim();
             const force = document.getElementById('toki-chk-force-overwrite').checked;
             if (this.handlers.downloadRange) {
@@ -3241,12 +3566,23 @@ class MenuModal {
             this.close(overlay);
         };
 
-        // Settings
+        const downCurrentBtn = document.getElementById('toki-btn-down-current');
+        if (downCurrentBtn) downCurrentBtn.onclick = () => {
+             if(this.handlers.downloadCurrent) this.handlers.downloadCurrent();
+             this.close(overlay);
+        };
+
+        const testExtractBtn = document.getElementById('toki-btn-test-extract');
+        if (testExtractBtn) testExtractBtn.onclick = () => {
+             if(this.handlers.testExtraction) this.handlers.testExtraction();
+        };
+
+        // 2. Settings Tab
         const selPolicy = document.getElementById('toki-sel-policy');
         const selSpeed = document.getElementById('toki-sel-speed');
         const selNovelTerm = document.getElementById('toki-sel-novel-mode');
 
-        // Load Initial Values (Need to fetch via handler or GM)
+        // Load Initial Values
         if (this.handlers.getConfig) {
             const cfg = this.handlers.getConfig();
             if (cfg.policy && selPolicy) selPolicy.value = cfg.policy;
@@ -3254,31 +3590,32 @@ class MenuModal {
             if (cfg.novelMode && selNovelTerm) selNovelTerm.value = cfg.novelMode;
         }
 
-        selPolicy.onchange = () => { 
-            if(this.handlers.setConfig) this.handlers.setConfig('TOKI_DOWNLOAD_POLICY', selPolicy.value);
+        if (selPolicy) {
+            selPolicy.onchange = () => { 
+                if(this.handlers.setConfig) this.handlers.setConfig('TOKI_DOWNLOAD_POLICY', selPolicy.value);
+                this.updateNativeHelper(selPolicy.value);
+            };
             this.updateNativeHelper(selPolicy.value);
-        };
-        this.updateNativeHelper(selPolicy.value);
+        }
         
-        // Native Test Button
-        const testBtn = document.getElementById('toki-btn-test-native');
-        if (testBtn) {
-            testBtn.onclick = async () => {
+        const testNativeBtn = document.getElementById('toki-btn-test-native');
+        if (testNativeBtn) {
+            testNativeBtn.onclick = async () => {
                 if (this.handlers.testNativeDownload) {
-                    testBtn.disabled = true;
-                    testBtn.textContent = '⏳ 테스트 중...';
+                    testNativeBtn.disabled = true;
+                    testNativeBtn.textContent = '⏳ 테스트 중...';
                     const success = await this.handlers.testNativeDownload();
                     if (success) {
-                        testBtn.textContent = '✅ 테스트 성공 (폴더 확인)';
-                        testBtn.style.color = '#55ff55';
+                        testNativeBtn.textContent = '✅ 테스트 성공 (폴더 확인)';
+                        testNativeBtn.style.color = '#55ff55';
                     } else {
-                        testBtn.textContent = '❌ 테스트 실패 (설정 확인)';
-                        testBtn.style.color = '#ff5555';
+                        testNativeBtn.textContent = '❌ 테스트 실패 (설정 확인)';
+                        testNativeBtn.style.color = '#ff5555';
                     }
                     setTimeout(() => {
-                        testBtn.disabled = false;
-                        testBtn.textContent = '📂 자동 분류 기능 테스트';
-                        testBtn.style.color = '';
+                        testNativeBtn.disabled = false;
+                        testNativeBtn.textContent = '📂 자동 분류 기능 테스트';
+                        testNativeBtn.style.color = '';
                     }, 3000);
                 }
             };
@@ -3287,33 +3624,51 @@ class MenuModal {
         if (selSpeed) selSpeed.onchange = () => { if(this.handlers.setConfig) this.handlers.setConfig('TOKI_SLEEP_MODE', selSpeed.value); };
         if (selNovelTerm) selNovelTerm.onchange = () => { if(this.handlers.setConfig) this.handlers.setConfig('TOKI_NOVEL_MODE', selNovelTerm.value); };
 
-        document.getElementById('toki-btn-advanced').onclick = () => {
+        const advancedBtn = document.getElementById('toki-btn-advanced');
+        if (advancedBtn) advancedBtn.onclick = () => {
             if(this.handlers.openSettings) this.handlers.openSettings();
-            // Typically advanced settings opens another modal, so we might want to close this one or keep it behind.
-            // Let's keep it open or close it? 
-            // Existing logic: showConfigModal() removes existing modal? 
-            // Let's close this menu for clarity.
             this.close(overlay); 
         };
-        document.getElementById('toki-btn-migration').onclick = () => {
+
+        // 3. History Tab
+        const syncBtn = document.getElementById('toki-btn-sync-now');
+        if (syncBtn) {
+            syncBtn.onclick = async () => {
+                if (this.handlers.syncHistory) {
+                    syncBtn.disabled = true;
+                    syncBtn.innerHTML = '<span>⏳ 동기화 중...</span>';
+                    await this.handlers.syncHistory();
+                    syncBtn.disabled = false;
+                    syncBtn.innerHTML = '<span>🔄 지금 즉시 동기화</span>';
+                    
+                    const timeEl = document.getElementById('toki-txt-last-sync');
+                    if (timeEl) timeEl.textContent = new Date().toLocaleTimeString();
+                }
+            };
+        }
+
+        // 4. Tools Tab
+        const migrationBtn = document.getElementById('toki-btn-migration');
+        if (migrationBtn) migrationBtn.onclick = () => {
             if(this.handlers.migrateFilenames) this.handlers.migrateFilenames();
             this.close(overlay);
         };
 
-        // System
-        document.getElementById('toki-btn-log').onclick = () => {
-            if(this.handlers.toggleLog) this.handlers.toggleLog();
-        };
-        document.getElementById('toki-btn-debug-extract').onclick = () => {
-             if(this.handlers.testExtraction) this.handlers.testExtraction();
-        };
-        document.getElementById('toki-btn-debug-download').onclick = () => {
-             if(this.handlers.downloadCurrent) this.handlers.downloadCurrent();
-             this.close(overlay);
-        };
-         document.getElementById('toki-btn-thumb-optim').onclick = () => {
+        const thumbBtn = document.getElementById('toki-btn-thumb-optim');
+        if (thumbBtn) thumbBtn.onclick = () => {
             if(this.handlers.migrateThumbnails) this.handlers.migrateThumbnails();
             this.close(overlay);
+        };
+
+        const logBtn = document.getElementById('toki-btn-log');
+        if (logBtn) logBtn.onclick = () => {
+            if(this.handlers.toggleLog) this.handlers.toggleLog();
+        };
+
+        const treeEditorBtn = document.getElementById('toki-btn-tree-editor');
+        if (treeEditorBtn) treeEditorBtn.onclick = () => {
+            const editor = new TreeRuleEditor();
+            editor.show();
         };
     }
 
@@ -3361,7 +3716,7 @@ async function markDownloadedItems(historyList) {
         return;
     }
 
-    const items = parser.getListItems();
+    const items = await parser.getListItems();
     let markedCount = 0;
 
     items.forEach(li => {
@@ -3385,26 +3740,8 @@ async function markDownloadedItems(historyList) {
                 }
 
                 if (isDownloaded) {
-                    // Visual Indicator
-                    element.style.opacity = '0.6';
-                    element.style.backgroundColor = 'rgba(0, 255, 0, 0.05)';
-                    
-                    // Add Badge if not exists
-                    if (!element.querySelector('.toki-badge')) {
-                        const badge = document.createElement('span');
-                        badge.className = 'toki-badge';
-                        badge.innerText = '✅';
-                        badge.style.marginLeft = '5px';
-                        badge.style.fontSize = '12px';
-                        
-                        // Priority: Link element inside the list item
-                        const linkEl = element.querySelector('a');
-                        if (linkEl) {
-                            linkEl.prepend(badge);
-                        } else {
-                            element.prepend(badge);
-                        }
-                    }
+                    // Visual Indicator (v1.9.1 Class-based)
+                    element.classList.add('toki-downloaded'); 
                     markedCount++;
                 }
             }
@@ -3415,6 +3752,354 @@ async function markDownloadedItems(historyList) {
 
     
     console.log(`[UI] ${markedCount}개 항목에 다운로드 완료 표시 적용.`);
+}
+
+/**
+ * TreeRuleEditor (v1.9.0)
+ * Specialist UI for managing parsing rules with a tree-style interface.
+ */
+class TreeRuleEditor {
+    constructor() {
+        this.rules = _parsers_RuleManager_js__WEBPACK_IMPORTED_MODULE_3__/* .RuleManager */ .u.getCustomRules();
+        this.overlay = null;
+        this.hints = {
+            'id': '사이트 고유 ID (영문/숫자)',
+            'name': '표시용 이름',
+            'urlPattern': '적용할 URL 정규표현식',
+            'category': 'Webtoon / Manga / Novel',
+            'meta': '작품 정보를 추출하는 규칙 그룹',
+            'selector': 'CSS 셀렉터 (예: .title, #info)',
+            'attr': '추출할 속성 (비워두면 텍스트)',
+            'regex': '데이터 정제용 정규식 그룹',
+            'list': '회차 목록을 추출하는 규칙 그룹',
+            'container': '목록 전체를 감싸는 부모 요소',
+            'item': '각 회차 줄 요소 (li 등)',
+            'viewer': '본문 내용을 추출하는 규칙 그룹',
+            'images': '웹툰 이미지 또는 소설 본문 요소'
+        };
+    }
+
+    show() {
+        this.overlay = document.createElement('div');
+        this.overlay.className = 'toki-modal-overlay';
+        this.overlay.style.zIndex = '10002';
+        
+        this.overlay.innerHTML = `
+            <div class="toki-modal toki-tree-modal">
+                <div class="toki-modal-header">
+                    <div class="toki-modal-title">🧩 파싱 규칙 관리자 (Tree Editor)</div>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="toki-btn-rule" id="tree-btn-export">📤 내보내기</button>
+                        <button class="toki-btn-rule" id="tree-btn-import">📥 가져오기</button>
+                        <button class="toki-modal-close" id="tree-close-btn">&times;</button>
+                    </div>
+                </div>
+                <div class="toki-tree-container">
+                    <div class="toki-tree-view" id="tree-root"></div>
+                    
+                    <div class="toki-tree-right-panel">
+                        <div style="display: flex; justify-content: space-between; align-items: center; color: #888; font-size: 12px;">
+                            <span>📄 JSON 미리보기</span>
+                            <span id="tree-json-status" style="color: #4ade80;">✓ Valid</span>
+                        </div>
+                        <textarea class="toki-tree-json-preview" id="tree-json-editor" spellcheck="false"></textarea>
+                        
+                        <div class="toki-test-bench" style="margin-top: 0;">
+                            <div class="toki-label" style="margin-bottom: 5px;">🧪 즉시 테스트</div>
+                            <div style="display: flex; gap: 8px;">
+                                <input type="text" id="tree-test-url" class="toki-input-compact" style="flex: 1;" placeholder="주소 입력" value="${window.location.href}">
+                                <button class="toki-btn-rule" id="tree-btn-test" style="border-color: #4ade80; color: #4ade80;">실행</button>
+                            </div>
+                            <div id="tree-test-result" class="toki-test-result">규칙 수정 후 바로 테스트해보세요.</div>
+                        </div>
+                        
+                        <div style="display: flex; gap: 10px;">
+                            <button class="toki-btn-action" id="tree-btn-save" style="background: #6a5acd; font-weight: bold;">저장 및 적용</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(this.overlay);
+        this.render();
+        this.bindEvents();
+    }
+
+    render() {
+        const root = this.overlay.querySelector('#tree-root');
+        root.innerHTML = '';
+        
+        const mainNode = document.createElement('div');
+        mainNode.innerHTML = `<div class="toki-tree-item"><span class="toki-tree-key">Rules [Array]</span><button class="toki-tree-btn-small" id="tree-add-rule">➕ 룰 추가</button></div>`;
+        root.appendChild(mainNode);
+
+        const listNode = document.createElement('div');
+        listNode.className = 'toki-tree-node';
+        this.rules.forEach((rule, idx) => {
+            listNode.appendChild(this.renderNode(rule, `[${idx}]`, rule.name || rule.id || `Rule ${idx + 1}`));
+        });
+        root.appendChild(listNode);
+
+        this.updateJsonPreview();
+    }
+
+    renderNode(data, path, label = '') {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'toki-tree-node-wrapper';
+
+        const item = document.createElement('div');
+        item.className = 'toki-tree-item';
+        
+        const isObject = data !== null && typeof data === 'object';
+        const toggle = document.createElement('span');
+        toggle.className = 'toki-tree-toggle';
+        toggle.textContent = isObject ? '▼' : '•';
+        
+        const keySpan = document.createElement('span');
+        keySpan.className = 'toki-tree-key';
+        keySpan.textContent = label || path.split('.').pop();
+        if (this.hints[keySpan.textContent]) {
+            keySpan.title = this.hints[keySpan.textContent];
+        }
+
+        item.appendChild(toggle);
+        item.appendChild(keySpan);
+
+        if (!isObject) {
+            const input = document.createElement('input');
+            input.className = 'toki-tree-val';
+            input.value = data;
+            input.dataset.path = path;
+            input.oninput = (e) => this.updateValue(path, e.target.value);
+            item.appendChild(input);
+        } else {
+            const actions = document.createElement('div');
+            actions.className = 'toki-tree-actions';
+            
+            const btnDel = document.createElement('button');
+            btnDel.className = 'toki-tree-btn-small';
+            btnDel.textContent = '🗑️';
+            btnDel.onclick = () => this.removeNode(path);
+            actions.appendChild(btnDel);
+            
+            item.appendChild(actions);
+        }
+
+        wrapper.appendChild(item);
+
+        if (isObject) {
+            const children = document.createElement('div');
+            children.className = 'toki-tree-node';
+            Object.keys(data).forEach(key => {
+                children.appendChild(this.renderNode(data[key], `${path}.${key}`, key));
+            });
+            wrapper.appendChild(children);
+
+            toggle.onclick = () => {
+                const isHidden = children.style.display === 'none';
+                children.style.display = isHidden ? 'block' : 'none';
+                toggle.textContent = isHidden ? '▼' : '▶';
+            };
+        }
+
+        return wrapper;
+    }
+
+    updateValue(path, val) {
+        const parts = path.split('.');
+        let current = this.rules;
+        
+        for (let i = 0; i < parts.length; i++) {
+            let p = parts[i];
+            if (p.startsWith('[') && p.endsWith(']')) {
+                p = parseInt(p.substring(1, p.length - 1));
+            }
+            
+            if (i === parts.length - 1) {
+                current[p] = val;
+            } else {
+                current = current[p];
+            }
+        }
+        this.updateJsonPreview();
+    }
+
+    removeNode(path) {
+        if (!confirm(`노드(${path})를 삭제하시겠습니까?`)) return;
+        
+        const parts = path.split('.');
+        if (parts.length === 1) { // Root rule
+            const idx = parseInt(parts[0].substring(1, parts[0].length - 1));
+            this.rules.splice(idx, 1);
+        } else {
+            let current = this.rules;
+            for (let i = 0; i < parts.length - 1; i++) {
+                let p = parts[i];
+                if (p.startsWith('[') && p.endsWith(']')) p = parseInt(p.substring(1, p.length - 1));
+                current = current[p];
+            }
+            const last = parts[parts.length - 1];
+            delete current[last];
+        }
+        this.render();
+    }
+
+    updateJsonPreview() {
+        const editor = this.overlay.querySelector('#tree-json-editor');
+        editor.value = JSON.stringify(this.rules, null, 2);
+    }
+
+    bindEvents() {
+        const overlay = this.overlay;
+        
+        overlay.querySelector('#tree-close-btn').onclick = () => overlay.remove();
+        
+        overlay.querySelector('#tree-add-rule').onclick = () => {
+            this.rules.push({
+                id: 'new_site_' + Date.now(),
+                name: '새 사이트',
+                urlPattern: '',
+                category: 'Webtoon',
+                meta: { title: { selector: '' } },
+                list: { container: '', item: '' },
+                viewer: { images: { selector: '' } }
+            });
+            this.render();
+        };
+
+        overlay.querySelector('#tree-json-editor').oninput = (e) => {
+            const status = overlay.querySelector('#tree-json-status');
+            try {
+                const parsed = JSON.parse(e.target.value);
+                if (Array.isArray(parsed)) {
+                    this.rules = parsed;
+                    status.textContent = '✓ Valid';
+                    status.style.color = '#4ade80';
+                    if (this.renderTimer) clearTimeout(this.renderTimer);
+                    this.renderTimer = setTimeout(() => this.render(), 1000);
+                }
+            } catch (err) {
+                status.textContent = '⚠ Invalid JSON';
+                status.style.color = '#ff5555';
+            }
+        };
+
+        overlay.querySelector('#tree-btn-save').onclick = () => {
+            _parsers_RuleManager_js__WEBPACK_IMPORTED_MODULE_3__/* .RuleManager */ .u.saveCustomRules(this.rules);
+            alert('파싱 규칙이 성공적으로 저장되었습니다.');
+            overlay.remove();
+        };
+
+        overlay.querySelector('#tree-btn-export').onclick = () => {
+            const blob = new Blob([JSON.stringify(this.rules, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `tokisync_rules_${new Date().toISOString().split('T')[0]}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+        };
+
+        overlay.querySelector('#tree-btn-import').onclick = () => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+            input.onchange = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    try {
+                        const imported = JSON.parse(ev.target.result);
+                        const rules = Array.isArray(imported) ? imported : (imported.rules || []);
+                        const mode = confirm('기존 규칙과 합치시겠습니까? (취소 시 전체 덮어쓰기)') ? 'merge' : 'overwrite';
+                        
+                        if (mode === 'overwrite') {
+                            this.rules = rules;
+                        } else {
+                            _parsers_RuleManager_js__WEBPACK_IMPORTED_MODULE_3__/* .RuleManager */ .u.bulkImport(rules, 'merge');
+                            this.rules = _parsers_RuleManager_js__WEBPACK_IMPORTED_MODULE_3__/* .RuleManager */ .u.getCustomRules();
+                        }
+                        this.render();
+                    } catch (err) {
+                        alert('JSON 파싱 오류: ' + err.message);
+                    }
+                };
+                reader.readAsText(file);
+            };
+            input.click();
+        };
+
+        overlay.querySelector('#tree-btn-test').onclick = async () => {
+            const res = overlay.querySelector('#tree-test-result');
+            res.textContent = '⏳ 파싱 테스트 중...';
+            try {
+                const url = overlay.querySelector('#tree-test-url').value;
+                const domain = new URL(url).origin;
+                const rule = this.rules.find(r => new RegExp(r.urlPattern, 'i').test(url));
+                if (!rule) throw new Error('해당 URL에 맞는 규칙이 트리 내에 없습니다.');
+
+                const parser = new _parsers_GenericParser_js__WEBPACK_IMPORTED_MODULE_4__/* .GenericParser */ .b(domain, rule);
+                const result = await (0,_extractor_js__WEBPACK_IMPORTED_MODULE_5__/* .extractEpisodeData */ .d)(document, parser, { site: 'test', category: rule.category }, false);
+                
+                res.innerHTML = `
+                    <div style="color: #4ade80">성공!</div>
+                    <div>• 제목: ${result.title || 'N/A'}</div>
+                    <div>• 항목 수: ${result.urls?.length || (result.content ? '1 (Text)' : '0')}</div>
+                `;
+            } catch (e) {
+                res.textContent = '❌ 실패: ' + e.message;
+            }
+        };
+    }
+}
+
+
+/***/ }),
+
+/***/ 969:
+/***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
+
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   O: function() { return /* binding */ ParserFactory; }
+/* harmony export */ });
+/* harmony import */ var _GenericParser_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(443);
+/* harmony import */ var _detector_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(419);
+
+
+
+/**
+ * ParserFactory
+ * Creates and provides the appropriate parser for the current site.
+ */
+class ParserFactory {
+    static #instance = null;
+
+    /**
+     * Get the appropriate parser for the current site (Singleton)
+     * @returns {Promise<BaseParser|null>}
+     */
+    static async getParser() {
+        if (this.#instance) return this.#instance;
+
+        const siteInfo = await (0,_detector_js__WEBPACK_IMPORTED_MODULE_1__/* .detectSite */ .T)();
+        if (!siteInfo) {
+            console.error('[ParserFactory] Failed to detect site');
+            alert("TokiSync 파서 에러: 매칭되는 파싱 룰이 없습니다.\n\n해당 사이트를 지원하려면 설정에서 커스텀 파싱 룰(JSON)을 등록해야 합니다.\n(자세한 방법은 Github의 rules.sample.json을 참조하세요)");
+            return null;
+        }
+
+        const { site, protocolDomain, matchedRule } = siteInfo;
+
+        // Dynamic Generic Parser
+        if (site === 'generic' && matchedRule) {
+            this.#instance = new _GenericParser_js__WEBPACK_IMPORTED_MODULE_0__/* .GenericParser */ .b(protocolDomain, matchedRule);
+            return this.#instance;
+        }
+
+        return null;
+    }
 }
 
 
@@ -3469,269 +4154,12 @@ var __webpack_exports__ = {};
 
 // EXTERNAL MODULE: ./src/core/utils.js
 var utils = __webpack_require__(924);
-// EXTERNAL MODULE: ./src/core/ui.js
-var ui = __webpack_require__(963);
-;// ./src/core/novel-decryptor.js
-/**
- * [전략 B] 소설 API 기반 복호화 모듈
- * Closed Shadow DOM 및 XOR 암호화를 우회하여 API를 통해 직접 평문을 추출합니다.
- */
-
-// 이스케이프 유무 모두 대응: "token":"eyJ..." 또는 \"token\":\"eyJ...\"
-const RE_TOKEN = /\\?"token\\?":\\?"(eyJ[A-Za-z0-9_-]+[A-Za-z0-9_=.-]*)\\?"/;
-
-/**
- * Base64URL 디코딩
- */
-function b64urlDecode(str) {
-    const pad = str.length % 4 === 0 ? '' : '='.repeat(4 - str.length % 4);
-    const bin = atob(str.replace(/-/g, '+').replace(/_/g, '/') + pad);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    return bytes;
-}
-
-/**
- * Base64URL 인코딩
- */
-function b64urlEncode(bytes) {
-    let bin = '';
-    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-/**
- * HMAC-SHA256 서명 (Proof 생성용)
- */
-async function hmacSign(secret, message) {
-    const enc = new TextEncoder();
-    const key = await crypto.subtle.importKey(
-        'raw', enc.encode(secret),
-        { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
-    );
-    const sig = await crypto.subtle.sign('HMAC', key, enc.encode(message));
-    return b64urlEncode(new Uint8Array(sig));
-}
-
-/**
- * XOR 복호화
- */
-function xorDecrypt(payloadB64, keyB64) {
-    const payload = b64urlDecode(payloadB64);
-    const key = b64urlDecode(keyB64);
-    const result = new Uint8Array(payload.length);
-    for (let i = 0; i < payload.length; i++) {
-        result[i] = payload[i] ^ key[i % key.length];
-    }
-    return new TextDecoder('utf-8').decode(result);
-}
-
-/**
- * document.cookie에서 특정 쿠키 값 가져오기
- */
-function getCookie(name) {
-    const match = document.cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
-    return match ? decodeURIComponent(match[1]) : null;
-}
-
-/**
- * nv 쿠키 삭제 후 새로 발급 (세션 차단 복구용)
- */
-async function resetNvCookie(cookieName) {
-    console.log(`[Decryptor] ${cookieName} 쿠키 리셋 중...`);
-    // 모든 경로에 대해 쿠키 삭제
-    document.cookie = `${cookieName}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
-    // 새 쿠키 발급
-    await fetch('/api/nv-issue', { method: 'POST', credentials: 'same-origin' });
-    console.log(`[Decryptor] ${cookieName} 쿠키 재발급 완료`);
-}
-
-/**
- * URL에서 novelId와 episodeId 추출
- */
-function getIdsFromUrl(url) {
-    const match = url.match(/\/novel\/(\d+)\/(\d+)/);
-    if (!match) return null;
-    return { novelId: match[1], episodeId: match[2] };
-}
-
-/**
- * [Main] 에피소드 URL로부터 평문 텍스트를 직접 추출하여 반환
- * @param {string} episodeUrl 에피소드 주소
- * @param {Object} config 규칙의 decryptApi 설정
- * @param {boolean} _isRetry 내부 재시도 여부 (외부에서 사용 금지)
- * @returns {Promise<string|null>} 복호화된 평문 (실패 시 null)
- */
-async function fetchNovelText(episodeUrl, config = {}, _isRetry = false) {
-    const endpoint = config.endpoint || '/api/novel-content';
-    const cookieName = config.cookieName || 'nv';
-    const clientHeader = config.clientHeader || 'shadow-v2';
-
-    try {
-        const ids = getIdsFromUrl(episodeUrl);
-        if (!ids) return null;
-
-        // 1. Fresh Token 추출 (토큰은 에피소드별 + 짧은 TTL이므로 항상 새로 가져옴)
-        const html = await fetch(episodeUrl, { credentials: 'same-origin' }).then(r => r.text());
-        const tokenMatch = html.match(RE_TOKEN);
-        if (!tokenMatch) {
-            console.warn('[Decryptor] 토큰 추출 실패 (API 호출 중단)');
-            return null;
-        }
-        const token = tokenMatch[1];
-
-        // 2. 쿠키 확인 (XOR 키)
-        let cookie = getCookie(cookieName);
-        if (!cookie) {
-            console.log('[Decryptor] 쿠키 없음 - nv-issue 시도');
-            await fetch('/api/nv-issue', { method: 'POST', credentials: 'same-origin' });
-            cookie = getCookie(cookieName);
-        }
-        if (!cookie) return null;
-        const xorKey = cookie.split('.')[0];
-
-        // 3. Proof 생성 (HMAC)
-        const nonce = b64urlEncode(crypto.getRandomValues(new Uint8Array(24)));
-        const proof = await hmacSign(cookie, `${token}.${nonce}.${navigator.userAgent}`);
-
-        // 4. API 호출
-        const resp = await fetch(endpoint, {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: {
-                'content-type': 'application/json',
-                'x-novel-client': clientHeader
-            },
-            body: JSON.stringify({
-                novelId: ids.novelId,
-                episodeId: ids.episodeId,
-                token, nonce, proof
-            })
-        });
-
-        // 5. API 실패 시 — 세션 차단 감지 → 쿠키 리셋 후 1회 재시도
-        if (!resp.ok) {
-            if (!_isRetry) {
-                console.warn(`[Decryptor] API 실패 (${resp.status}) → 세션 차단 의심, 쿠키 리셋 후 재시도`);
-                await resetNvCookie(cookieName);
-                return fetchNovelText(episodeUrl, config, true); // 재시도는 딱 1회
-            }
-            console.error(`[Decryptor] 재시도 후에도 실패 (${resp.status})`);
-            return null;
-        }
-
-        const data = await resp.json();
-        if (!data.ok || !data.payload) return null;
-
-        // 6. XOR 복호화
-        return xorDecrypt(data.payload, xorKey);
-
-    } catch (e) {
-        console.error('[Decryptor] 복호화 과정 중 예외 발생:', e);
-        return null;
-    }
-}
-
-;// ./src/core/extractor.js
-
-
-
-
-/**
- * 뷰어 페이지(또는 팝업 워커) 내에서 직접 데이터를 추출하는 범용 모듈
- * 
- * @param {Document} targetDoc 대상 문서 객체 (현재 창의 document 또는 iframe 내부 document)
- * @param {Object} parser 선택된 사이트의 GenericParser 인스턴스
- * @param {Object} siteInfo 사이트 메타데이터 (category 등)
- * @param {boolean} isStaticDoc XHR로 가져온 정적 HTML인지 여부
- * @param {string} episodeUrl 에피소드 URL (API 복호화 폴백용)
- * @returns {Promise<Object>} 추출 결과 { urls: string[], content: string, title: string, episodeTitle: string }
- */
-async function extractEpisodeData(targetDoc, parser, siteInfo, isStaticDoc = false, episodeUrl = null) {
-    const logger = ui.LogBox.getInstance();
-    const isNovel = (siteInfo.category === 'Novel' || siteInfo.category === 'novel');
-    const viewerCfg = parser.rule.viewer || {};
-
-    let extractedData = {
-        urls: [],
-        content: "",
-        seriesTitle: "",
-        episodeTitle: "",
-        episodeNum: ""
-    };
-
-    // 1. 소설 텍스트 추출 로직
-    if (isNovel) {
-        extractedData.content = parser.getNovelContent(targetDoc);
-
-        // [전략 B] DOM 추출 실패 + API 복호화 설정이 있는 경우 폴백 시도
-        if (!extractedData.content && viewerCfg.decryptApi && episodeUrl) {
-            logger.log('[Extractor] DOM 추출 실패 - API 복호화 폴백 시도...', 'Extractor');
-            extractedData.content = await fetchNovelText(episodeUrl, viewerCfg.decryptApi);
-            if (extractedData.content) {
-                logger.log('✅ API 복호화 폴백 성공', 'Extractor');
-            }
-        }
-    } 
-    // 2. 웹툰 이미지 추출 로직
-    else {
-        // 초기 파싱 (정규식/DOM)
-        const initialUrls = parser.getImageList(targetDoc);
-
-        // 물리 스크롤 대기 (정적 문서는 스킵)
-        if (!isStaticDoc && targetDoc.defaultView) {
-            await (0,utils/* scrollToLoad */.Vs)(targetDoc, 20000, viewerCfg);
-        } else {
-            console.log('[Extractor] 정적 문서이거나 Window 객체가 없어 스크롤을 건너뜁니다.');
-        }
-
-        // 스크롤 후 최종 파싱
-        let finalUrls = isStaticDoc ? initialUrls : parser.getImageList(targetDoc);
-
-        // Dummy(Placeholder) 우회 병합
-        const mergedUrls = finalUrls.map((final, idx) => {
-            const initial = initialUrls[idx];
-            if (final.isDummy && initial && !initial.isDummy) {
-                console.log(`[Extractor] Placeholder 우회: ${final.url.split('/').pop()} -> ${initial.url.split('/').pop()}`);
-                return initial.url;
-            }
-            return final.url;
-        }).filter(url => url !== "");
-
-        logger.log(`[Extractor] 이미지 ${mergedUrls.length}개 감지`, 'Extractor');
-
-        // 이미지 감지 0개 시 1.5초 대기 후 재시도
-        if (mergedUrls.length === 0 && !isStaticDoc) {
-            logger.warn('[Extractor] 이미지 0개 — 1.5초 후 재파싱 시도', 'Extractor');
-            await (0,utils/* sleep */.yy)(1500);
-            const retryUrls = parser.getImageList(targetDoc);
-            if (retryUrls.length > 0) mergedUrls.push(...retryUrls.map(u => u.url).filter(u => u !== ""));
-            logger.log(`[Extractor] 재파싱 결과: ${mergedUrls.length}개`, 'Extractor');
-        }
-
-        extractedData.urls = mergedUrls;
-    }
-
-    // 3. 메타데이터 (작품명, 에피소드 제목) 자체 추출 시도
-    // 뷰어 페이지에서 직접 단건 실행하거나 팝업 워커일 경우를 대비함
-    try {
-        if (parser.getViewerMetadata) {
-            const metadata = parser.getViewerMetadata(targetDoc);
-            extractedData.seriesTitle = metadata.seriesTitle;
-            extractedData.episodeTitle = metadata.episodeTitle;
-            extractedData.episodeNum = metadata.episodeNum;
-        }
-    } catch (e) {
-        console.warn("[Extractor] 뷰어 메타데이터 추출 실패:", e);
-    }
-
-    return extractedData;
-}
-
-// EXTERNAL MODULE: ./src/core/parsers/ParserFactory.js + 2 modules
-var ParserFactory = __webpack_require__(729);
-// EXTERNAL MODULE: ./src/core/detector.js + 1 modules
-var detector = __webpack_require__(739);
+// EXTERNAL MODULE: ./src/core/extractor.js
+var extractor = __webpack_require__(929);
+// EXTERNAL MODULE: ./src/core/parsers/ParserFactory.js
+var ParserFactory = __webpack_require__(969);
+// EXTERNAL MODULE: ./src/core/detector.js
+var detector = __webpack_require__(419);
 ;// ./src/core/epub.js
 class EpubBuilder {
     constructor() {
@@ -3925,6 +4353,40 @@ class CbzBuilder {
     }
 }
 
+;// ./src/core/txt.js
+class TxtBuilder {
+    constructor() {
+        this.content = "";
+    }
+
+    addChapter(title, textContent) {
+        this.content += `\n\n=== ${title} ===\n\n`;
+        this.content += textContent;
+    }
+
+    async build(metadata = {}) {
+        try {
+            // Return an object that duck-types JSZip's generateAsync
+            return {
+                generateAsync: async () => {
+                    // Prepend metadata title at the top if available
+                    let finalContent = this.content;
+                    if (metadata.title) {
+                        finalContent = `[ ${metadata.title} ]\n` + finalContent;
+                    }
+                    return new Blob([finalContent], { type: 'text/plain;charset=utf-8' });
+                }
+            };
+        } catch (e) {
+            const { LogBox } = await Promise.resolve(/* import() */).then(__webpack_require__.bind(__webpack_require__, 963));
+            LogBox.getInstance().critical(`TXT 빌드 실패: ${e.message} (${metadata.title || 'unknown'})`, 'Builder:TXT');
+            throw e;
+        }
+    }
+}
+
+// EXTERNAL MODULE: ./src/core/ui.js
+var ui = __webpack_require__(963);
 // EXTERNAL MODULE: ./src/core/config.js
 var core_config = __webpack_require__(899);
 // EXTERNAL MODULE: ./src/core/anti_sleep.js
@@ -3933,7 +4395,10 @@ var anti_sleep = __webpack_require__(209);
 var gas = __webpack_require__(488);
 // EXTERNAL MODULE: ./src/core/network.js
 var network = __webpack_require__(391);
+// EXTERNAL MODULE: ./src/core/novel-decryptor.js
+var novel_decryptor = __webpack_require__(602);
 ;// ./src/core/downloader.js
+
 
 
 
@@ -3972,19 +4437,30 @@ async function processItem(item, builder, siteInfo, iframe, parser, seriesTitle 
 
     // [전략 B] fetchMethod === 'api'는 targetDoc 여부와 무관하게 항상 API 경로 우선
     if (fetchMethod === 'api') {
-        // [v2.1] novel-decryptor.js를 통한 API 다운로드는 DDos 감지를 피하기 위해 무조건 매우 느림(10-30초) 고정
-        policy = SLEEP_POLICIES.very_slow;
-
         const logger = ui.LogBox.getInstance();
         logger.log(`[API] 직접 복호화 시도 중 (대기: ${policy.min / 1000}~${policy.max / 1000}초): ${item.title}`, 'Downloader');
 
-        const text = await fetchNovelText(item.src, viewerCfg.decryptApi || {});
+        const text = await (0,novel_decryptor/* fetchNovelText */.U)(item.src, viewerCfg.decryptApi || {});
 
         if (text) {
-            builder.addChapter(item.title, text);
+            let cleanText = text;
+            
+            // 1. 앞부분 껍데기 제거 (text 또는 html 형식을 모두 지원하며, 문자열 시작 부분만 타겟팅)
+            cleanText = cleanText.replace(/^\{"kind"\s*:\s*"(text|html)"\s*,\s*"(text|html)"\s*:\s*"/, '');
+            
+            // 2. 뒷부분 껍데기 제거 (", "css":"" } 또는 "} 로 끝나는 모든 경우 대응)
+            cleanText = cleanText.replace(/"\s*(,\s*"css"\s*:\s*""\s*)?\}$/, '');
+            
+            // 3. 줄바꿈 이스케이프(\n)를 실제 줄바꿈으로 변환
+            cleanText = cleanText.replace(/\\n/g, '\n');
+            
+            // 4. 따옴표 이스케이프(\")를 실제 쌍따옴표로 변환
+            cleanText = cleanText.replace(/\\"/g, '"');
+
+            builder.addChapter(item.title, cleanText);
             logger.log(`✅ 복호화 성공: ${item.title}`, 'Downloader');
         } else {
-            logger.error(`⚠️ 복호화 실패 (스킵): ${item.title}`, 'Downloader');
+            throw new Error(`복호화 실패 (API 응답 없음)`);
         }
 
         await (0,utils/* sleep */.yy)(policy.min, policy.max);
@@ -4050,7 +4526,7 @@ async function processItem(item, builder, siteInfo, iframe, parser, seriesTitle 
     }
 
     // --- [v1.8.2] 1단계: 모듈화된 파이프라인(Extractor) 호출 ---
-    const extractedData = await extractEpisodeData(iframeDoc, parser, siteInfo, isStaticDoc, item.src);
+    const extractedData = await (0,extractor/* extractEpisodeData */.d)(iframeDoc, parser, siteInfo, isStaticDoc, item.src);
     
     // 메타데이터가 뷰어에서 추출되었다면 활용 (단건 다운로드 등)
     const finalTitle = extractedData.episodeTitle && extractedData.episodeTitle !== "UnknownEpisode" 
@@ -4059,8 +4535,7 @@ async function processItem(item, builder, siteInfo, iframe, parser, seriesTitle 
 
     if (isNovel) {
         if (!extractedData.content) {
-            ui.LogBox.getInstance().error(`⚠️ 텍스트 추출 실패: ${finalTitle}`, 'Downloader');
-            return;
+            throw new Error(`텍스트 본문 추출 실패 (DOM 또는 API 모두 감지 불가)`);
         }
         builder.addChapter(finalTitle, extractedData.content);
     } 
@@ -4069,8 +4544,7 @@ async function processItem(item, builder, siteInfo, iframe, parser, seriesTitle 
         const mergedUrls = extractedData.urls;
 
         if (mergedUrls.length === 0) {
-            logger.error(`⚠️ 이미지 감지 실패: ${finalTitle} — 해당 챕터 건너뜀`, 'Parser');
-            return;
+            throw new Error(`이미지 URL 감지 실패 (뷰어 컨테이너 또는 속성 탐색 불가)`);
         }
 
         // Fetch Images Parallel
@@ -4137,6 +4611,8 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
         logger.log('[Anti-Sleep] 자동 시작 실패 (사용자 상호작용 필요)', 'error');
     }
 
+    const failedEpisodes = [];  // [v1.8.1] 완전 실패 리스트
+    const partialFailures = []; // [v1.8.1] 부분 실패 리스트 (이미지 일부 누락)
     const siteInfo = await (0,detector/* detectSite */.T)();
     if (!siteInfo) {
         alert("지원하지 않는 사이트이거나 다운로드 페이지가 아닙니다.");
@@ -4187,9 +4663,18 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
             logger.log('⚠️ folderInCbz 정책이 폐기되어 zipOfCbzs(배치)로 전환되었습니다.', 'warn');
         }
 
+        // [v1.8.2] Graceful Fallback for missing Drive configuration
+        if (destination === 'drive' && !(0,core_config/* isConfigValid */.Jb)()) {
+            alert('구글 드라이브 설정(Folder ID 등)이 누락되었습니다. 임시로 개별 로컬 다운로드 정책으로 전환합니다.');
+            logger.warn('⚠️ 구글 드라이브 설정 누락 감지. 정책을 개별 로컬 다운로드로 자동 전환합니다.', 'System');
+            buildingPolicy = 'individual';
+            destination = 'local';
+        }
+
+        const configNovelFormat = (0,core_config/* getConfig */.zj)().novelFormat || 'epub';
         const EXTENSION_MAP = {
-            'Novel': 'epub',
-            'novel': 'epub',
+            'Novel': configNovelFormat,
+            'novel': configNovelFormat,
             'Webtoon': 'cbz',
             'webtoon': 'cbz',
             'Manga': 'cbz',
@@ -4207,19 +4692,22 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
         // Get List
         let list = await parser.getListItems();
 
-        // [v2.0] 커스텀 범위 필터 ("1,2,4-10" 형식)
+        // [v1.9.1] 정렬 로직 통합: 범위 필터 여부와 상관없이 항상 오름차순(1화~N화)으로 정렬
         const rangeSet = parseRangeSpec(rangeSpec);
-        if (rangeSet) {
-            // 필터링 및 번호 오름차순 정렬 (1부터 다운로드 되도록)
-            const mappedList = list.map(li => {
-                const item = parser.parseListItem(li.element || li);
-                return { li, num: parseInt(item.num) };
-            }).filter(item => rangeSet.has(item.num));
+        const mappedList = list.map(li => {
+            const item = parser.parseListItem(li.element || li);
+            return { li, num: parseInt(item.num) || 0 }; // 숫자가 아니면 0으로 처리하여 상단 배치
+        });
 
-            mappedList.sort((a, b) => a.num - b.num);
-            list = mappedList.map(item => item.li);
-            
+        if (rangeSet) {
+            list = mappedList.filter(item => rangeSet.has(item.num))
+                             .sort((a, b) => a.num - b.num)
+                             .map(item => item.li);
             logger.log(`범위 필터 적용 및 오름차순 정렬 완료: ${rangeSpec} → ${list.length}개 항목`);
+        } else {
+            list = mappedList.sort((a, b) => a.num - b.num)
+                             .map(item => item.li);
+            logger.log(`전체 항목 오름차순 정렬 완료: ${list.length}개 항목`);
         }
         
         // Log episode range
@@ -4275,8 +4763,7 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                 const thumbnailUrl = parser.getThumbnailUrl();
                 if (thumbnailUrl) {
                     logger.log('📷 시리즈 썸네일 업로드 중...');
-                    const thumbResponse = await fetch(thumbnailUrl);
-                    const thumbBlob = await thumbResponse.blob();
+                    const thumbBlob = await (0,utils/* fetchBlobWithXHR */.Kt)(thumbnailUrl);
                     
                     // Upload as 'cover.jpg' - network.js will auto-redirect to _Thumbnails/{ID}.jpg
                     // saveFile(data, filename, type, extension, metadata)
@@ -4340,7 +4827,7 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                 const indexResponse = await new Promise((resolve, reject) => {
                     GM_xmlhttpRequest({
                         method: "POST", url: config.gasUrl,
-                        data: JSON.stringify({ type: "get_library", folderId: config.folderId, apiKey: config.apiKey }),
+                        data: JSON.stringify({ type: "get_library", folderId: config.folderId, apiKey: config.apiKey, protocolVersion: 3 }),
                         headers: { "Content-Type": "text/plain" },
                         onload: (r) => {
                             try { resolve(JSON.parse(r.responseText)); } 
@@ -4411,12 +4898,14 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
         document.body.appendChild(iframe);
 
         // [v1.7.1] Novel Single Volume Mode Init
-        const novelMode = (0,core_config/* getConfig */.zj)().novelMode;
+        const configParams = (0,core_config/* getConfig */.zj)();
+        const novelMode = configParams.novelMode;
+        const novelFormat = configParams.novelFormat || 'epub';
         const isSingleVolume = isNovel && novelMode === 'singleVolume';
-        let masterEpubBuilder = null;
+        let masterNovelBuilder = null;
         if (isSingleVolume) {
-            masterEpubBuilder = new EpubBuilder();
-            logger.log('📙 소설 단행본 합본 모드 활성화 (마지막에 한 번에 저장됩니다)');
+            masterNovelBuilder = novelFormat === 'txt' ? new TxtBuilder() : new EpubBuilder();
+            logger.log(`📙 소설 단행본 합본 모드 활성화 (${novelFormat.toUpperCase()}) (마지막에 한 번에 저장됩니다)`);
         }
 
         // --- Processing Loop ---
@@ -4452,21 +4941,47 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
             // [v1.6.0] Strategy: Always use a FRESH builder per item for Kavita compatibility
             // [v1.7.1] Except for Novel Single Volume Mode
             if (isSingleVolume) {
-                currentBuilder = masterEpubBuilder;
+                currentBuilder = masterNovelBuilder;
             } else {
-                if (isNovel) currentBuilder = new EpubBuilder();
+                if (isNovel) currentBuilder = novelFormat === 'txt' ? new TxtBuilder() : new EpubBuilder();
                 else currentBuilder = new CbzBuilder();
             }
 
             // Process Item
             try {
-                await processItem(item, currentBuilder, siteInfo, iframe, parser, seriesTitle);
+                const result = await processItem(item, currentBuilder, siteInfo, iframe, parser, seriesTitle);
+                
+                // [v1.8.1] 부분 실패 체크 (이미지 누락 여부)
+                if (currentBuilder && currentBuilder.chapters) {
+                    const latestChapter = currentBuilder.chapters[currentBuilder.chapters.length - 1];
+                    if (latestChapter && Array.isArray(latestChapter.images)) {
+                        const missingCount = latestChapter.images.filter(img => img.isMissing).length;
+                        if (missingCount > 0) {
+                            console.warn(`[Downloader] 부분 실패 감지: ${item.title} (이미지 ${missingCount}개 누락)`);
+                            partialFailures.push({
+                                num: item.num,
+                                title: item.title,
+                                missingCount: missingCount
+                            });
+                        }
+                    }
+                }
+
                 if (isSingleVolume) {
-                    logger.log(`📥 챕터 추가 완료: ${item.title} (현재 ${masterEpubBuilder.chapters.length}개)`, 'Downloader');
+                    const currentSize = currentBuilder.chapters ? currentBuilder.chapters.length : (currentBuilder.content ? currentBuilder.content.split('===').length - 1 : 0);
+                    logger.log(`📥 챕터 추가 완료: ${item.title} (현재 ${currentSize}개)`, 'Downloader');
                 }
             } catch (err) {
                 console.error(err);
-                logger.error(`항목 처리 실패 (${item.title}): ${err.message}`, 'Downloader');
+                const errorMsg = err.message || "알 수 없는 오류";
+                logger.error(`항목 처리 실패 (${item.title}): ${errorMsg}`, 'Downloader');
+                
+                // [v1.8.1] 실패 내역 저장
+                failedEpisodes.push({
+                    num: item.num,
+                    title: item.title,
+                    error: errorMsg
+                });
                 continue; // Skip faulty item but continue loop
             }
 
@@ -4514,13 +5029,13 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                     console.log(`[MasterZip] 추가 중: ${fullFilename}.${extension}`);
                     masterZip.file(`${fullFilename}.${extension}`, blob);
                     
-                    // [v1.6.0] 5-Chapter Batching Logic
-                    // Every 5 items (or at the end), save the batch and clear memory
+                    // [v1.8.2] Batching Logic
+                    // Novel: Infinite batch. Webtoon: 20 per batch to prevent OOM
                     const processedCount = i + 1;
                     const isLastItem = (i === list.length - 1);
-                    const BATCH_SIZE = 5;
+                    const BATCH_SIZE = isNovel ? Infinity : 20;
 
-                    if (processedCount % BATCH_SIZE === 0 || isLastItem) {
+                    if ((BATCH_SIZE !== Infinity && processedCount % BATCH_SIZE === 0) || isLastItem) {
                         const batchNum = Math.ceil(processedCount / BATCH_SIZE);
                         const batchFilename = `${rootFolder}_Part${batchNum}`;
                         
@@ -4567,11 +5082,12 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                                 await new Promise((res, rej) => {
                                     GM_xmlhttpRequest({
                                         method: "POST", url: (0,core_config/* getConfig */.zj)().gasUrl,
-                                        data: JSON.stringify({ 
-                                            type: "upload", uploadUrl: updateUrl, chunkData: chunkBase64, 
-                                            folderId: (0,core_config/* getConfig */.zj)().folderId,
-                                            start: start, end: end, total: totalSize, apiKey: (0,core_config/* getConfig */.zj)().apiKey
-                                        }),
+                                            data: JSON.stringify({ 
+                                                type: "upload", uploadUrl: updateUrl, chunkData: chunkBase64, 
+                                                folderId: (0,core_config/* getConfig */.zj)().folderId,
+                                                protocolVersion: 3,
+                                                start: start, end: end, total: totalSize, apiKey: (0,core_config/* getConfig */.zj)().apiKey
+                                            }),
                                         headers: { "Content-Type": "text/plain" },
                                         timeout: 300000,
                                         onload: (resp) => {
@@ -4643,9 +5159,10 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
         }
 
 
-        // [v1.7.1] Finalize Single Volume EPUB
-        if (isSingleVolume && masterEpubBuilder) {
-            if (masterEpubBuilder.chapters.length > 0) {
+        // [v1.7.1] Finalize Single Volume EPUB/TXT
+        if (isSingleVolume && masterNovelBuilder) {
+            const hasContent = masterNovelBuilder.chapters ? masterNovelBuilder.chapters.length > 0 : masterNovelBuilder.content.length > 0;
+            if (hasContent) {
                 try {
                     // [v1.7.1 Update] Use Chapter Range for Filename instead of "(합본)"
                     // [v1.7.1 Update] Use Chapter Range for Filename instead of "(합본)" - Safe Parsing
@@ -4665,14 +5182,14 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                     
                     logger.log(`📚 단행본 조립 및 저장 중... (${finalFilename})`);
                     
-                    const finalZip = await masterEpubBuilder.build({
+                    const finalZip = await masterNovelBuilder.build({
                         series: seriesTitle || rootFolder,
                         title: seriesTitle || rootFolder,
                         writer: siteName
                     });
                     const finalBlob = await finalZip.generateAsync({ type: "blob" });
                     
-                    await (0,utils/* saveFile */.OJ)(finalBlob, finalFilename, destination, 'epub', {
+                    await (0,utils/* saveFile */.OJ)(finalBlob, finalFilename, destination, extension, {
                         folderName: rootFolder,
                         category: category
                     });
@@ -4701,8 +5218,11 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
             );
         }
 
-        logger.success(`✅ 다운로드 완료!`);
-        ui/* Notifier */.ze.notify('TokiSync', `다운로드 완료! (${list.length}개 항목)`);
+        logger.success(`✅ 모든 작업 완료!`);
+        ui/* Notifier */.ze.notify('TokiSync', `다운로드 완료! (${list.length - failedEpisodes.length}개 성공, ${failedEpisodes.length}개 실패)`);
+
+        // [v1.8.1] 고도화된 실패 리포트 생성 및 저장 (MCP 검토 반영)
+        await generateDownloadReport(seriesTitle || rootFolder, seriesId, list.length, failedEpisodes, partialFailures);
 
     } catch (error) {
         console.error(error);
@@ -4728,8 +5248,7 @@ async function fetchImages(imageUrls) {
         
         while (retries > 0) {
             try {
-                const response = await fetch(src);
-                const blob = await response.blob();
+                const blob = await (0,utils/* fetchBlobWithXHR */.Kt)(src);
                 
                 if (blob.size === 0) {
                     throw new Error("빈 이미지 데이터 (Blob size 0)");
@@ -4809,9 +5328,63 @@ async function fetchImages(imageUrls) {
     return await Promise.all(promises);
 }
 
+/**
+ * [v1.8.1] 다운로드 실패 리포트 생성 및 다운로드 (MCP 검토 의견 반영)
+ * @private
+ */
+async function generateDownloadReport(seriesTitle, seriesId, listCount, failedEpisodes, partialFailures) {
+    const logger = ui.LogBox.getInstance();
+    if (failedEpisodes.length === 0 && partialFailures.length === 0) return;
+
+    logger.warn(`⚠️ 다운로드 중 일부 오류가 발견되었습니다. 리포트를 생성합니다.`, 'System');
+
+    const timestamp = new Date().toLocaleString();
+    const lines = [
+        `[TokiSync 다운로드 리포트]`,
+        `작품명: ${seriesTitle}`,
+        `일시: ${timestamp}`,
+        `--------------------------------------------------`,
+        `■ 요약 (Summary)`,
+        `- 총 시도: ${listCount}개`,
+        `- 성공: ${listCount - failedEpisodes.length}개`,
+        `- 완전 실패: ${failedEpisodes.length}개 (파일이 생성되지 않음)`,
+        `- 부분 실패: ${partialFailures.length}개 (파일은 생성되었으나 일부 데이터 누락)`,
+        `--------------------------------------------------`,
+    ];
+
+    if (failedEpisodes.length > 0) {
+        lines.push(``, `■ 완전 실패 목록 (Critical Failures)`, `(원인 분석 후 해당 회차만 재시도해 보세요)`);
+        failedEpisodes.forEach(fail => {
+            lines.push(`- [${fail.num}] ${fail.title} : ${fail.error}`);
+        });
+    }
+
+    if (partialFailures.length > 0) {
+        lines.push(``, `■ 부분 실패 목록 (Warnings/Partial Success)`, `(다운로드는 완료되었으나 일부 페이지가 누락된 항목입니다)`);
+        partialFailures.forEach(fail => {
+            lines.push(`- [${fail.num}] ${fail.title} : 이미지 ${fail.missingCount}개 누락`);
+        });
+    }
+
+    lines.push(``, `--------------------------------------------------`, `위 리포트를 참고하여 누락된 회차를 확인하시기 바랍니다.`);
+
+    const reportContent = lines.join('\n');
+    const reportBlob = new Blob([reportContent], { type: 'text/plain;charset=utf-8' });
+    const cleanSeriesTitle = (seriesTitle || "Unknown").replace(/[<>:"/\\|?*]/g, '').trim();
+    const reportFilename = `${cleanSeriesTitle}_다운로드_실패_리포트`;
+
+    try {
+        await (0,utils/* saveFile */.OJ)(reportBlob, reportFilename, 'local', 'txt');
+        logger.success(`✅ 실패 리포트 다운로드 완료: ${reportFilename}.txt`);
+    } catch (e) {
+        console.error('[Downloader] 리포트 저장 실패:', e);
+    }
+}
+
 ;// ./src/core/main.js
 
  
+
 
 
 
@@ -4827,6 +5400,10 @@ async function main() {
     console.log("🚀 TokiDownloader Loaded (New Core v1.7.4)");
     
     const logger = ui.LogBox.getInstance();
+
+    // -- 0. Pre-detection & Core States --
+    const siteInfo = await (0,detector/* detectSite */.T)();
+    if(!siteInfo) return; 
 
     // -- Helper Functions for Menu Actions --
 
@@ -4861,7 +5438,8 @@ async function main() {
                 data: JSON.stringify({
                     type: 'view_migrate_thumbnails',
                     folderId: config.folderId,
-                    apiKey: config.apiKey
+                    apiKey: config.apiKey,
+                    protocolVersion: 3
                 }),
                 onload: (res) => {
                     try {
@@ -4919,7 +5497,8 @@ async function main() {
                     type: 'view_migrate_filenames',
                     seriesId: seriesId,
                     folderId: config.folderId,
-                    apiKey: config.apiKey
+                    apiKey: config.apiKey,
+                    protocolVersion: 3
                 }),
                 headers: {
                     // "Authorization": `Bearer ${token}`, // If using OAuth
@@ -4948,6 +5527,67 @@ async function main() {
         } catch (e) {
             alert('오류 발생: ' + e.message);
             console.error(e);
+        }
+    };
+
+    // -- History Sync (Async) & Cross-Tab Auto Refresh --
+    let lastSyncTime = Date.now();
+    let isSyncing = false;
+
+    const syncHistory = async () => {
+        if (isSyncing) return;
+        isSyncing = true;
+        try {
+            const parser = await ParserFactory/* ParserFactory */.O.getParser();
+            if (!parser) return;
+            const list = await parser.getListItems();
+            console.log(`[TokiSync] Found ${list.length} list items`);
+            if (list.length === 0) {
+                console.warn('[TokiSync] No list items found, skipping history sync');
+                return;
+            }
+
+            const first = parser.parseListItem(list[0]);
+            const last = parser.parseListItem(list[list.length - 1]);
+
+            const idMatch = document.URL.match(/\/(novel|webtoon|comic)\/([0-9]+)/);
+            const seriesId = idMatch ? idMatch[2] : "0000";
+
+            // Determine Root Folder Name (Unified with Downloader)
+            const rootFolder = parser.getFormattedTitle(seriesId, first.title, last.title, utils/* getCommonPrefix */.iL);
+
+            const category = siteInfo.category || 'Webtoon';
+
+            if (!(0,core_config/* isConfigValid */.Jb)()) {
+                console.log('[TokiSync] GAS 설정을 찾을 수 없어 이력 동기화를 건너뜁니다.');
+                return;
+            }
+
+            console.log(`[TokiSync] Fetching history for: ${rootFolder} (${category})`);
+            
+            // [v1.9.1] Use fetchHistoryDirect for faster & more reliable sync
+            const result = await (0,network/* fetchHistoryDirect */.GA)(rootFolder, category);
+            
+            if (result.success) {
+                console.log(`[TokiSync] Received ${result.data.length} history items via Direct API`);
+                if (result.data.length > 0) {
+                    await (0,ui/* markDownloadedItems */.hV)(result.data);
+                } else {
+                    console.log('[TokiSync] No history items found in Drive');
+                }
+            } else {
+                // Fallback to Legacy GAS if Direct fails
+                console.warn('[TokiSync] Direct history fetch failed, trying legacy GAS relay...');
+                const legacyHistory = await (0,gas/* fetchHistory */.Ny)(rootFolder, category);
+                if (legacyHistory && legacyHistory.length > 0) {
+                    await (0,ui/* markDownloadedItems */.hV)(legacyHistory);
+                }
+            }
+        } catch (e) {
+            console.warn('[TokiSync] History check failed:', e);
+        } finally {
+            isSyncing = false;
+            lastSyncTime = Date.now();
         }
     };
 
@@ -4983,6 +5623,7 @@ async function main() {
         },
         migrateFilenames: runFilenameMigration,
         migrateThumbnails: runThumbnailMigration,
+        syncHistory: syncHistory,
         testNativeDownload: async () => {
             try {
                 const testBlob = new Blob(["TokiSync Native Mode Test File"], { type: "text/plain" });
@@ -5007,7 +5648,7 @@ async function main() {
 
                 const siteInfo = await (0,detector/* detectSite */.T)();
                 // 현재 페이지(document)를 대상으로 추출 테스트
-                const result = await extractEpisodeData(document, parser, siteInfo, false);
+                const result = await (0,extractor/* extractEpisodeData */.d)(document, parser, siteInfo, false);
                 
                 console.log('[Debug Result]', result);
                 
@@ -5040,15 +5681,18 @@ async function main() {
                 if (!parser) throw new Error('파서를 찾을 수 없습니다.');
 
                 // 1. 메타데이터 추출 (제목 등 확인용)
-                const metadata = await extractEpisodeData(document, parser, siteInfo, false);
+                const metadata = await (0,extractor/* extractEpisodeData */.d)(document, parser, siteInfo, false);
                 const title = metadata.episodeTitle || "Current_Episode";
                 const seriesTitle = metadata.seriesTitle || "Unknown_Series";
 
                 // 2. 빌더 생성 (카테고리에 따라)
                 const isNovel = (siteInfo.category === 'Novel' || siteInfo.category === 'novel');
                 let builder;
+                let extension = 'cbz';
                 if (isNovel) {
-                    builder = new EpubBuilder(seriesTitle, { author: "TokiSync" });
+                    const novelFormat = (0,core_config/* getConfig */.zj)().novelFormat || 'epub';
+                    builder = novelFormat === 'txt' ? new TxtBuilder() : new EpubBuilder(seriesTitle, { author: "TokiSync" });
+                    extension = novelFormat;
                 } else {
                     builder = new CbzBuilder(title);
                 }
@@ -5074,7 +5718,6 @@ async function main() {
                 });
                 
                 const blob = await zip.generateAsync({ type: "blob" });
-                const extension = isNovel ? 'epub' : 'cbz';
                 const filename = `${tempItem.num} - ${title}`;
 
                 await (0,utils/* saveFile */.OJ)(blob, filename, 'local', extension, { category: siteInfo.category });
@@ -5091,6 +5734,10 @@ async function main() {
     // -- 2. Register Legacy Menu Commands (Fallback) --
     if (typeof GM_registerMenuCommand !== 'undefined') {
         GM_registerMenuCommand('⚙️ 설정 (Settings)', () => (0,core_config/* showConfigModal */.Vh)());
+        GM_registerMenuCommand('🧩 파싱 규칙 관리', () => {
+            const editor = new ui/* TreeRuleEditor */.AC();
+            editor.show();
+        });
         GM_registerMenuCommand('📜 로그창 토글 (Log)', () => logger.toggle());
         GM_registerMenuCommand('🌐 Viewer 열기', openViewer);
         GM_registerMenuCommand('📥 전체 다운로드', () => {
@@ -5164,55 +5811,6 @@ async function main() {
         }
     });
 
-    const siteInfo = await (0,detector/* detectSite */.T)();
-    if(!siteInfo) return; 
-
-    // -- 4. History Sync (Async) & Cross-Tab Auto Refresh --
-    let lastSyncTime = Date.now();
-    let isSyncing = false;
-
-    const syncHistory = async () => {
-        if (isSyncing) return;
-        isSyncing = true;
-        try {
-            const parser = await ParserFactory/* ParserFactory */.O.getParser();
-            if (!parser) return;
-            const list = await parser.getListItems();
-            console.log(`[TokiSync] Found ${list.length} list items`);
-            if (list.length === 0) {
-                console.warn('[TokiSync] No list items found, skipping history sync');
-                return;
-            }
-
-            const first = parser.parseListItem(list[0]);
-            const last = parser.parseListItem(list[list.length - 1]);
-
-            const idMatch = document.URL.match(/\/(novel|webtoon|comic)\/([0-9]+)/);
-            const seriesId = idMatch ? idMatch[2] : "0000";
-
-            // Determine Root Folder Name (Unified with Downloader)
-            const rootFolder = parser.getFormattedTitle(seriesId, first.title, last.title, utils/* getCommonPrefix */.iL);
-
-            let category = 'Webtoon';
-            if (siteInfo.site === '북토끼') category = 'Novel';
-            else if (siteInfo.site === '마나토끼') category = 'Manga';
-
-            console.log(`[TokiSync] Fetching history for: ${rootFolder} (${category})`);
-            const history = await (0,gas/* fetchHistory */.Ny)(rootFolder, category);
-            console.log(`[TokiSync] Received ${history.length} history items`);
-            if (history.length > 0) {
-                await (0,ui/* markDownloadedItems */.hV)(history);
-            } else {
-                console.log('[TokiSync] No history items to mark');
-            }
-        } catch (e) {
-            console.warn('[TokiSync] History check failed:', e);
-        } finally {
-            isSyncing = false;
-            lastSyncTime = Date.now();
-        }
-    };
-
     // Initial load
     console.log('[TokiSync] Starting history sync...');
     syncHistory();
@@ -5230,9 +5828,6 @@ async function main() {
         }
     });
 }
-
-// Auto-run main if imported? Or let index.js call it.
-// Since we are refactoring, likely index.js will just import and call main().
 
 ;// ./src/core/index.js
 
