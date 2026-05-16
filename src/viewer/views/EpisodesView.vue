@@ -135,7 +135,7 @@
               </div>
 
               <!-- 텍스트 정보 -->
-              <!-- 레퍼런스: ml-6, tracking-tighter, group-hover:text-blue-600 -->
+              <!-- 레퍼런스: ml-6, tracking-tighter, group-hover:text-theme-accent -->
               <div class="ml-6 flex-grow overflow-hidden">
                 <h5 class="font-bold text-sm md:text-base ep-text group-hover:ep-text-accent transition-colors truncate tracking-tighter">
                   {{ ep.name || ep.title }}

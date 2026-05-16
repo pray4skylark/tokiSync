@@ -4,7 +4,7 @@
     <!-- Download Progress Overlay -->
     <transition name="fade">
       <div v-if="isDownloading" class="fixed inset-0 z-[200] bg-black/90 flex flex-col items-center justify-center text-white">
-        <div class="w-16 h-16 border-4 border-zinc-800 border-t-blue-500 rounded-full animate-spin mb-8"></div>
+        <div class="w-16 h-16 border-4 border-zinc-800 border-t-theme-accent rounded-full animate-spin mb-8"></div>
         <p class="text-sm font-bold text-zinc-400 tracking-wider uppercase mb-8">{{ downloadProgress || '준비 중...' }}</p>
         <button @click="exitViewer" class="px-8 py-3 bg-red-500/20 hover:bg-red-500/40 text-red-500 border border-red-500/50 rounded-2xl text-sm font-black transition-all uppercase tracking-widest">
           취소하고 나가기
@@ -27,7 +27,7 @@
           </button>
 
           <div class="min-w-0 overflow-hidden text-center">
-            <p class="text-[8px] md:text-[9px] font-black tracking-[0.3em] md:tracking-[0.5em] uppercase text-blue-500 mb-0.5 truncate">{{ selectedItem?.name || selectedItem?.title }}</p>
+            <p class="text-[8px] md:text-[9px] font-black tracking-[0.3em] md:tracking-[0.5em] uppercase text-theme-accent mb-0.5 truncate">{{ selectedItem?.name || selectedItem?.title }}</p>
             <p class="text-xs md:text-sm font-black viewer-toolbar-title uppercase tracking-tighter truncate">{{ currentEpisode?.name || currentEpisode?.title }}</p>
           </div>
 
@@ -228,7 +228,7 @@
           <template v-if="!isNovelMode">
             <button @click="viewerDefaults.rtl = !viewerDefaults.rtl" :class="viewerDefaults.rtl ? 'viewer-toolbar-active' : ''">RTL</button>
           </template>
-          <span class="text-blue-500 font-black">{{ viewerData.mode === 'scroll' ? scrollProgress + '%' : currentPage + ' / ' + totalPages }}</span>
+          <span class="text-theme-accent font-black">{{ viewerData.mode === 'scroll' ? scrollProgress + '%' : currentPage + ' / ' + totalPages }}</span>
         </div>
 
         <!-- Novel Settings Row -->

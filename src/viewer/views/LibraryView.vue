@@ -11,7 +11,7 @@
       </div>
       <div class="flex items-center gap-4 w-full md:w-auto">
         <div class="relative flex-grow md:w-[400px] group">
-          <input v-model="searchQuery" type="text" placeholder="Search..." class="w-full bg-theme-surface border border-theme-border rounded-[24px] px-8 py-5 pl-16 text-sm outline-none focus:ring-2 focus:ring-theme-accent/20 transition-all text-theme-text">
+          <input v-model="searchQuery" type="text" placeholder="Search..." class="w-full bg-theme-surface border border-theme-border rounded-[24px] px-8 py-5 pl-16 text-sm outline-none focus:ring-2 focus:ring-theme-accent transition-all text-theme-text">
           <svg class="w-6 h-6 absolute left-6 top-1/2 -translate-y-1/2 text-theme-muted group-focus-within:text-theme-accent transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" stroke-width="3"></path></svg>
         </div>
         <button @click="refreshLibrary(true)" :disabled="isSyncing"

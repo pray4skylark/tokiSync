@@ -14,15 +14,15 @@
         </div>
 
         <!-- Smart Action Bar: Integrated Read First / Resume -->
-        <div class="p-6 md:p-8 bg-blue-600/10 border-b border-blue-500/10 flex items-center justify-between">
+        <div class="p-6 md:p-8 bg-theme-accent border-b border-theme-accent flex items-center justify-between">
           <div class="flex-grow">
-            <p v-if="lastReadEpisode" class="text-xs font-bold text-blue-400 uppercase tracking-tight mb-1">Recent Progress</p>
+            <p v-if="lastReadEpisode" class="text-xs font-bold text-theme-accent uppercase tracking-tight mb-1">Recent Progress</p>
             <p class="text-sm font-black truncate max-w-[200px] md:max-w-xs">
               {{ lastReadEpisode ? lastReadEpisode.title : 'No history found' }}
             </p>
           </div>
           <button @click="handleSmartRead" 
-                  class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-2xl font-black text-sm uppercase tracking-tighter transition-all flex items-center shadow-lg shadow-blue-900/20 active:scale-95">
+                  class="bg-theme-accent hover:bg-theme-accent text-white px-6 py-3 rounded-2xl font-black text-sm uppercase tracking-tighter transition-all flex items-center shadow-lg shadow-theme-accent active:scale-95">
             <span v-if="lastReadEpisode">Continue Reading</span>
             <span v-else>Read First Episode</span>
             <svg class="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M13 7l5 5m0 0l-5 5m5-5H6"></path></svg>
@@ -37,12 +37,12 @@
                @click="startReading(ep)"
                class="flex items-center p-4 md:p-5 rounded-[28px] transition-all cursor-pointer group relative overflow-hidden"
                :class="[
-                 currentEpisode?.id === ep.id ? 'bg-blue-600 shadow-xl shadow-blue-900/40' : 'bg-white/5 hover:bg-white/10',
+                 currentEpisode?.id === ep.id ? 'bg-theme-accent shadow-xl shadow-theme-accent' : 'bg-white/5 hover:bg-white/10',
                  ep.isRead ? 'opacity-80' : 'opacity-100'
                ]">
             
             <!-- Read Indicator -->
-            <div v-if="ep.isRead && currentEpisode?.id !== ep.id" class="absolute top-3 right-3 w-1.5 h-1.5 bg-blue-500 rounded-full"></div>
+            <div v-if="ep.isRead && currentEpisode?.id !== ep.id" class="absolute top-3 right-3 w-1.5 h-1.5 bg-theme-accent rounded-full"></div>
 
             <div class="w-20 md:w-28 aspect-video rounded-xl overflow-hidden bg-zinc-900 mr-5 md:mr-7 flex-shrink-0 border border-white/5">
               <img :src="ep.thumbnail" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500">
@@ -50,8 +50,8 @@
             <div class="flex-grow min-w-0">
               <p class="text-sm md:text-base font-black tracking-tight truncate" :class="{'text-white': currentEpisode?.id === ep.id}">{{ ep.title }}</p>
               <div class="flex items-center mt-1 space-x-2">
-                <p class="text-[9px] font-bold uppercase tracking-tight" :class="currentEpisode?.id === ep.id ? 'text-blue-200' : 'text-zinc-500'">{{ ep.date }}</p>
-                <span v-if="ep.isRead" class="text-[9px] font-black uppercase tracking-tighter px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400">READ</span>
+                <p class="text-[9px] font-bold uppercase tracking-tight" :class="currentEpisode?.id === ep.id ? 'text-theme-accent' : 'text-zinc-500'">{{ ep.date }}</p>
+                <span v-if="ep.isRead" class="text-[9px] font-black uppercase tracking-tighter px-1.5 py-0.5 rounded bg-theme-accent text-theme-accent">READ</span>
               </div>
             </div>
           </div>

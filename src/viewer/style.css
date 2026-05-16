@@ -16,32 +16,32 @@
 /* ── 전역 테마: data-theme 속성 기반 ── */
 :root,
 html[data-theme="dark"] {
-  --t-bg: #121212;
-  --t-surface: #1e1e1e;
-  --t-surface-hover: #2a2a2a;
-  --t-border: #333333;
-  --t-text: #ffffff;
-  --t-text-sub: #a0a0a0;
-  --t-text-muted: #757575;
-  --t-accent: #4f9ef8; /* 밝고 쨍한 파란색 */
-  --t-glass-bg: rgba(18, 18, 18, 0.85);
+  --t-bg: #0f1115; /* Core --toki-bg와 동기화 */
+  --t-surface: rgba(26, 29, 36, 0.7); /* Core --toki-surface와 동기화 */
+  --t-surface-hover: rgba(38, 42, 53, 0.85); /* Core --toki-surface-hover와 동기화 */
+  --t-border: rgba(255, 255, 255, 0.08); /* Core --toki-border와 동기화 */
+  --t-text: #f0f2f5; /* Core --toki-text와 동기화 */
+  --t-text-sub: #9ea4b0; /* Core --toki-text-sub와 동기화 */
+  --t-text-muted: #64748b;
+  --t-accent: #3b82f6; /* Core --toki-accent와 동기화 */
+  --t-glass-bg: rgba(15, 17, 21, 0.8);
   --t-glass-border: rgba(255, 255, 255, 0.1);
-  --t-btn-primary-bg: #facc15; /* 스크린샷의 쨍한 노란색 */
+  --t-btn-primary-bg: #facc15;
   --t-btn-primary-text: #111827;
   --t-btn-continue-bg: rgba(255, 255, 255, 0.1);
   --t-btn-continue-text: #ffffff;
   --t-btn-ghost-bg: transparent;
-  --t-btn-ghost-text: #a0a0a0;
-  --t-sort-active-bg: #333333;
+  --t-btn-ghost-text: #9ea4b0;
+  --t-sort-active-bg: #1e293b;
   --t-sort-active-text: #ffffff;
-  --t-sort-inactive: #757575;
-  --t-thumb-bg: #2a2a2a;
-  --t-list-header-bg: rgba(255, 255, 255, 0.06);
+  --t-sort-inactive: #64748b;
+  --t-thumb-bg: #1e293b;
+  --t-list-header-bg: rgba(255, 255, 255, 0.05);
   /* 뷰어 툴바 (다크) */
-  --t-toolbar-bg: rgba(18, 18, 22, 0.9);
-  --t-toolbar-text: #e4e4e7;
-  --t-toolbar-icon: #a1a1aa;
-  --t-toolbar-muted: #52525b;
+  --t-toolbar-bg: rgba(15, 17, 21, 0.9);
+  --t-toolbar-text: #f0f2f5;
+  --t-toolbar-icon: #9ea4b0;
+  --t-toolbar-muted: #475569;
   --t-toolbar-active-text: #ffffff;
 }
 
@@ -193,7 +193,7 @@ body {
 }
 
 .shimmer {
-  background: linear-gradient(90deg, #1c1c1e 25%, #2c2c2e 50%, #1c1c1e 75%);
+  background: linear-gradient(90deg, var(--t-surface) 25%, var(--t-surface-hover) 50%, var(--t-surface) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
 }
@@ -331,18 +331,11 @@ body {
   height: auto;
 }
 
-/* Novel: Theme Colors */
-.theme-light {
-  background-color: #ffffff !important;
-  color: #1a1a1a !important;
-}
-.theme-sepia {
-  background-color: #f4ecd8 !important;
-  color: #5b4636 !important;
-}
+/* Novel: Theme Colors (Consolidated) */
+.theme-light,
+.theme-sepia,
 .theme-dark {
-  background-color: #1a1a1a !important;
-  color: #d4d4d8 !important;
+  transition: background-color 0.4s ease, color 0.4s ease;
 }
 
 /* Novel: Settings Row */

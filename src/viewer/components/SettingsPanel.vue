@@ -11,8 +11,8 @@
           <!-- Header -->
           <div class="px-8 py-6 border-b border-white/5 flex justify-between items-center bg-black/20">
             <div class="flex items-center space-x-3">
-              <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-sm">⚙️</div>
-              <h2 class="text-xl font-black tracking-tight text-theme-text uppercase italic">Settings <span class="text-blue-500 font-normal not-italic ml-2 opacity-50 text-sm tracking-widest uppercase">v1.9.3</span></h2>
+              <div class="w-8 h-8 bg-theme-accent rounded-lg flex items-center justify-center text-sm">⚙️</div>
+              <h2 class="text-xl font-black tracking-tight text-theme-text uppercase italic">Settings <span class="text-theme-accent font-normal not-italic ml-2 opacity-50 text-sm tracking-widest uppercase">v1.9.3</span></h2>
             </div>
             <button @click="showSettings = false" class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 text-theme-muted transition-colors">
               <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path></svg>
@@ -25,7 +25,7 @@
               v-for="tab in tabItems" :key="tab.id"
               @click="activeTab = tab.id"
               class="px-6 py-3 rounded-t-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all flex items-center space-x-2"
-              :class="activeTab === tab.id ? 'bg-theme-surface text-blue-500 border-t border-x border-white/10' : 'text-theme-muted hover:text-theme-text hover:bg-white/5'"
+              :class="activeTab === tab.id ? 'bg-theme-surface text-theme-accent border-t border-x border-white/10' : 'text-theme-muted hover:text-theme-text hover:bg-white/5'"
             >
               <span>{{ tab.icon }}</span>
               <span>{{ tab.label }}</span>
@@ -39,7 +39,7 @@
             <transition name="fade-slide" mode="out-in">
               <div v-if="activeTab === 'cloud'" class="space-y-8 py-2">
                 <div class="space-y-1">
-                  <p class="text-[9px] font-black text-blue-500 uppercase tracking-widest ml-1">GAS Deployment</p>
+                  <p class="text-[9px] font-black text-theme-accent uppercase tracking-widest ml-1">GAS Deployment</p>
                   <p class="text-xs text-theme-muted mb-4 ml-1">Google Apps Script의 ID와 드라이브 폴더 ID를 설정합니다.</p>
                   <div class="space-y-4">
                     <div class="group">
@@ -54,7 +54,7 @@
                       <p class="text-[8px] font-bold text-theme-muted uppercase mb-1.5 ml-1">Drive Folder ID</p>
                       <input v-model="config.folderId" placeholder="Root Folder ID" class="setting-input">
                     </div>
-                    <button @click="saveCloudConfig" class="w-full mt-4 bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-2xl text-[11px] font-black uppercase tracking-[0.3em] shadow-lg shadow-blue-600/20 transition-all flex items-center justify-center space-x-2">
+                    <button @click="saveCloudConfig" class="w-full mt-4 bg-theme-accent hover:brightness-110 text-white py-4 rounded-2xl text-[11px] font-black uppercase tracking-[0.3em] shadow-lg shadow-theme-accent transition-all flex items-center justify-center space-x-2">
                       <span>💾</span> <span>SAVE CONFIGURATION</span>
                     </button>
                   </div>
@@ -64,7 +64,7 @@
               <!-- Tab: Viewer -->
               <div v-else-if="activeTab === 'viewer'" class="space-y-8 py-2">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div class="col-span-1 md:col-span-2 text-[9px] font-black text-blue-500 uppercase tracking-widest ml-1 mb-2">Display & Layout</div>
+                  <div class="col-span-1 md:col-span-2 text-[9px] font-black text-theme-accent uppercase tracking-widest ml-1 mb-2">Display & Layout</div>
                   
                   <label class="setting-toggle">
                     <div class="flex flex-col">
@@ -93,7 +93,7 @@
                   <div class="col-span-1 md:col-span-2 border-t border-white/5 my-2"></div>
                   <div class="col-span-1 md:col-span-2 text-[9px] font-black text-theme-accent uppercase tracking-widest ml-1 mb-2">v1.9.3 Turbo Engine</div>
 
-                  <label class="setting-toggle border-theme-accent/20 hover:border-theme-accent/50">
+                  <label class="setting-toggle border-theme-accent hover:border-theme-accent">
                     <div class="flex flex-col">
                       <span class="text-[11px] font-black text-theme-accent uppercase tracking-tighter">Auto-Crop Margin</span>
                       <span class="text-[9px] text-theme-muted uppercase opacity-70">여백 자동 감지 및 제거</span>
@@ -101,7 +101,7 @@
                     <input type="checkbox" v-model="viewerDefaults.autoCrop" class="setting-checkbox accent-theme-accent">
                   </label>
 
-                  <label class="setting-toggle border-theme-accent/20 hover:border-theme-accent/50">
+                  <label class="setting-toggle border-theme-accent hover:border-theme-accent">
                     <div class="flex flex-col">
                       <span class="text-[11px] font-black text-theme-accent uppercase tracking-tighter">Virtual Scroll</span>
                       <span class="text-[9px] text-theme-muted uppercase opacity-70">대용량 이미지 렌더링 최적화</span>
@@ -109,7 +109,7 @@
                     <input type="checkbox" v-model="viewerDefaults.virtualScroll" class="setting-checkbox accent-theme-accent">
                   </label>
 
-                  <label class="setting-toggle border-theme-accent/20 hover:border-theme-accent/50">
+                  <label class="setting-toggle border-theme-accent hover:border-theme-accent">
                     <div class="flex flex-col">
                       <span class="text-[11px] font-black text-theme-accent uppercase tracking-tighter">Background Preload</span>
                       <span class="text-[9px] text-theme-muted uppercase opacity-70">다음 화 백그라운드 사전 다운로드</span>
@@ -118,12 +118,12 @@
                   </label>
 
                   <!-- [v1.7.4] Download Threads Selection -->
-                  <div class="col-span-1 md:col-span-2 p-5 rounded-[24px] bg-black/20 border border-theme-accent/20 flex items-center justify-between">
+                  <div class="col-span-1 md:col-span-2 p-5 rounded-[24px] bg-black/20 border border-theme-accent flex items-center justify-between">
                     <div class="flex flex-col">
                       <span class="text-[11px] font-black text-theme-accent uppercase tracking-tighter">Download Threads</span>
                       <span class="text-[9px] text-theme-muted uppercase opacity-70">동시 다운로드 스레드 (4G: 2 추천)</span>
                     </div>
-                    <select v-model.number="viewerDefaults.downloadThreads" class="bg-black/60 border border-white/10 rounded-xl px-4 py-2 text-[10px] font-black text-theme-accent outline-none focus:border-theme-accent/50 transition-all uppercase italic tracking-widest">
+                    <select v-model.number="viewerDefaults.downloadThreads" class="bg-black/60 border border-white/10 rounded-xl px-4 py-2 text-[10px] font-black text-theme-accent outline-none focus:border-theme-accent transition-all uppercase italic tracking-widest">
                       <option :value="1">1 Thread</option>
                       <option :value="2">2 Threads</option>
                       <option :value="3">3 Threads</option>
@@ -131,12 +131,12 @@
                   </div>
 
                   <!-- [v2.1] Viewer Engine Version Selection -->
-                  <div class="col-span-1 md:col-span-2 p-5 rounded-[24px] bg-blue-600/10 border border-blue-500/30 flex items-center justify-between">
+                  <div class="col-span-1 md:col-span-2 p-5 rounded-[24px] bg-theme-accent border border-theme-accent flex items-center justify-between">
                     <div class="flex flex-col">
-                      <span class="text-[11px] font-black text-blue-500 uppercase tracking-tighter">Viewer Engine</span>
+                      <span class="text-[11px] font-black text-theme-accent uppercase tracking-tighter">Viewer Engine</span>
                       <span class="text-[9px] text-theme-muted uppercase opacity-70">V1: Legacy / V2: Progress Tracking (BETA)</span>
                     </div>
-                    <select v-model.number="viewerDefaults.viewerVersion" class="bg-black/60 border border-white/10 rounded-xl px-4 py-2 text-[10px] font-black text-blue-500 outline-none focus:border-blue-500/50 transition-all uppercase italic tracking-widest">
+                    <select v-model.number="viewerDefaults.viewerVersion" class="bg-black/60 border border-white/10 rounded-xl px-4 py-2 text-[10px] font-black text-theme-accent outline-none focus:border-theme-accent transition-all uppercase italic tracking-widest">
                       <option :value="1">V1 Standard</option>
                       <option :value="2">V2 Progress</option>
                     </select>
@@ -149,14 +149,14 @@
               <div v-else-if="activeTab === 'data'" class="space-y-8 py-2">
                 <div class="space-y-4">
                   <div class="text-[9px] font-black text-red-500 uppercase tracking-widest ml-1 mb-2">Maintenance</div>
-                  <button @click="forceCloudSync" class="w-full bg-theme-surface-hover border border-white/5 hover:border-blue-500/30 p-6 rounded-[24px] text-left transition-all flex items-center justify-between group">
+                  <button @click="forceCloudSync" class="w-full bg-theme-surface-hover border border-white/5 hover:border-theme-accent p-6 rounded-[24px] text-left transition-all flex items-center justify-between group">
                     <div class="flex flex-col">
                       <span class="text-sm font-black text-theme-text uppercase">Force Cloud Sync</span>
                       <span class="text-[10px] text-theme-muted uppercase">강제 데이터 백업 및 동기화</span>
                     </div>
                     <span class="text-xl group-hover:translate-x-1 transition-transform">🔄</span>
                   </button>
-                  <button @click="reloadApp" class="w-full bg-theme-surface-hover border border-white/5 hover:border-theme-accent/30 p-6 rounded-[24px] text-left transition-all flex items-center justify-between group">
+                  <button @click="reloadApp" class="w-full bg-theme-surface-hover border border-white/5 hover:border-theme-accent p-6 rounded-[24px] text-left transition-all flex items-center justify-between group">
                     <div class="flex flex-col">
                       <span class="text-sm font-black text-theme-text uppercase">Relod Application</span>
                       <span class="text-[10px] text-theme-muted uppercase">앱 강제 새로고침</span>
@@ -195,15 +195,15 @@ const tabItems = [
 
 <style scoped>
 .setting-input {
-  @apply w-full bg-black/40 border border-white/5 p-4 rounded-2xl text-sm outline-none focus:ring-1 focus:ring-blue-500/50 focus:border-blue-500/30 transition-all text-white placeholder:text-zinc-600;
+  @apply w-full bg-black/40 border border-white/5 p-4 rounded-2xl text-sm outline-none focus:ring-1 focus:ring-theme-accent focus:border-theme-accent transition-all text-white placeholder:text-zinc-600;
 }
 
 .setting-toggle {
-  @apply flex items-center justify-between p-5 rounded-[24px] bg-black/20 border border-white/5 hover:border-blue-500/30 transition-all cursor-pointer;
+  @apply flex items-center justify-between p-5 rounded-[24px] bg-black/20 border border-white/5 hover:border-theme-accent transition-all cursor-pointer;
 }
 
 .setting-checkbox {
-  @apply w-5 h-5 rounded-lg accent-blue-600 cursor-pointer;
+  @apply w-5 h-5 rounded-lg accent-theme-accent cursor-pointer;
 }
 
 .modal-fade-enter-active, .modal-fade-leave-active {

@@ -5,7 +5,7 @@
     <!-- Download Progress Overlay -->
     <transition name="fade">
       <div v-if="isDownloading" class="fixed inset-0 z-[200] bg-black/90 flex flex-col items-center justify-center text-white">
-        <div class="w-16 h-16 border-4 border-zinc-800 border-t-blue-500 rounded-full animate-spin mb-8"></div>
+        <div class="w-16 h-16 border-4 border-zinc-800 border-t-theme-accent rounded-full animate-spin mb-8"></div>
         <p class="text-sm font-bold text-zinc-400 tracking-wider uppercase mb-8">{{ downloadProgress || '준비 중...' }}</p>
         <button @click="exitViewer" class="px-8 py-3 bg-red-500/20 hover:bg-red-500/40 text-red-500 border border-red-500/50 rounded-2xl text-sm font-black transition-all uppercase tracking-widest">
           취소하고 나가기
@@ -17,8 +17,8 @@
     <transition name="fade">
       <div v-if="isRestoring && !isDownloading" class="fixed inset-0 z-[150] bg-black/40 backdrop-blur-2xl flex flex-col items-center justify-center text-white">
         <div class="flex flex-col items-center scale-110">
-          <div class="w-10 h-10 border-[3px] border-white/5 border-t-blue-500 rounded-full animate-spin mb-5"></div>
-          <p class="text-[9px] font-black tracking-[0.5em] uppercase text-blue-500/80 animate-pulse">Synchronizing Position</p>
+          <div class="w-10 h-10 border-[3px] border-white/5 border-t-theme-accent rounded-full animate-spin mb-5"></div>
+          <p class="text-[9px] font-black tracking-[0.5em] uppercase text-theme-accent animate-pulse">Synchronizing Position</p>
         </div>
       </div>
     </transition>
@@ -35,7 +35,7 @@
             <svg class="w-4 h-4 md:w-5 md:h-5 viewer-toolbar-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M15 19l-7-7 7-7"></path></svg>
           </button>
           <div class="min-w-0 text-center">
-            <p class="text-[8px] md:text-[9px] font-black tracking-[0.3em] uppercase text-blue-500 mb-0.5 truncate">{{ selectedItem?.title }}</p>
+            <p class="text-[8px] md:text-[9px] font-black tracking-[0.3em] uppercase text-theme-accent mb-0.5 truncate">{{ selectedItem?.title }}</p>
             <p class="text-xs md:text-sm font-black uppercase tracking-tighter truncate">{{ currentEpisode?.title }} <span class="text-[10px] opacity-30 italic">v2.3</span></p>
           </div>
           <button @click.stop="goToNextEpisode" :disabled="!hasNextEpisode" class="flex-shrink-0 p-2 hover:bg-white/10 rounded-full disabled:opacity-20">
@@ -128,13 +128,13 @@
       <div v-if="showViewerControls" class="fixed bottom-4 inset-x-4 md:bottom-8 md:inset-x-8 z-[100] bg-zinc-900/40 backdrop-blur-xl border border-white/10 p-5 md:p-8 rounded-[32px] md:rounded-[48px] flex flex-col space-y-4 shadow-2xl viewer-toolbar reader-footer-safe">
         <div class="flex items-center space-x-10">
           <button @click="handlePrev" class="viewer-toolbar-muted hover:text-white transition-colors">◀</button>
-          <input type="range" class="flex-grow accent-blue-500 h-1 rounded-full bg-zinc-800" v-model.number="currentPage" min="1" :max="totalPages">
+          <input type="range" class="flex-grow accent-theme-accent h-1 rounded-full bg-zinc-800" v-model.number="currentPage" min="1" :max="totalPages">
           <button @click="handleNext" class="viewer-toolbar-muted hover:text-white transition-colors">▶</button>
         </div>
         <div class="flex justify-center gap-10 text-[10px] font-black uppercase tracking-[0.2em] viewer-toolbar-muted">
-          <button v-if="!isNovelMode" @click="viewerDefaults.spread = !viewerDefaults.spread" :class="viewerDefaults.spread ? 'text-blue-500' : ''">Spread</button>
-          <button @click="setViewerMode(viewerData.mode === 'scroll' ? 'page' : 'scroll')" :class="viewerData.mode === 'scroll' ? 'text-blue-500' : ''">Scroll</button>
-          <span class="text-blue-500">{{ viewerData.mode === 'scroll' ? scrollProgress + '%' : currentPage + ' / ' + totalPages }}</span>
+          <button v-if="!isNovelMode" @click="viewerDefaults.spread = !viewerDefaults.spread" :class="viewerDefaults.spread ? 'text-theme-accent' : ''">Spread</button>
+          <button @click="setViewerMode(viewerData.mode === 'scroll' ? 'page' : 'scroll')" :class="viewerData.mode === 'scroll' ? 'text-theme-accent' : ''">Scroll</button>
+          <span class="text-theme-accent">{{ viewerData.mode === 'scroll' ? scrollProgress + '%' : currentPage + ' / ' + totalPages }}</span>
         </div>
 
         <!-- Novel Settings Row -->
@@ -142,13 +142,13 @@
           <!-- Row 1: 테마 색상 + 폰트 크기 -->
           <div class="flex items-center justify-between text-white">
             <div class="flex space-x-3">
-              <button class="w-8 h-8 rounded-full border-2 transition-all bg-white border-zinc-200" :class="{ 'ring-2 ring-blue-500 border-transparent': novelSettings.theme === 'light' }" @click.stop="setNovelTheme('light')" title="Light"></button>
-              <button class="w-8 h-8 rounded-full border-2 transition-all bg-[#f4ecd8] border-[#d4c5b0]" :class="{ 'ring-2 ring-blue-500 border-transparent': novelSettings.theme === 'sepia' }" @click.stop="setNovelTheme('sepia')" title="Sepia"></button>
-              <button class="w-8 h-8 rounded-full border-2 transition-all bg-black border-zinc-700"  :class="{ 'ring-2 ring-blue-500 border-transparent': novelSettings.theme === 'dark' }"  @click.stop="setNovelTheme('dark')"  title="Dark"></button>
+              <button class="w-8 h-8 rounded-full border-2 transition-all bg-white border-zinc-200" :class="{ 'ring-2 ring-theme-accent border-transparent': novelSettings.theme === 'light' }" @click.stop="setNovelTheme('light')" title="Light"></button>
+              <button class="w-8 h-8 rounded-full border-2 transition-all bg-[#f4ecd8] border-[#d4c5b0]" :class="{ 'ring-2 ring-theme-accent border-transparent': novelSettings.theme === 'sepia' }" @click.stop="setNovelTheme('sepia')" title="Sepia"></button>
+              <button class="w-8 h-8 rounded-full border-2 transition-all bg-black border-zinc-700"  :class="{ 'ring-2 ring-theme-accent border-transparent': novelSettings.theme === 'dark' }"  @click.stop="setNovelTheme('dark')"  title="Dark"></button>
             </div>
             <div class="flex items-center space-x-4 bg-white/5 rounded-2xl px-4 py-1 border border-white/5">
               <button class="text-lg font-bold text-zinc-400 hover:text-white transition-colors px-2" @click.stop="adjustFontSize(-2)">A-</button>
-              <span class="text-sm font-black w-6 text-center text-blue-400">{{ novelSettings.fontSize }}</span>
+              <span class="text-sm font-black w-6 text-center text-theme-accent">{{ novelSettings.fontSize }}</span>
               <button class="text-lg font-bold text-zinc-400 hover:text-white transition-colors px-2" @click.stop="adjustFontSize(2)">A+</button>
             </div>
           </div>
@@ -158,10 +158,10 @@
               <span class="text-[10px] font-black uppercase tracking-widest text-zinc-500">줄 간격</span>
               <input type="range" min="1.4" max="3.0" step="0.1" :value="novelSettings.lineHeight"
                      @input="setLineHeight(parseFloat($event.target.value))"
-                     class="flex-grow accent-blue-500 h-1 rounded-full bg-zinc-800 appearance-none cursor-pointer">
+                     class="flex-grow accent-theme-accent h-1 rounded-full bg-zinc-800 appearance-none cursor-pointer">
             </div>
             <button class="p-2 rounded-xl transition-all border"
-                    :class="novelSettings.spread ? 'bg-blue-500/20 border-blue-500/50 text-blue-400' : 'bg-white/5 border-transparent text-zinc-500 hover:text-white hover:bg-white/10'" 
+                    :class="novelSettings.spread ? 'bg-theme-accent border-theme-accent text-theme-accent' : 'bg-white/5 border-transparent text-zinc-500 hover:text-white hover:bg-white/10'" 
                     @click.stop="toggleNovelSpread" title="두 페이지 보기">
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
             </button>
