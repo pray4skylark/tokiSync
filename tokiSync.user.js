@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.9.1
+// @version      1.9.3
 // @description  Toki series sites -> Google Drive syncing tool (Bundled)
 // @author       pray4skylark
 // @updateURL    https://pray4skylark.github.io/tokiSync/tokiSync.user.js
@@ -146,7 +146,7 @@ function isAudioRunning() {
 /* harmony export */   r9: function() { return /* binding */ uploadDirect; }
 /* harmony export */ });
 /* harmony import */ var _config_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(899);
-/* harmony import */ var _ui_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(963);
+/* harmony import */ var _ui_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(989);
 /**
  * Direct Drive Access Module
  * Bypasses GAS relay for high-speed uploads using GM_xmlhttpRequest
@@ -1289,7 +1289,7 @@ class GenericParser extends BaseParser {
 /* harmony export */ });
 /* harmony import */ var _config_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(899);
 /* harmony import */ var _network_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(391);
-/* harmony import */ var _ui_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(963);
+/* harmony import */ var _ui_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(989);
 
 
 
@@ -2310,7 +2310,7 @@ function isConfigValid() {
 /* harmony export */ });
 /* unused harmony export waitForContent */
 /* harmony import */ var _gas_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(488);
-/* harmony import */ var _ui_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(963);
+/* harmony import */ var _ui_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(989);
 
 
 
@@ -2870,7 +2870,7 @@ async function fetchBlobWithXHR(url) {
 /* harmony export */   d: function() { return /* binding */ extractEpisodeData; }
 /* harmony export */ });
 /* harmony import */ var _utils_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(924);
-/* harmony import */ var _ui_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(963);
+/* harmony import */ var _ui_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(989);
 /* harmony import */ var _novel_decryptor_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(602);
 
 
@@ -2970,26 +2970,86 @@ async function extractEpisodeData(targetDoc, parser, siteInfo, isStaticDoc = fal
 
 /***/ }),
 
-/***/ 963:
+/***/ 969:
 /***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
 
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
-/* harmony export */   AC: function() { return /* binding */ TreeRuleEditor; },
-/* harmony export */   LogBox: function() { return /* binding */ LogBox; },
-/* harmony export */   fo: function() { return /* binding */ MenuModal; },
-/* harmony export */   hV: function() { return /* binding */ markDownloadedItems; },
-/* harmony export */   ze: function() { return /* binding */ Notifier; }
+/* harmony export */   O: function() { return /* binding */ ParserFactory; }
 /* harmony export */ });
-/* harmony import */ var _anti_sleep_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(209);
-/* harmony import */ var _config_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(899);
-/* harmony import */ var _parsers_ParserFactory_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(969);
-/* harmony import */ var _parsers_RuleManager_js__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(543);
-/* harmony import */ var _parsers_GenericParser_js__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(443);
-/* harmony import */ var _extractor_js__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(929);
+/* harmony import */ var _GenericParser_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(443);
+/* harmony import */ var _detector_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(419);
+
+
+
+/**
+ * ParserFactory
+ * Creates and provides the appropriate parser for the current site.
+ */
+class ParserFactory {
+    static #instance = null;
+
+    /**
+     * Get the appropriate parser for the current site (Singleton)
+     * @returns {Promise<BaseParser|null>}
+     */
+    static async getParser() {
+        if (this.#instance) return this.#instance;
+
+        const siteInfo = await (0,_detector_js__WEBPACK_IMPORTED_MODULE_1__/* .detectSite */ .T)();
+        if (!siteInfo) {
+            console.error('[ParserFactory] Failed to detect site');
+            alert("TokiSync 파서 에러: 매칭되는 파싱 룰이 없습니다.\n\n해당 사이트를 지원하려면 설정에서 커스텀 파싱 룰(JSON)을 등록해야 합니다.\n(자세한 방법은 Github의 rules.sample.json을 참조하세요)");
+            return null;
+        }
+
+        const { site, protocolDomain, matchedRule } = siteInfo;
+
+        // Dynamic Generic Parser
+        if (site === 'generic' && matchedRule) {
+            this.#instance = new _GenericParser_js__WEBPACK_IMPORTED_MODULE_0__/* .GenericParser */ .b(protocolDomain, matchedRule);
+            return this.#instance;
+        }
+
+        return null;
+    }
+}
+
+
+/***/ }),
+
+/***/ 989:
+/***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
+
+
+// EXPORTS
+__webpack_require__.d(__webpack_exports__, {
+  LogBox: function() { return /* binding */ LogBox; },
+  fo: function() { return /* binding */ MenuModal; },
+  ze: function() { return /* binding */ Notifier; },
+  AC: function() { return /* binding */ TreeRuleEditor; },
+  hV: function() { return /* binding */ markDownloadedItems; }
+});
+
+// EXTERNAL MODULE: ./src/core/anti_sleep.js
+var anti_sleep = __webpack_require__(209);
+// EXTERNAL MODULE: ./src/core/config.js
+var core_config = __webpack_require__(899);
+// EXTERNAL MODULE: ./src/core/parsers/ParserFactory.js
+var ParserFactory = __webpack_require__(969);
+// EXTERNAL MODULE: ./src/core/parsers/RuleManager.js
+var RuleManager = __webpack_require__(543);
+// EXTERNAL MODULE: ./src/core/parsers/GenericParser.js + 1 modules
+var GenericParser = __webpack_require__(443);
+// EXTERNAL MODULE: ./src/core/extractor.js
+var extractor = __webpack_require__(929);
+;// ./src/core/ui.css
+var ui_namespaceObject = "@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');\n\n:root {\n    --toki-primary: #2563eb;\n    --toki-primary-dark: #1d4ed8;\n    --toki-accent: #facc15;\n    --toki-bg: rgba(248, 250, 252, 0.9);\n    --toki-text: #1e293b;\n    --toki-text-muted: #64748b;\n    --toki-border: rgba(255, 255, 255, 0.6);\n    --toki-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);\n    --toki-font: 'Inter', -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif;\n}\n\n/* LogBox Styles */\n#toki-logbox {\n    position: fixed;\n    bottom: 100px;\n    right: 30px;\n    width: 480px;\n    height: 350px;\n    background: var(--toki-bg);\n    color: var(--toki-text);\n    font-family: 'Cascadia Code', Consolas, monospace;\n    font-size: 12px;\n    border: 1px solid var(--toki-border);\n    border-radius: 16px;\n    z-index: 9999;\n    display: none;\n    flex-direction: column;\n    box-shadow: var(--toki-shadow);\n    backdrop-filter: blur(20px);\n    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);\n}\n\n#toki-logbox-header {\n    padding: 12px 16px;\n    background: rgba(255, 255, 255, 0.4);\n    border-bottom: 1px solid rgba(0, 0, 0, 0.05);\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    border-top-left-radius: 16px;\n    border-top-right-radius: 16px;\n    cursor: move;\n}\n\n#toki-logbox-title {\n    font-weight: 700;\n    font-size: 13px;\n    letter-spacing: -0.01em;\n}\n\n#toki-logbox-controls span {\n    cursor: pointer;\n    margin-left: 12px;\n    color: var(--toki-text-muted);\n    font-size: 14px;\n    transition: transform 0.2s, color 0.2s;\n    display: inline-block;\n}\n\n#toki-logbox-controls span:hover {\n    color: var(--toki-primary);\n    transform: scale(1.15);\n}\n\n#toki-logbox-content {\n    flex: 1;\n    overflow-y: auto;\n    padding: 12px;\n    margin: 0;\n    list-style: none;\n}\n\n#toki-logbox-content li {\n    margin-bottom: 4px;\n    word-break: break-all;\n    padding: 4px 8px;\n    border-radius: 6px;\n    line-height: 1.4;\n}\n\n#toki-logbox-content li.critical {\n    color: #be123c;\n    font-weight: 700;\n    background: rgba(225, 29, 72, 0.1);\n    border-left: 3px solid #e11d48;\n}\n\n#toki-logbox-content li.error { color: #e11d48; }\n#toki-logbox-content li.warn { color: #d97706; }\n#toki-logbox-content li.success { color: #059669; font-weight: 600; }\n\n/* Modal Styles */\n.toki-modal-overlay {\n    position: fixed;\n    top: 0;\n    left: 0;\n    width: 100%;\n    height: 100%;\n    background: rgba(15, 23, 42, 0.2);\n    backdrop-filter: blur(12px);\n    z-index: 9999;\n    display: flex;\n    justify-content: center;\n    align-items: center;\n    opacity: 0;\n    animation: tokiFadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;\n}\n\n.toki-modal {\n    width: 520px;\n    max-width: 95%;\n    background: var(--toki-bg);\n    border: 1px solid var(--toki-border);\n    border-radius: 28px;\n    box-shadow: var(--toki-shadow);\n    overflow: hidden;\n    display: flex;\n    flex-direction: column;\n    transform: translateY(30px) scale(0.95);\n    animation: tokiSlideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;\n    backdrop-filter: blur(30px);\n    color: var(--toki-text);\n    font-family: var(--toki-font);\n}\n\n.toki-modal-header {\n    padding: 24px 32px;\n    background: rgba(255, 255, 255, 0.4);\n    border-bottom: 1px solid rgba(0, 0, 0, 0.05);\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n}\n\n.toki-modal-title {\n    font-size: 24px;\n    font-weight: 800;\n    color: #0f172a;\n    display: flex;\n    align-items: center;\n    gap: 12px;\n    letter-spacing: -0.03em;\n}\n\n.toki-modal-close {\n    background: rgba(0, 0, 0, 0.05);\n    border: none;\n    color: var(--toki-text-muted);\n    width: 36px;\n    height: 36px;\n    border-radius: 50%;\n    cursor: pointer;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);\n    font-size: 20px;\n}\n\n.toki-modal-close:hover {\n    background: #ef4444;\n    color: #fff;\n    transform: rotate(90deg);\n}\n\n.toki-btn-ghost {\n    background: rgba(0, 0, 0, 0.05);\n    border: none;\n    color: var(--toki-text-muted);\n    padding: 6px 14px;\n    border-radius: 12px;\n    cursor: pointer;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    transition: all 0.2s;\n    font-size: 13px;\n    font-weight: 600;\n    gap: 6px;\n}\n\n.toki-btn-ghost:hover {\n    background: rgba(0, 0, 0, 0.08);\n    color: var(--toki-text);\n}\n\n/* Tabs */\n.toki-tabs {\n    display: flex;\n    background: rgba(255, 255, 255, 0.3);\n    padding: 8px;\n    gap: 6px;\n    border-bottom: 1px solid rgba(0, 0, 0, 0.05);\n}\n\n.toki-tab-btn {\n    flex: 1;\n    padding: 12px;\n    background: none;\n    border: none;\n    color: var(--toki-text-muted);\n    font-size: 14px;\n    font-weight: 700;\n    cursor: pointer;\n    transition: all 0.3s;\n    border-radius: 14px;\n    display: flex;\n    justify-content: center;\n    align-items: center;\n    gap: 8px;\n}\n\n.toki-tab-btn:hover {\n    color: var(--toki-text);\n    background: rgba(255, 255, 255, 0.6);\n}\n\n.toki-tab-btn.active {\n    background: #fff;\n    color: var(--toki-primary);\n    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);\n}\n\n.toki-tab-content {\n    display: none;\n    padding: 32px;\n    animation: tokiTabFadeIn 0.4s ease-out;\n}\n\n.toki-tab-content.active { display: block; }\n\n/* Components */\n.toki-section-title {\n    font-size: 11px;\n    font-weight: 800;\n    color: var(--toki-primary);\n    text-transform: uppercase;\n    letter-spacing: 0.1em;\n    margin: 24px 0 12px 4px;\n    opacity: 0.8;\n}\n\n.toki-control-group {\n    margin-bottom: 20px;\n    position: relative;\n}\n\n.toki-label {\n    display: block;\n    font-size: 13px;\n    font-weight: 700;\n    color: var(--toki-text-muted);\n    margin-bottom: 8px;\n    margin-left: 4px;\n}\n\n.toki-input, .toki-select {\n    width: 100%;\n    padding: 14px 18px;\n    background: rgba(255, 255, 255, 0.8);\n    border: 1px solid rgba(0, 0, 0, 0.08);\n    border-radius: 16px;\n    color: var(--toki-text) !important;\n    font-size: 15px;\n    font-weight: 600;\n    appearance: none;\n    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);\n    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);\n}\n\n.toki-input:hover, .toki-select:hover {\n    border-color: var(--toki-primary);\n    background-color: #fff;\n    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.08);\n}\n\n.toki-input:focus, .toki-select:focus {\n    outline: none;\n    border-color: var(--toki-primary);\n    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);\n    background-color: #fff;\n}\n\n.toki-select {\n    cursor: pointer;\n    background-image: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2364748b'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E\");\n    background-repeat: no-repeat;\n    background-position: right 16px center;\n    background-size: 16px;\n}\n\n.toki-btn-action {\n    width: 100%;\n    height: 56px;\n    background: var(--toki-primary);\n    color: #fff !important;\n    border: none;\n    border-radius: 18px;\n    font-size: 16px;\n    font-weight: 700;\n    cursor: pointer;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    gap: 12px;\n    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);\n    box-shadow: 0 8px 15px rgba(37, 99, 235, 0.2);\n}\n\n.toki-btn-action:hover {\n    transform: translateY(-3px);\n    box-shadow: 0 12px 20px rgba(37, 99, 235, 0.35);\n    filter: brightness(1.05);\n}\n\n.toki-btn-secondary {\n    background: rgba(255, 255, 255, 0.8);\n    color: #475569 !important;\n    border: 1px solid rgba(0, 0, 0, 0.05);\n    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);\n}\n\n.toki-btn-secondary:hover {\n    background: #fff;\n    color: var(--toki-text) !important;\n}\n\n/* Status & Indicators */\n.toki-status-dot {\n    width: 8px;\n    height: 8px;\n    border-radius: 50%;\n    display: inline-block;\n    margin-right: 6px;\n}\n\n.toki-status-online {\n    background: #10b981;\n    box-shadow: 0 0 8px #10b981;\n}\n\n.toki-downloaded {\n    background: rgba(16, 185, 129, 0.08) !important;\n    border-left: 4px solid #10b981 !important;\n    opacity: 0.75;\n    transition: all 0.3s ease;\n}\n\n.toki-downloaded:hover {\n    opacity: 1;\n    background: rgba(16, 185, 129, 0.15) !important;\n}\n\n/* FAB */\n.toki-fab {\n    position: fixed;\n    bottom: 30px;\n    right: 30px;\n    width: 64px;\n    height: 64px;\n    background: linear-gradient(135deg, #2563eb, #0ea5e9);\n    border-radius: 20px;\n    box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.4);\n    display: flex;\n    justify-content: center;\n    align-items: center;\n    cursor: pointer;\n    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);\n    z-index: 9998;\n}\n\n.toki-fab:hover {\n    transform: translateY(-5px) rotate(5deg);\n    box-shadow: 0 20px 25px -5px rgba(37, 99, 235, 0.5);\n}\n\n.toki-fab svg {\n    width: 28px;\n    height: 28px;\n    fill: #fff;\n}\n\n/* Tree Editor */\n.toki-tree-view {\n    flex: 1.5;\n    overflow-y: auto;\n    background: rgba(255, 255, 255, 0.5);\n    border-radius: 16px;\n    padding: 20px;\n    border: 1px solid rgba(0, 0, 0, 0.05);\n    font-family: monospace;\n    font-size: 13px;\n}\n\n.toki-tree-node {\n    margin-left: 20px;\n    position: relative;\n    border-left: 1px dashed rgba(0, 0, 0, 0.1);\n    padding-left: 12px;\n}\n\n.toki-tree-item {\n    display: flex;\n    align-items: center;\n    gap: 8px;\n    padding: 6px 10px;\n    border-radius: 8px;\n    transition: all 0.2s;\n}\n\n.toki-tree-item:hover {\n    background: rgba(37, 99, 235, 0.05);\n}\n\n.toki-tree-key {\n    color: #2563eb;\n    font-weight: 700;\n    cursor: pointer;\n    min-width: 90px;\n}\n\n.toki-tree-val {\n    color: #1e293b;\n    background: transparent;\n    border: none;\n    border-bottom: 1px solid transparent;\n    width: 100%;\n}\n\n.toki-tree-val:focus {\n    border-bottom-color: #2563eb;\n    outline: none;\n    background: rgba(37, 99, 235, 0.05);\n}\n\n/* Animations */\n@keyframes tokiFadeIn {\n    from { opacity: 0; }\n    to { opacity: 1; }\n}\n\n@keyframes tokiTabFadeIn {\n    from { opacity: 0; transform: translateX(10px); }\n    to { opacity: 1; transform: translateX(0); }\n}\n\n@keyframes tokiSlideUp {\n    from { opacity: 0; transform: translateY(30px) scale(0.95); }\n    to { opacity: 1; transform: translateY(0) scale(1); }\n}\n";
+;// ./src/core/ui.js
 /**
  * UI Module for TokiSync
  * Handles Logging Overlay and OS Notifications
  */
+
 
 
 
@@ -3017,7 +3077,8 @@ class LogBox {
         if (!document.getElementById(styleId)) {
             const style = document.createElement('style');
             style.id = styleId;
-            style.innerHTML = `@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');:root{--toki-primary:#2563eb;--toki-primary-dark:#1d4ed8;--toki-accent:#facc15;--toki-bg:rgba(248,250,252,.9);--toki-text:#1e293b;--toki-text-muted:#64748b;--toki-border:rgba(255,255,255,.6);--toki-shadow:0 25px 50px -12px rgba(0,0,0,.25);--toki-font:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}#toki-logbox{position:fixed;bottom:100px;right:30px;width:480px;height:350px;background:var(--toki-bg);color:var(--toki-text);font-family:'Cascadia Code',Consolas,monospace;font-size:12px;border:1px solid var(--toki-border);border-radius:16px;z-index:9999;display:none;flex-direction:column;box-shadow:var(--toki-shadow);backdrop-filter:blur(20px);transition:all .3s cubic-bezier(.4,0,.2,1)}#toki-logbox-header{padding:12px 16px;background:rgba(255,255,255,.4);border-bottom:1px solid rgba(0,0,0,.05);display:flex;justify-content:space-between;align-items:center;border-top-left-radius:16px;border-top-right-radius:16px;cursor:move}#toki-logbox-title{font-weight:700;font-size:13px;letter-spacing:-.01em}#toki-logbox-controls span{cursor:pointer;margin-left:12px;color:var(--toki-text-muted);font-size:14px;transition:transform .2s,color .2s;display:inline-block}#toki-logbox-controls span:hover{color:var(--toki-primary);transform:scale(1.15)}#toki-logbox-content{flex:1;overflow-y:auto;padding:12px;margin:0;list-style:none}#toki-logbox-content li{margin-bottom:4px;word-break:break-all;padding:4px 8px;border-radius:6px;line-height:1.4}#toki-logbox-content li.critical{color:#be123c;font-weight:700;background:rgba(225,29,72,.1);border-left:3px solid #e11d48}#toki-logbox-content li.error{color:#e11d48}#toki-logbox-content li.warn{color:#d97706}#toki-logbox-content li.success{color:#059669;font-weight:600}.toki-modal-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(15,23,42,.2);backdrop-filter:blur(12px);z-index:9999;display:flex;justify-content:center;align-items:center;opacity:0;animation:tokiFadeIn .3s cubic-bezier(.4,0,.2,1) forwards}.toki-modal{width:520px;max-width:95%;background:var(--toki-bg);border:1px solid var(--toki-border);border-radius:28px;box-shadow:var(--toki-shadow);overflow:hidden;display:flex;flex-direction:column;transform:translateY(30px) scale(.95);animation:tokiSlideUp .4s cubic-bezier(.16,1,.3,1) forwards;backdrop-filter:blur(30px);color:var(--toki-text);font-family:var(--toki-font)}.toki-modal-header{padding:24px 32px;background:rgba(255,255,255,.4);border-bottom:1px solid rgba(0,0,0,.05);display:flex;justify-content:space-between;align-items:center}.toki-modal-title{font-size:24px;font-weight:800;color:#0f172a;display:flex;align-items:center;gap:12px;letter-spacing:-.03em}.toki-modal-close{background:rgba(0,0,0,.05);border:none;color:var(--toki-text-muted);width:36px;height:36px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .3s cubic-bezier(.4,0,.2,1);font-size:20px}.toki-modal-close:hover{background:#ef4444;color:#fff;transform:rotate(90deg)}.toki-btn-ghost{background:rgba(0,0,0,.05);border:none;color:var(--toki-text-muted);padding:6px 14px;border-radius:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;font-size:13px;font-weight:600;gap:6px}.toki-btn-ghost:hover{background:rgba(0,0,0,.08);color:var(--toki-text)}.toki-modal-body{padding:0;max-height:75vh;overflow-y:auto}.toki-tabs{display:flex;background:rgba(255,255,255,.3);padding:8px;gap:6px;border-bottom:1px solid rgba(0,0,0,.05)}.toki-tab-btn{flex:1;padding:12px;background:none;border:none;color:var(--toki-text-muted);font-size:14px;font-weight:700;cursor:pointer;transition:all .3s;border-radius:14px;display:flex;justify-content:center;align-items:center;gap:8px}.toki-tab-btn:hover{color:var(--toki-text);background:rgba(255,255,255,.6)}.toki-tab-btn.active{background:#fff;color:var(--toki-primary);box-shadow:0 4px 12px rgba(37,99,235,.15)}.toki-tab-content{display:none;padding:32px;animation:tokiTabFadeIn .4s ease-out}.toki-tab-content.active{display:block}.toki-section-title{font-size:11px;font-weight:800;color:var(--toki-primary);text-transform:uppercase;letter-spacing:.1em;margin:24px 0 12px 4px;opacity:.8}.toki-control-group{margin-bottom:20px;position:relative}.toki-label{display:block;font-size:13px;font-weight:700;color:var(--toki-text-muted);margin-bottom:8px;margin-left:4px}.toki-input,.toki-select{width:100%;padding:14px 18px;background:rgba(255,255,255,.8);border:1px solid rgba(0,0,0,.08);border-radius:16px;color:var(--toki-text)!important;font-size:15px;font-weight:600;appearance:none;transition:all .2s cubic-bezier(.4,0,.2,1);box-shadow:0 2px 4px rgba(0,0,0,.02)}.toki-input:hover,.toki-select:hover{border-color:var(--toki-primary);background-color:#fff;box-shadow:0 4px 12px rgba(37,99,235,.08);color:var(--toki-text)!important}.toki-input:focus,.toki-select:focus{outline:none;border-color:var(--toki-primary);box-shadow:0 0 0 4px rgba(37,99,235,.1);background-color:#fff;color:var(--toki-text)!important}.toki-select{cursor:pointer;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2364748b'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 16px center;background-size:16px}.toki-checkbox-wrapper{display:flex;align-items:center;gap:12px;cursor:pointer;padding:8px 4px;user-select:none}.toki-checkbox{width:22px;height:22px;border:2px solid rgba(0,0,0,.1);border-radius:6px;display:flex;align-items:center;justify-content:center;transition:all .2s;background:#fff;position:relative}.toki-checkbox-input{display:none}.toki-checkbox-input:checked + .toki-checkbox{background:var(--toki-primary);border-color:var(--toki-primary)}.toki-checkbox-input:checked + .toki-checkbox::after{content:'✓';color:#fff;font-size:14px;font-weight:900}.toki-checkbox-label{font-size:14px;font-weight:600;color:var(--toki-text)}.toki-btn-action{width:100%;height:56px;background:var(--toki-primary);color:#fff!important;border:none;border-radius:18px;font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:12px;transition:all .3s cubic-bezier(.175,.885,.32,1.275);box-shadow:0 8px 15px rgba(37,99,235,.2)}.toki-btn-action:hover{transform:translateY(-3px);box-shadow:0 12px 20px rgba(37,99,235,.35);filter:brightness(1.05);color:#fff!important}.toki-btn-action:active{transform:translateY(-1px)}.toki-btn-secondary{background:rgba(255,255,255,.8);color:#475569!important;border:1px solid rgba(0,0,0,.05);box-shadow:0 1px 2px rgba(0,0,0,.05)}.toki-btn-secondary:hover{background:#fff;color:var(--toki-text)!important}.toki-info-card{background:rgba(255,255,255,.6);border:1px solid rgba(0,0,0,.03);border-radius:20px;padding:20px;margin-bottom:20px;display:flex;flex-direction:column;gap:12px}.toki-info-row{display:flex;justify-content:space-between;align-items:center}.toki-info-label{font-size:13px;color:var(--toki-text-muted)}.toki-info-val{font-size:14px;font-weight:700;color:var(--toki-text)}.toki-status-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}.toki-status-online{background:#10b981;box-shadow:0 0 8px #10b981}.toki-fab{position:fixed;bottom:30px;right:30px;width:64px;height:64px;background:linear-gradient(135deg,#2563eb,#0ea5e9);border-radius:20px;box-shadow:0 10px 15px -3px rgba(37,99,235,.4);display:flex;justify-content:center;align-items:center;cursor:pointer;transition:all .3s cubic-bezier(.175,.885,.32,1.275);z-index:9998}.toki-fab:hover{transform:translateY(-5px) rotate(5deg);box-shadow:0 20px 25px -5px rgba(37,99,235,.5)}.toki-fab:active{transform:scale(.9)}.toki-fab svg{width:28px;height:28px;fill:#fff}.toki-tree-modal{width:1100px!important;height:85vh!important}.toki-tree-container{display:flex;flex:1;overflow:hidden;gap:24px;padding:24px;background:rgba(255,255,255,.2)}.toki-tree-view{flex:1.5;overflow-y:auto;background:rgba(255,255,255,.5);border-radius:16px;padding:20px;border:1px solid rgba(0,0,0,.05);font-family:monospace;font-size:13px}.toki-tree-node{margin-left:20px;position:relative;border-left:1px dashed rgba(0,0,0,.1);padding-left:12px}.toki-tree-item{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;transition:all .2s}.toki-tree-item:hover{background:rgba(37,99,235,.05)}.toki-tree-key{color:#2563eb;font-weight:700;cursor:pointer;min-width:90px}.toki-tree-val{color:#1e293b;background:0 0;border:none;border-bottom:1px solid transparent;width:100%}.toki-tree-val:focus{border-bottom-color:#2563eb;outline:none;background:rgba(37,99,235,.05)}.toki-tree-toggle{cursor:pointer;user-select:none;width:18px;text-align:center;color:#94a3b8;font-weight:700}.toki-tree-toggle:hover{color:#2563eb}.toki-tree-right-panel{flex:1;display:flex;flex-direction:column;gap:20px;background:rgba(255,255,255,.4);padding:20px;border-radius:16px}.toki-tree-json-preview{flex:1;background:#0f172a;color:#e2e8f0;padding:20px;border-radius:16px;font-size:12px;font-family:monospace;border:1px solid rgba(255,255,255,.1);resize:none}.toki-btn-rule{background:0 0;border:1px solid #ddd;padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer;transition:all .2s}.toki-btn-rule:hover{background:#f8fafc;border-color:#94a3b8}@keyframes tokiFadeIn{from{opacity:0}to{opacity:1}}@keyframes tokiTabFadeIn{from{opacity:0;transform:translateX(10px)}to{opacity:1;transform:translateX(0)}}@keyframes tokiSlideUp{from{opacity:0;transform:translateY(30px) scale(.95)}to{opacity:1;transform:translateY(0) scale(1)}}`;            document.head.appendChild(style);
+            style.innerHTML = ui_namespaceObject;
+            document.head.appendChild(style);
         }
 
         // -- HTML --
@@ -3056,13 +3117,13 @@ class LogBox {
         if (audioBtn) {
             audioBtn.onclick = () => {
                 try {
-                    if ((0,_anti_sleep_js__WEBPACK_IMPORTED_MODULE_0__/* .isAudioRunning */ .S2)()) {
-                        (0,_anti_sleep_js__WEBPACK_IMPORTED_MODULE_0__/* .stopSilentAudio */ .Cv)();
+                    if ((0,anti_sleep/* isAudioRunning */.S2)()) {
+                        (0,anti_sleep/* stopSilentAudio */.Cv)();
                         audioBtn.textContent = '🔊';
                         audioBtn.title = '백그라운드 모드 (꺼짐)';
                         this.log('[Anti-Sleep] 백그라운드 모드 비활성화');
                     } else {
-                        (0,_anti_sleep_js__WEBPACK_IMPORTED_MODULE_0__/* .startSilentAudio */ .yS)();
+                        (0,anti_sleep/* startSilentAudio */.yS)();
                         audioBtn.textContent = '🔇';
                         audioBtn.title = '백그라운드 모드 (켜짐)';
                         this.log('[Anti-Sleep] 백그라운드 모드 활성화', 'success');
@@ -3074,7 +3135,7 @@ class LogBox {
 
             // Sync UI with initial state (if auto-started by downloader)
             setInterval(() => {
-                const running = (0,_anti_sleep_js__WEBPACK_IMPORTED_MODULE_0__/* .isAudioRunning */ .S2)();
+                const running = (0,anti_sleep/* isAudioRunning */.S2)();
                 if (running && audioBtn.textContent === '🔊') {
                     audioBtn.textContent = '🔇';
                     audioBtn.title = '백그라운드 모드 (켜짐)';
@@ -3155,7 +3216,7 @@ class LogBox {
         currentUrl = currentUrl.replace(/([&?])(token|key|pwd)=[^&]+/g, '$1$2=***');
         
         // Retrieve run settings
-        const config = (0,_config_js__WEBPACK_IMPORTED_MODULE_1__/* .getConfig */ .zj)();
+        const config = (0,core_config/* getConfig */.zj)();
         const dest = config.destination || 'native';
         const isCbz = config.saveAs === 'cbz';
         const smartSkip = config.useSmartSkip ? 'ON' : 'OFF';
@@ -3710,7 +3771,7 @@ async function markDownloadedItems(historyList) {
     // Use Set for fast lookup
     const historySet = new Set(historyList.map(id => id.toString())); // Ensure string comparison
 
-    const parser = await _parsers_ParserFactory_js__WEBPACK_IMPORTED_MODULE_2__/* .ParserFactory */ .O.getParser();
+    const parser = await ParserFactory/* ParserFactory */.O.getParser();
     if (!parser) {
         console.warn('[UI] 파서를 찾을 수 없어 다운로드 표시를 생략합니다.');
         return;
@@ -3760,7 +3821,7 @@ async function markDownloadedItems(historyList) {
  */
 class TreeRuleEditor {
     constructor() {
-        this.rules = _parsers_RuleManager_js__WEBPACK_IMPORTED_MODULE_3__/* .RuleManager */ .u.getCustomRules();
+        this.rules = RuleManager/* RuleManager */.u.getCustomRules();
         this.overlay = null;
         this.hints = {
             'id': '사이트 고유 ID (영문/숫자)',
@@ -3986,7 +4047,7 @@ class TreeRuleEditor {
         };
 
         overlay.querySelector('#tree-btn-save').onclick = () => {
-            _parsers_RuleManager_js__WEBPACK_IMPORTED_MODULE_3__/* .RuleManager */ .u.saveCustomRules(this.rules);
+            RuleManager/* RuleManager */.u.saveCustomRules(this.rules);
             alert('파싱 규칙이 성공적으로 저장되었습니다.');
             overlay.remove();
         };
@@ -4018,8 +4079,8 @@ class TreeRuleEditor {
                         if (mode === 'overwrite') {
                             this.rules = rules;
                         } else {
-                            _parsers_RuleManager_js__WEBPACK_IMPORTED_MODULE_3__/* .RuleManager */ .u.bulkImport(rules, 'merge');
-                            this.rules = _parsers_RuleManager_js__WEBPACK_IMPORTED_MODULE_3__/* .RuleManager */ .u.getCustomRules();
+                            RuleManager/* RuleManager */.u.bulkImport(rules, 'merge');
+                            this.rules = RuleManager/* RuleManager */.u.getCustomRules();
                         }
                         this.render();
                     } catch (err) {
@@ -4040,8 +4101,8 @@ class TreeRuleEditor {
                 const rule = this.rules.find(r => new RegExp(r.urlPattern, 'i').test(url));
                 if (!rule) throw new Error('해당 URL에 맞는 규칙이 트리 내에 없습니다.');
 
-                const parser = new _parsers_GenericParser_js__WEBPACK_IMPORTED_MODULE_4__/* .GenericParser */ .b(domain, rule);
-                const result = await (0,_extractor_js__WEBPACK_IMPORTED_MODULE_5__/* .extractEpisodeData */ .d)(document, parser, { site: 'test', category: rule.category }, false);
+                const parser = new GenericParser/* GenericParser */.b(domain, rule);
+                const result = await (0,extractor/* extractEpisodeData */.d)(document, parser, { site: 'test', category: rule.category }, false);
                 
                 res.innerHTML = `
                     <div style="color: #4ade80">성공!</div>
@@ -4052,53 +4113,6 @@ class TreeRuleEditor {
                 res.textContent = '❌ 실패: ' + e.message;
             }
         };
-    }
-}
-
-
-/***/ }),
-
-/***/ 969:
-/***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
-
-/* harmony export */ __webpack_require__.d(__webpack_exports__, {
-/* harmony export */   O: function() { return /* binding */ ParserFactory; }
-/* harmony export */ });
-/* harmony import */ var _GenericParser_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(443);
-/* harmony import */ var _detector_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(419);
-
-
-
-/**
- * ParserFactory
- * Creates and provides the appropriate parser for the current site.
- */
-class ParserFactory {
-    static #instance = null;
-
-    /**
-     * Get the appropriate parser for the current site (Singleton)
-     * @returns {Promise<BaseParser|null>}
-     */
-    static async getParser() {
-        if (this.#instance) return this.#instance;
-
-        const siteInfo = await (0,_detector_js__WEBPACK_IMPORTED_MODULE_1__/* .detectSite */ .T)();
-        if (!siteInfo) {
-            console.error('[ParserFactory] Failed to detect site');
-            alert("TokiSync 파서 에러: 매칭되는 파싱 룰이 없습니다.\n\n해당 사이트를 지원하려면 설정에서 커스텀 파싱 룰(JSON)을 등록해야 합니다.\n(자세한 방법은 Github의 rules.sample.json을 참조하세요)");
-            return null;
-        }
-
-        const { site, protocolDomain, matchedRule } = siteInfo;
-
-        // Dynamic Generic Parser
-        if (site === 'generic' && matchedRule) {
-            this.#instance = new _GenericParser_js__WEBPACK_IMPORTED_MODULE_0__/* .GenericParser */ .b(protocolDomain, matchedRule);
-            return this.#instance;
-        }
-
-        return null;
     }
 }
 
@@ -4274,7 +4288,7 @@ ${tocNav}
             // Return the ZIP object (which IS the EPUB)
             return zip; 
         } catch (e) {
-            const { LogBox } = await Promise.resolve(/* import() */).then(__webpack_require__.bind(__webpack_require__, 963));
+            const { LogBox } = await Promise.resolve(/* import() */).then(__webpack_require__.bind(__webpack_require__, 989));
             LogBox.getInstance().critical(`EPUB 빌드 실패: ${e.message} (${metadata.title || 'unknown'})`, 'Builder:EPUB');
             throw e;
         }
@@ -4315,7 +4329,7 @@ class CbzBuilder {
 
             return zip;
         } catch (e) {
-            const { LogBox } = await Promise.resolve(/* import() */).then(__webpack_require__.bind(__webpack_require__, 963));
+            const { LogBox } = await Promise.resolve(/* import() */).then(__webpack_require__.bind(__webpack_require__, 989));
             LogBox.getInstance().critical(`CBZ 빌드 실패: ${e.message} (${metadata.title || 'unknown'})`, 'Builder:CBZ');
             throw e;
         }
@@ -4378,15 +4392,15 @@ class TxtBuilder {
                 }
             };
         } catch (e) {
-            const { LogBox } = await Promise.resolve(/* import() */).then(__webpack_require__.bind(__webpack_require__, 963));
+            const { LogBox } = await Promise.resolve(/* import() */).then(__webpack_require__.bind(__webpack_require__, 989));
             LogBox.getInstance().critical(`TXT 빌드 실패: ${e.message} (${metadata.title || 'unknown'})`, 'Builder:TXT');
             throw e;
         }
     }
 }
 
-// EXTERNAL MODULE: ./src/core/ui.js
-var ui = __webpack_require__(963);
+// EXTERNAL MODULE: ./src/core/ui.js + 1 modules
+var ui = __webpack_require__(989);
 // EXTERNAL MODULE: ./src/core/config.js
 var core_config = __webpack_require__(899);
 // EXTERNAL MODULE: ./src/core/anti_sleep.js
