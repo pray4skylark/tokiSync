@@ -327,18 +327,13 @@ function pauseForCaptcha(targetUrl) {
         // Create full-screen overlay
         const overlay = document.createElement('div');
         overlay.id = 'toki-captcha-overlay';
-        overlay.style.cssText = `
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0, 0, 0, 0.9); z-index: 999999;
-            display: flex; flex-direction: column; align-items: center; justify-content: center;
-            color: white; font-family: Arial, sans-serif;
-        `;
+        overlay.className = 'toki-captcha-overlay';
         
         overlay.innerHTML = `
-            <h1 style="font-size: 32px; margin-bottom: 20px;">⚠️ 캡차 감지</h1>
-            <p style="font-size: 18px; margin-bottom: 30px;">아래 프레임에서 캡차를 해결해주세요. (전용 프레임 모드)</p>
-            <div style="width: 80%; height: 60%; background: white; border-radius: 10px; overflow: hidden; margin-bottom: 20px;" id="toki-captcha-frame-container"></div>
-            <button id="toki-resume-btn" style="padding: 15px 40px; font-size: 18px; background: #4CAF50; color: white; border: none; border-radius: 8px; cursor: pointer;">
+            <h1 class="toki-text-lg toki-captcha-title">⚠️ 캡차 감지</h1>
+            <p class="toki-text-base toki-captcha-desc">아래 프레임에서 캡차를 해결해주세요. (전용 프레임 모드)</p>
+            <div class="toki-captcha-frame" id="toki-captcha-frame-container"></div>
+            <button id="toki-resume-btn" class="toki-btn-action toki-btn-gradient-green toki-btn-resume">
                 해결 후 재개하기
             </button>
         `;
@@ -347,10 +342,8 @@ function pauseForCaptcha(targetUrl) {
         
         // 캡차 조작 전용 신규 프레임 띄우기 (다운로드용 프레임의 간섭 방지)
         const captchaIframe = document.createElement('iframe');
+        captchaIframe.classList.add('toki-visible-block', 'toki-captcha-iframe');
         captchaIframe.src = targetUrl;
-        captchaIframe.style.width = '100%';
-        captchaIframe.style.height = '100%';
-        captchaIframe.style.border = 'none';
         
         const container = document.getElementById('toki-captcha-frame-container');
         if (container) {

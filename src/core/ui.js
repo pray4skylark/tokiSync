@@ -41,8 +41,8 @@ export class LogBox {
             <div id="toki-logbox-header">
                 <span id="toki-logbox-title">TokiSync Log</span>
                 <div id="toki-logbox-controls">
-                    <span id="toki-btn-report" title="버그 리포트 복사" style="cursor:pointer; color:#facc15;">📋</span>
-                    <span id="toki-btn-audio" title="백그라운드 모드" style="cursor:pointer;">🔊</span>
+                    <span id="toki-btn-report" title="버그 리포트 복사" class="toki-cursor-pointer toki-text-warning">📋</span>
+                    <span id="toki-btn-audio" title="백그라운드 모드" class="toki-cursor-pointer">🔊</span>
                     <span id="toki-btn-clear" title="Clear">🚫</span>
                     <span id="toki-btn-close" title="Hide">❌</span>
                 </div>
@@ -60,7 +60,7 @@ export class LogBox {
 
         // ESC Key Support for LogBox
         window.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && this.container.style.display === 'flex') {
+            if (e.key === 'Escape' && this.container.classList.contains('toki-visible-flex')) {
                 this.hide();
             }
         });
@@ -153,11 +153,11 @@ export class LogBox {
     }
 
     show() {
-        if (this.container) this.container.style.display = 'flex';
+        if (this.container) this.container.classList.add('toki-visible-flex');
     }
 
     hide() {
-        if (this.container) this.container.style.display = 'none';
+        if (this.container) this.container.classList.remove('toki-visible-flex');
     }
 
     async exportReport() {
@@ -244,7 +244,7 @@ ${fmt(info)}
 
     toggle() {
         if (!this.container) return;
-        if (this.container.style.display === 'none' || this.container.style.display === '') {
+        if (!this.container.classList.contains('toki-visible-flex')) {
             this.show();
         } else {
             this.hide();
@@ -339,7 +339,7 @@ export class MenuModal {
         header.className = 'toki-modal-header';
         header.innerHTML = `
             <div class="toki-modal-title"><span>⚡ TokiSync</span></div>
-            <div style="display: flex; gap: 10px; align-items: center;">
+            <div class="toki-flex-row">
                 <button class="toki-btn-ghost" id="toki-btn-viewer-link" title="Open Viewer">
                     🌐 <span>Viewer</span>
                 </button>
@@ -370,29 +370,29 @@ export class MenuModal {
         tabDown.innerHTML = `
                 <div class="toki-control-group">
                     <label class="toki-label">빠른 작업</label>
-                    <button class="toki-btn-action" id="toki-btn-down-current" style="height: 52px; background: linear-gradient(135deg, #10b981, #059669); box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);">
+                    <button class="toki-btn-action toki-btn-gradient-green" id="toki-btn-down-current">
                         <span>🚀 현재 회차 즉시 다운로드</span>
                     </button>
                 </div>
-                <hr style="border: 0; border-top: 1px solid rgba(0,0,0,0.05); margin: 24px 0;">
+                <hr class="toki-divider">
                 <div class="toki-control-group">
                     <label class="toki-label">에피소드 범위 지정</label>
                     <input type="text" id="toki-range-input" class="toki-input"
                         placeholder="예: 1,2,4-10,15 (비우면 전체)">
-                    <div style="font-size: 11px; margin-top: 8px; color: #94a3b8; margin-left: 4px;">쉼표(,)로 개별 번호, 하이픈(-)으로 연속 범위 지정</div>
+                    <div class="toki-text-xs toki-mt-8 toki-ml-4">쉼표(,)로 개별 번호, 하이픈(-)으로 연속 범위 지정</div>
                 </div>
-                <div class="toki-control-group" style="margin-bottom: 24px;">
+                <div class="toki-control-group toki-mb-24">
                     <label class="toki-checkbox-wrapper">
                         <input type="checkbox" id="toki-chk-force-overwrite" class="toki-checkbox-input">
                         <span class="toki-checkbox"></span>
                         <span class="toki-checkbox-label">⚠️ 강제 재다운로드 (파일 덮어쓰기)</span>
                     </label>
                 </div>
-                <div style="display: flex; gap: 12px;">
-                    <button class="toki-btn-action" id="toki-btn-down-range" style="flex: 1.4; height: 52px;">
+                <div class="toki-btn-group-row">
+                    <button class="toki-btn-action toki-flex-1-4" id="toki-btn-down-range">
                         <span>선택 다운로드</span>
                     </button>
-                    <button class="toki-btn-action toki-btn-secondary" id="toki-btn-down-all" style="flex: 1; height: 52px;">
+                    <button class="toki-btn-action toki-btn-secondary" id="toki-btn-down-all">
                         <span>전체</span>
                     </button>
                 </div>
@@ -404,7 +404,7 @@ export class MenuModal {
         tabSettings.className = 'toki-tab-content';
         tabSettings.id = 'toki-tab-settings';
         tabSettings.innerHTML = `
-            <div class="toki-section-title" style="margin-top:0;">Download Settings</div>
+            <div class="toki-section-title toki-mt-0">Download Settings</div>
             <div class="toki-control-group">
                 <label class="toki-label">저장 정책</label>
                 <select id="toki-sel-policy" class="toki-select">
@@ -426,17 +426,17 @@ export class MenuModal {
                 </select>
             </div>
 
-            <div id="toki-native-helper" style="display:none; margin: -10px 0 20px 0; padding: 14px; background: rgba(37, 99, 235, 0.05); border: 1px solid rgba(37, 99, 235, 0.1); border-radius: 18px;">
-                <div style="font-size: 12px; color: var(--toki-primary); margin-bottom: 10px; line-height: 1.5; font-weight: 500;">
+            <div id="toki-native-helper" class="toki-hidden toki-helper-box-blue">
+                <div class="toki-text-sm toki-text-primary toki-mb-10 toki-helper-desc">
                     ⚠️ Native 모드는 브라우저 설정 변경이 필요합니다.
                 </div>
-                <button class="toki-btn-action toki-btn-secondary" id="toki-btn-test-native" style="height: 36px; font-size: 12px; border-radius: 12px;">
+                <button class="toki-btn-action toki-btn-secondary toki-btn-sm" id="toki-btn-test-native">
                     📂 기능 동작 테스트 실행
                 </button>
             </div>
 
             <div class="toki-section-title">Novel Settings</div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+            <div class="toki-form-grid">
                 <div class="toki-control-group">
                     <label class="toki-label">소설 포맷</label>
                     <select id="toki-sel-novel-format" class="toki-select">
@@ -463,7 +463,7 @@ export class MenuModal {
             </div>
 
             <div class="toki-section-title">Configuration</div>
-            <button class="toki-btn-action toki-btn-secondary" id="toki-btn-advanced" style="height: 52px; font-size: 14px; font-weight: 700; border-style: dashed; background: rgba(0,0,0,0.02); border-radius: 20px;">
+            <button class="toki-btn-action toki-btn-secondary toki-btn-slate" id="toki-btn-advanced">
                 🛠️ 상세 주소 및 API 키 설정 (Advanced)
             </button>
         `;
@@ -485,11 +485,11 @@ export class MenuModal {
                 </div>
             </div>
             <div class="toki-control-group">
-                <button class="toki-btn-action" id="toki-btn-sync-now" style="height: 48px;">
+                <button class="toki-btn-action toki-btn-sync" id="toki-btn-sync-now">
                     <span>🔄 지금 즉시 동기화</span>
                 </button>
             </div>
-            <p style="font-size: 11px; color: #94a3b8; text-align: center; line-height: 1.6;">
+            <p class="toki-text-xs toki-text-center toki-line-16">
                 구글 드라이브의 데이터를 기반으로 목록에 완료 표시(✅)를 업데이트합니다.
             </p>
         `;
@@ -502,23 +502,23 @@ export class MenuModal {
         tabTools.innerHTML = `
                 <div class="toki-control-group">
                     <label class="toki-label">파일 관리</label>
-                    <div style="display: flex; flex-direction: column; gap: 8px;">
-                        <button class="toki-btn-action toki-btn-secondary" id="toki-btn-migration" style="height: 44px; justify-content: flex-start; padding-left: 20px;">
+                    <div class="toki-btn-group-stack">
+                        <button class="toki-btn-action toki-btn-secondary" id="toki-btn-migration">
                             📂 기존 파일명 표준화 (Migration)
                         </button>
-                        <button class="toki-btn-action toki-btn-secondary" id="toki-btn-thumb-optim" style="height: 44px; justify-content: flex-start; padding-left: 20px;">
+                        <button class="toki-btn-action toki-btn-secondary" id="toki-btn-thumb-optim">
                             🔄 썸네일 통합 및 캐 최적화
                         </button>
                     </div>
                 </div>
-                <hr style="border: 0; border-top: 1px solid rgba(0,0,0,0.05); margin: 24px 0;">
+                <hr class="toki-divider">
                 <div class="toki-control-group">
                     <label class="toki-label">시스템 도구</label>
-                    <div style="display: flex; flex-direction: column; gap: 8px;">
-                        <button class="toki-btn-action toki-btn-secondary" id="toki-btn-log" style="height: 44px; justify-content: flex-start; padding-left: 20px;">
+                    <div class="toki-btn-group-stack">
+                        <button class="toki-btn-action toki-btn-secondary" id="toki-btn-log">
                             📝 실시간 로그창 토글
                         </button>
-                        <button class="toki-btn-action" id="toki-btn-tree-editor" style="height: 44px; background: #6366f1; justify-content: flex-start; padding-left: 20px;">
+                        <button class="toki-btn-action toki-btn-indigo" id="toki-btn-tree-editor">
                             🧩 파싱 규칙 편집기 (Tree Editor)
                         </button>
                     </div>
@@ -621,15 +621,17 @@ export class MenuModal {
                     const success = await this.handlers.testNativeDownload();
                     if (success) {
                         testNativeBtn.textContent = '✅ 테스트 성공 (폴더 확인)';
-                        testNativeBtn.style.color = '#55ff55';
+                        testNativeBtn.classList.add('toki-text-success');
+                        testNativeBtn.classList.remove('toki-text-danger');
                     } else {
                         testNativeBtn.textContent = '❌ 테스트 실패 (설정 확인)';
-                        testNativeBtn.style.color = '#ff5555';
+                        testNativeBtn.classList.add('toki-text-danger');
+                        testNativeBtn.classList.remove('toki-text-success');
                     }
                     setTimeout(() => {
                         testNativeBtn.disabled = false;
                         testNativeBtn.textContent = '📂 자동 분류 기능 테스트';
-                        testNativeBtn.style.color = '';
+                        testNativeBtn.classList.remove('toki-text-success', 'toki-text-danger');
                     }, 3000);
                 }
             };
@@ -694,8 +696,8 @@ export class MenuModal {
 
     close(overlay) {
         if(overlay) {
-            overlay.style.transition = 'opacity 0.2s';
-            overlay.style.opacity = '0';
+            // overlay.style.transition = 'opacity 0.2s'; // CSS handles transition
+            overlay.classList.add('toki-hidden');
             setTimeout(() => overlay.remove(), 200);
         }
     }
@@ -709,7 +711,11 @@ export class MenuModal {
     updateNativeHelper(policy) {
         const helper = document.getElementById('toki-native-helper');
         if (helper) {
-            helper.style.display = (policy === 'native') ? 'block' : 'none';
+            if (policy === 'native') {
+                helper.classList.remove('toki-hidden');
+            } else {
+                helper.classList.add('toki-hidden');
+            }
         }
     }
 }
@@ -796,13 +802,13 @@ export class TreeRuleEditor {
     show() {
         this.overlay = document.createElement('div');
         this.overlay.className = 'toki-modal-overlay';
-        this.overlay.style.zIndex = '10002';
+        // z-index handled by .toki-tree-modal in ui.css
         
         this.overlay.innerHTML = `
             <div class="toki-modal toki-tree-modal">
                 <div class="toki-modal-header">
                     <div class="toki-modal-title">🧩 파싱 규칙 관리자 (Tree Editor)</div>
-                    <div style="display: flex; gap: 8px;">
+                    <div class="toki-flex-row-8">
                         <button class="toki-btn-rule" id="tree-btn-export">📤 내보내기</button>
                         <button class="toki-btn-rule" id="tree-btn-import">📥 가져오기</button>
                         <button class="toki-modal-close" id="tree-close-btn">&times;</button>
@@ -812,23 +818,23 @@ export class TreeRuleEditor {
                     <div class="toki-tree-view" id="tree-root"></div>
                     
                     <div class="toki-tree-right-panel">
-                        <div style="display: flex; justify-content: space-between; align-items: center; color: #888; font-size: 12px;">
+                        <div class="toki-flex-between toki-text-xs">
                             <span>📄 JSON 미리보기</span>
-                            <span id="tree-json-status" style="color: #4ade80;">✓ Valid</span>
+                            <span id="tree-json-status" class="toki-text-success">✓ Valid</span>
                         </div>
                         <textarea class="toki-tree-json-preview" id="tree-json-editor" spellcheck="false"></textarea>
                         
-                        <div class="toki-test-bench" style="margin-top: 0;">
-                            <div class="toki-label" style="margin-bottom: 5px;">🧪 즉시 테스트</div>
-                            <div style="display: flex; gap: 8px;">
-                                <input type="text" id="tree-test-url" class="toki-input-compact" style="flex: 1;" placeholder="주소 입력" value="${window.location.href}">
-                                <button class="toki-btn-rule" id="tree-btn-test" style="border-color: #4ade80; color: #4ade80;">실행</button>
+                        <div class="toki-test-bench toki-mt-0">
+                            <div class="toki-label toki-mb-5">🧪 즉시 테스트</div>
+                            <div class="toki-flex-row-8">
+                                <input type="text" id="tree-test-url" class="toki-input-compact toki-flex-1" placeholder="주소 입력" value="${window.location.href}">
+                                <button class="toki-btn-rule toki-text-success" id="tree-btn-test">실행</button>
                             </div>
                             <div id="tree-test-result" class="toki-test-result">규칙 수정 후 바로 테스트해보세요.</div>
                         </div>
                         
-                        <div style="display: flex; gap: 10px;">
-                            <button class="toki-btn-action" id="tree-btn-save" style="background: #6a5acd; font-weight: bold;">저장 및 적용</button>
+                        <div class="toki-flex-row-10">
+                            <button class="toki-btn-action toki-btn-lavender" id="tree-btn-save">저장 및 적용</button>
                         </div>
                     </div>
                 </div>
@@ -911,8 +917,7 @@ export class TreeRuleEditor {
             wrapper.appendChild(children);
 
             toggle.onclick = () => {
-                const isHidden = children.style.display === 'none';
-                children.style.display = isHidden ? 'block' : 'none';
+                children.classList.toggle('toki-hidden');
                 toggle.textContent = isHidden ? '▼' : '▶';
             };
         }
@@ -989,13 +994,15 @@ export class TreeRuleEditor {
                 if (Array.isArray(parsed)) {
                     this.rules = parsed;
                     status.textContent = '✓ Valid';
-                    status.style.color = '#4ade80';
+                    status.classList.add('toki-text-success');
+                    status.classList.remove('toki-text-danger');
                     if (this.renderTimer) clearTimeout(this.renderTimer);
                     this.renderTimer = setTimeout(() => this.render(), 1000);
                 }
             } catch (err) {
                 status.textContent = '⚠ Invalid JSON';
-                status.style.color = '#ff5555';
+                status.classList.add('toki-text-danger');
+                status.classList.remove('toki-text-success');
             }
         };
 
@@ -1058,7 +1065,7 @@ export class TreeRuleEditor {
                 const result = await extractEpisodeData(document, parser, { site: 'test', category: rule.category }, false);
                 
                 res.innerHTML = `
-                    <div style="color: #4ade80">성공!</div>
+                    <div class="toki-text-success">성공!</div>
                     <div>• 제목: ${result.title || 'N/A'}</div>
                     <div>• 항목 수: ${result.urls?.length || (result.content ? '1 (Text)' : '0')}</div>
                 `;

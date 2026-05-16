@@ -36,7 +36,7 @@ export function startSilentAudio() {
         
         if (!audioEl) {
             audioEl = document.createElement('audio');
-            audioEl.style.display = "none";
+            audioEl.classList.add('toki-hidden');
             document.body.appendChild(audioEl);
         }
         

@@ -2,7 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.9.3] - 2026-05-17
+
+### ✨ UI 아키텍처 현대화 및 클래스 기반 리팩터링 완료
+- **인라인 스타일 완전 제거**: `ui.js`, `config.js`, `downloader.js` 등 전 모듈에서 하드코딩된 `style=""` 속성을 제거하고 `ui.css` 클래스 기반으로 전환했습니다.
+- **동적 상태 관리 개선**: `element.style.display` 조작 방식을 `classList.toggle` 방식으로 개편하여 UI 렌더링 성능과 유지보수성을 향상시켰습니다.
+- **Glassmorphism 디자인 완성**: 텍스트에어리어(`.toki-textarea`), 정보 카드(`.toki-info-card`), 동기화 상태 표시기 등 모든 UI 요소에 일관된 프리미엄 디자인을 적용했습니다.
+- **핫픽스 통합**: 상세 설정 모달 내 History 탭 레이아웃 및 입력 폼 스타일 누락 문제를 해결했습니다.
+
 ## [v1.8.3] - 2026-05-12
+
+
 
 ### 🎨 UI/UX 전면 개편 및 사용성 향상
 - **모달 너비 확장 (520px)**: 기존 360px에서 520px로 모달 너비를 확장하여 시각적 답답함을 해소하고 가독성을 높였습니다.

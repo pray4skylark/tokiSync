@@ -257,7 +257,7 @@
     margin-left: 4px;
 }
 
-.toki-input, .toki-select {
+.toki-input, .toki-select, .toki-textarea {
     width: 100%;
     padding: 14px 18px;
     background: rgba(255, 255, 255, 0.8);
@@ -271,17 +271,22 @@
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
 }
 
-.toki-input:hover, .toki-select:hover {
+.toki-input:hover, .toki-select:hover, .toki-textarea:hover {
     border-color: var(--toki-primary);
     background-color: #fff;
     box-shadow: 0 4px 12px rgba(37, 99, 235, 0.08);
 }
 
-.toki-input:focus, .toki-select:focus {
+.toki-input:focus, .toki-select:focus, .toki-textarea:focus {
     outline: none;
     border-color: var(--toki-primary);
     box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
     background-color: #fff;
+}
+
+.toki-textarea {
+    resize: vertical;
+    line-height: 1.5;
 }
 
 .toki-select {
@@ -384,6 +389,20 @@
 }
 
 /* Tree Editor */
+.toki-tree-modal {
+    width: 1100px !important;
+    height: 85vh !important;
+}
+
+.toki-tree-container {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+    gap: 24px;
+    padding: 24px;
+    background: rgba(255, 255, 255, 0.2);
+}
+
 .toki-tree-view {
     flex: 1.5;
     overflow-y: auto;
@@ -436,6 +455,56 @@
     background: rgba(37, 99, 235, 0.05);
 }
 
+.toki-tree-toggle {
+    cursor: pointer;
+    user-select: none;
+    width: 18px;
+    text-align: center;
+    color: #94a3b8;
+    font-weight: 700;
+}
+
+.toki-tree-toggle:hover {
+    color: var(--toki-primary);
+}
+
+.toki-tree-right-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    background: rgba(255, 255, 255, 0.4);
+    padding: 20px;
+    border-radius: 16px;
+}
+
+.toki-tree-json-preview {
+    flex: 1;
+    background: #0f172a;
+    color: #e2e8f0;
+    padding: 20px;
+    border-radius: 16px;
+    font-size: 12px;
+    font-family: monospace;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    resize: none;
+}
+
+.toki-btn-rule {
+    background: transparent;
+    border: 1px solid #ddd;
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.toki-btn-rule:hover {
+    background: #f8fafc;
+    border-color: #94a3b8;
+}
+
 /* Animations */
 @keyframes tokiFadeIn {
     from { opacity: 0; }
@@ -451,3 +520,188 @@
     from { opacity: 0; transform: translateY(30px) scale(0.95); }
     to { opacity: 1; transform: translateY(0) scale(1); }
 }
+
+/* --- Structural Layouts for Inline Replacement --- */
+
+/* Horizontal Button Row (e.g., Download buttons) */
+.toki-btn-group-row {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+.toki-btn-group-row .toki-btn-action {
+    height: 52px;
+    flex: 1;
+}
+.toki-btn-group-row .toki-flex-1-4 {
+    flex: 1.4;
+}
+
+/* Vertical Button Stack (e.g., Tool buttons) */
+.toki-btn-group-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.toki-btn-group-stack .toki-btn-action {
+    height: 44px;
+    justify-content: flex-start;
+    padding-left: 20px;
+}
+
+/* 2-Column Form Grid */
+.toki-form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+/* Utility Shortcuts */
+.toki-flex-between { display: flex; justify-content: space-between; align-items: center; }
+.toki-divider { border: 0; border-top: 1px solid rgba(0,0,0,0.05); margin: 24px 0; }
+.toki-mt-0 { margin-top: 0 !important; }
+.toki-mt-8 { margin-top: 8px !important; }
+.toki-mt-32 { margin-top: 32px !important; }
+.toki-ml-4 { margin-left: 4px !important; }
+.toki-mb-5 { margin-bottom: 5px !important; }
+.toki-mb-10 { margin-bottom: 10px !important; }
+.toki-mb-24 { margin-bottom: 24px !important; }
+.toki-flex-1 { flex: 1; }
+.toki-flex-row { display: flex; gap: 4px; align-items: center; }
+.toki-flex-row-8 { display: flex; gap: 8px; align-items: center; }
+.toki-flex-row-10 { display: flex; gap: 10px; align-items: center; }
+
+/* Text Utilities */
+.toki-text-xs { font-size: 11px; color: #94a3b8; }
+.toki-text-sm { font-size: 12px; }
+.toki-text-base { font-size: 14px; }
+.toki-text-lg { font-size: 20px; font-weight: 700; }
+.toki-text-success { color: #4ade80 !important; }
+.toki-text-danger { color: #ff5555 !important; }
+.toki-text-primary { color: var(--toki-primary) !important; }
+.toki-text-center { text-align: center; }
+.toki-line-16 { line-height: 1.6; }
+
+/* Specialized Components */
+.toki-modal-main { padding: 32px; width: 520px; max-height: 85vh; overflow-y: auto; }
+.toki-btn-gradient-green { 
+    background: linear-gradient(135deg, #10b981, #059669) !important; 
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2) !important;
+}
+.toki-btn-indigo { background: #6366f1 !important; }
+.toki-btn-lavender { background: #6a5acd !important; font-weight: bold !important; }
+.toki-btn-slate { background: rgba(0,0,0,0.02) !important; border-style: dashed !important; border-radius: 20px !important; }
+.toki-hidden { display: none !important; }
+
+/* Helper Boxes */
+.toki-helper-box-blue {
+    margin: -10px 0 20px 0; padding: 14px; 
+    background: rgba(37, 99, 235, 0.05); border: 1px solid rgba(37, 99, 235, 0.1); 
+    border-radius: 18px;
+}
+
+/* Captcha Overlay */
+.toki-captcha-overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.8); z-index: 10001;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: white; font-family: var(--toki-font);
+}
+.toki-captcha-frame {
+    width: 80%; height: 60%; background: white; 
+    border-radius: 20px; overflow: hidden; 
+    margin-bottom: 20px; box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+}
+
+/* Component: Helper Description Text */
+.toki-helper-desc { line-height: 1.5; font-weight: 500; }
+
+/* Component: Small Button (e.g., Test Native) */
+.toki-btn-sm { height: 36px !important; font-size: 12px !important; border-radius: 12px !important; }
+
+/* Component: Sync Button (height 48px) */
+.toki-btn-sync { height: 48px !important; }
+
+/* Component: Modal Header without border */
+.toki-modal-header-borderless { border: none !important; }
+
+/* Component: Code Textarea */
+.toki-textarea-code { min-height: 120px; font-family: monospace; }
+
+/* Visibility Toggles */
+.toki-visible-flex { display: flex !important; }
+.toki-visible-block { display: block !important; }
+.toki-hidden { display: none !important; }
+
+/* Status Badges & Indicators */
+.toki-badge {
+    margin-left: 5px;
+    font-size: 12px;
+    vertical-align: middle;
+}
+
+.toki-downloaded {
+    opacity: 0.6;
+    background-color: rgba(74, 222, 128, 0.05) !important;
+    transition: opacity 0.3s ease;
+}
+.toki-downloaded:hover {
+    opacity: 1;
+}
+
+.toki-tree-modal {
+    z-index: 10002 !important;
+}
+
+/* Iframe Elements */
+.toki-downloader-iframe {
+    width: 100%;
+    height: 600px;
+    opacity: 0.1;
+    pointer-events: none;
+    border: none;
+    margin-top: 40px;
+}
+
+.toki-captcha-iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+}
+
+/* Info Card & History Styles */
+.toki-info-card {
+    background: rgba(255, 255, 255, 0.4);
+    border: 1px solid rgba(0, 0, 0, 0.05);
+    border-radius: 12px;
+    padding: 12px 16px;
+    margin-bottom: 20px;
+}
+
+.toki-info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+}
+
+.toki-info-row:not(:last-child) {
+    border-bottom: 1px dashed rgba(0, 0, 0, 0.05);
+}
+
+.toki-info-label {
+    font-size: 13px;
+    color: var(--toki-text-muted);
+    font-weight: 500;
+}
+
+.toki-info-val {
+    font-size: 13px;
+    color: var(--toki-text);
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+

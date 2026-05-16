@@ -48,4 +48,5 @@ Model swap: Update `.agent_checkpoint.md`. Read SSOT + state first.
 # 🚀 SECTION 9: RELEASE & BRANCH
 - Main: No direct commit. Use PR.
 - Assets: Include `docs/tokiSync.user.js`, `google_app_script/TokiSync_Server_Bundle.gs` in Release.
+- 🚫 NO AUTO-COMMIT/RELEASE. Bump version @ COMMIT phase ONLY after human approval.
 

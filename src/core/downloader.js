@@ -488,13 +488,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
         // 목록 페이지 최하단에 배치 + opacity 0.1
         // IntersectionObserver가 정상 동작하며, 브라우저가 일반 문서 흐름으로 렌더링
         const iframe = document.createElement('iframe');
-        iframe.style.display = 'block';
-        iframe.style.width = '100%';
-        iframe.style.height = '600px';
-        iframe.style.opacity = '0.1';
-        iframe.style.pointerEvents = 'none';
-        iframe.style.border = 'none';
-        iframe.style.marginTop = '40px';
+        iframe.classList.add('toki-visible-block', 'toki-downloader-iframe');
         document.body.appendChild(iframe);
 
         // [v1.7.1] Novel Single Volume Mode Init
@@ -736,8 +730,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                 const badge = document.createElement('span');
                 badge.className = 'toki-badge';
                 badge.innerText = '✅';
-                badge.style.marginLeft = '5px';
-                badge.style.fontSize = '12px';
+                // Styles moved to .toki-badge in ui.css
                 
                 // Target: .wr-subject > a (link element)
                 const linkEl = item.element.querySelector('.wr-subject > a');
@@ -753,9 +746,8 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                     }
                 }
                 
-                // Visual feedback
-                item.element.style.opacity = '0.6';
-                item.element.style.backgroundColor = 'rgba(0, 255, 0, 0.05)';
+                // Visual feedback (v1.9.5 consistent styling)
+                item.element.classList.add('toki-downloaded');
             }
         }
 

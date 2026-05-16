@@ -73,13 +73,14 @@ export function showConfigModal() {
     overlay.id = 'toki-config-modal';
     overlay.className = 'toki-modal-overlay';
     
+
     overlay.innerHTML = `
-        <div class="toki-modal toki-modal-container" style="padding: 32px; width: 520px; max-height: 85vh; overflow-y: auto;">
-            <div class="toki-modal-header" style="border:none; margin-bottom: 24px;">
-                <div class="toki-modal-title" style="font-size: 20px;">🛠️ 상세 설정 (Advanced)</div>
+        <div class="toki-modal toki-modal-main">
+            <div class="toki-modal-header toki-modal-header-borderless">
+                <div class="toki-modal-title toki-text-lg">🛠️ 상세 설정 (Advanced)</div>
             </div>
             
-            <div class="toki-section-title" style="margin-top:0;">Cloud & Storage</div>
+            <div class="toki-section-title toki-mt-0">Cloud & Storage</div>
             <div class="toki-control-group">
                 <label class="toki-label">GAS Script ID</label>
                 <input type="text" id="toki-cfg-gas-id" class="toki-input" placeholder="AKfycb..." value="${config.gasId}">
@@ -128,7 +129,7 @@ export function showConfigModal() {
             </div>
             
             <div class="toki-section-title">Format & Rules</div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+            <div class="toki-form-grid">
                 <div class="toki-control-group">
                     <label class="toki-label">소설 포맷</label>
                     <select id="toki-cfg-novel-format" class="toki-select">
@@ -152,12 +153,12 @@ export function showConfigModal() {
 
             <div class="toki-control-group">
                 <label class="toki-label">커스텀 파싱 룰 (JSON Array)</label>
-                <textarea id="toki-cfg-custom-rule" class="toki-textarea" style="min-height: 120px; font-family: monospace;" placeholder="[{...}]">${config.customRules}</textarea>
+                <textarea id="toki-cfg-custom-rule" class="toki-textarea toki-textarea-code" placeholder="[{...}]">${config.customRules}</textarea>
             </div>
 
-            <div class="toki-modal-footer" style="display: flex; gap: 12px; margin-top: 32px;">
-                <button id="toki-btn-cancel" class="toki-btn-action toki-btn-secondary" style="flex: 1; height: 52px;">취소</button>
-                <button id="toki-btn-save" class="toki-btn-action" style="flex: 1; height: 52px; background: var(--toki-primary);">설정 저장하기</button>
+            <div class="toki-modal-footer toki-btn-group-row toki-mt-32">
+                <button id="toki-btn-cancel" class="toki-btn-action toki-btn-secondary">취소</button>
+                <button id="toki-btn-save" class="toki-btn-action">설정 저장하기</button>
             </div>
         </div>
     `;
