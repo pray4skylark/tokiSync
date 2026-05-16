@@ -44,3 +44,8 @@ Error found → Auditor report → Main re-plan → Worker re-impl. No quick fix
 
 # 📝 SECTION 8: HANDOVER
 Model swap: Update `.agent_checkpoint.md`. Read SSOT + state first.
+
+# 🚀 SECTION 9: RELEASE & BRANCH
+- Main: No direct commit. Use PR.
+- Assets: Include `docs/tokiSync.user.js`, `TokiSync_Server_Bundle.gs` in Release.
+
