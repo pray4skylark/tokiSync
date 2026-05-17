@@ -1,15 +1,19 @@
 // ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.9.3
+// @version      1.9.4
 // @description  Toki series sites -> Google Drive syncing tool (Bundled)
 // @author       pray4skylark
 // @updateURL    https://pray4skylark.github.io/tokiSync/tokiSync.user.js
 // @downloadURL  https://pray4skylark.github.io/tokiSync/tokiSync.user.js
-// @match        https://*.com/webtoon/*
-// @match        https://*.com/novel/*
-// @match        https://*.com/manhwa/*
-// @match        https://*.net/comic/*
+// @match        *://*/*webtoon/*
+// @match        *://*/*novel/*
+// @match        *://*/*manhwa/*
+// @match        *://*/*manga/*
+// @match        *://*/*comic/*
+// @match        *://*/*toon/*
+// @include      *://*toki*/*
+// @include      *://*toon*/*
 // @match        https://script.google.com/*
 // @match        https://*.github.io/tokiSync/*
 // @match        https://pray4skylark.github.io/tokiSync/*
@@ -340,16 +344,17 @@ async function getOrCreateFolder(folderName, parentId, token, category = 'Webtoo
     
     // 3. Get or create series folder in category
     // [v1.4.0 Fix] Search by ID prefix "[12345]" instead of full name to handle title changes
-    // folderName format: "[12345] Title"
-    const idMatch = folderName.match(/^\[\d+\]/);
+    // [v1.9.4 Fix] Support alphanumeric IDs and fallback to exact match if ID is "0000" to prevent collision
+    const idMatch = folderName.match(/^\[([a-zA-Z0-9_\-]+)\]/);
     const idPrefix = idMatch ? idMatch[0] : null;
+    const rawId = idMatch ? idMatch[1] : null;
     
     let queryPart = "";
-    if (idPrefix) {
+    if (idPrefix && rawId !== "0000") {
         // Search for folders containing "[12345]"
         queryPart = `name contains '${idPrefix}'`;
     } else {
-        // Fallback: Exact match
+        // Fallback: Exact match for 0000 or invalid ID
         queryPart = `name = '${folderName.replace(/'/g, "\\'")}'`; 
     }
 
@@ -378,7 +383,7 @@ async function getOrCreateFolder(folderName, parentId, token, category = 'Webtoo
     // Filter results to ensure it starts with the ID (double check)
     let foundFolder = null;
     if (seriesResult.files && seriesResult.files.length > 0) {
-        if (idPrefix) {
+        if (idPrefix && rawId !== "0000") {
             // Find the first folder that STARTS with the ID
             foundFolder = seriesResult.files.find(f => f.name.startsWith(idPrefix));
         } else {
@@ -1103,6 +1108,50 @@ class GenericParser extends BaseParser {
         return null;
     }
 
+    /**
+     * Extracts the Series ID based on JSON rule, with a robust fallback.
+     */
+    getSeriesId() {
+        const ext = this.rule.idExtraction;
+        if (ext) {
+            if (ext.source === 'url' && ext.regex) {
+                try {
+                    const regex = new RegExp(ext.regex, 'i');
+                    const match = document.URL.match(regex);
+                    if (match) return match[1] || match[0];
+                } catch(e) {
+                    console.warn('[GenericParser] Invalid idExtraction regex', e);
+                }
+            } else if (ext.source === 'query' && ext.param) {
+                const params = new URLSearchParams(window.location.search);
+                const val = params.get(ext.param);
+                if (val) return val;
+            } else if (ext.source === 'dom' && ext.selector) {
+                const el = document.querySelector(ext.selector);
+                if (el) {
+                    return ext.attr ? el.getAttribute(ext.attr) : el.innerText?.trim();
+                }
+            }
+        }
+        
+        // Fallback: Dynamic Category-Aware Extraction
+        const category = (this.rule.category || 'webtoon').toLowerCase();
+        const categorySynonyms = {
+            manga: ['manga', 'manhwa', 'comic', 'toon'],
+            webtoon: ['webtoon', 'toon', 'comic', 'manga', 'manhwa'],
+            novel: ['novel', 'book']
+        };
+        const targetWords = categorySynonyms[category] || [category];
+        const dynamicPattern = new RegExp(`\\/(${targetWords.join('|')})\\/([a-zA-Z0-9_\\-]+)`, 'i');
+        const idMatch = document.URL.match(dynamicPattern);
+        let seriesId = idMatch ? idMatch[2] : null;
+        if (!seriesId) {
+            const params = new URLSearchParams(window.location.search);
+            seriesId = params.get('id') || params.get('no') || params.get('comic_id') || params.get('toon');
+        }
+        return seriesId || "0000";
+    }
+
     async getListItems() {
         const listCfg = this.rule.list || {};
         let container = document.querySelector(listCfg.container);
@@ -1200,7 +1249,14 @@ class GenericParser extends BaseParser {
         }
 
         // 2. DOM 기반 추출 (기본)
-        const container = iframeDocument.querySelector(viewerCfg.imageContainer) || iframeDocument;
+        let container = iframeDocument;
+        if (viewerCfg.imageContainer) {
+            container = iframeDocument.querySelector(viewerCfg.imageContainer);
+            if (!container) {
+                console.warn(`[GenericParser] 지정된 imageContainer(${viewerCfg.imageContainer})를 DOM에서 찾지 못했습니다.`);
+                return [];
+            }
+        }
         const imgs = Array.from(container.querySelectorAll(viewerCfg.imageItem || 'img'));
 
         return imgs.map(img => {
@@ -2342,13 +2398,15 @@ function getCommonPrefix(str1, str2) {
     while (i < str1.length && i < str2.length && str1[i] === str2[i]) {
         i++;
     }
-    let prefix = str1.substring(0, i).trim();
+    let prefix = str1.substring(0, i);
     
-    // Remove trailing partial numbers (e.g. "인싸 공명 1" → "인싸 공명")
-    // Stop at last word boundary before a number
-    prefix = prefix.replace(/\s+\d+$/, '');
+    // Remove trailing numbers (which belong to the episode number sequence)
+    // By doing this BEFORE trim(), we protect series titles that end in numbers
+    // followed by a space (e.g. "Mob Psycho 100 1" -> prefix "Mob Psycho 100 1" -> "Mob Psycho 100 ")
+    prefix = prefix.replace(/\d+$/, '');
+    prefix = prefix.replace(/[\s\-_]+$/, '');
     
-    return prefix;
+    return prefix.trim();
 }
 
 async function waitIframeLoad(iframe, url, viewerCfg = {}) {
@@ -4744,11 +4802,8 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
         const first = parser.parseListItem(list[0]);
         const last = parser.parseListItem(list[list.length - 1]);
         
-        // Extract Series ID from URL
-        // https://.../webtoon/123456?page=...
-        // Pattern: /novel/(\d+) or /webtoon/(\d+) or /comic/(\d+)
-        const idMatch = document.URL.match(/\/(novel|webtoon|comic)\/([0-9]+)/);
-        const seriesId = idMatch ? idMatch[2] : "0000";
+        // [v1.9.4] Extract Series ID via Parser rules with robust fallback
+        const seriesId = parser.getSeriesId();
 
         // Determine Root Folder Name & Series Title
         const rootFolder = parser.getFormattedTitle(seriesId, first.title, last.title, utils/* getCommonPrefix */.iL);
@@ -5405,7 +5460,7 @@ async function generateDownloadReport(seriesTitle, seriesId, listCount, failedEp
 
 
 async function main() {
-    console.log("🚀 TokiDownloader Loaded (New Core v1.9.3)");
+    console.log("🚀 TokiDownloader Loaded (New Core v1.9.4)");
     
     const logger = ui.LogBox.getInstance();
 
@@ -5478,10 +5533,15 @@ async function main() {
     const runFilenameMigration = async () => {
         if (!confirm('현재 작품의 파일명을 표준화하시겠습니까?\n(예: "0001 - 1화.cbz" -> "0001 - 제목 1화.cbz")')) return;
         
-        const idMatch = document.URL.match(/\/(novel|webtoon|comic)\/([0-9]+)/);
-        const seriesId = idMatch ? idMatch[2] : null;
+        const parserInfo = await ParserFactory/* ParserFactory */.O.getParser();
+        if (!parserInfo) {
+            alert('현재 사이트를 지원하는 파서를 찾을 수 없습니다.');
+            return;
+        }
+        
+        const seriesId = parserInfo.parser.getSeriesId();
 
-        if (!seriesId) {
+        if (!seriesId || seriesId === "0000") {
             alert('시리즈 ID를 찾을 수 없습니다.');
             return;
         }
@@ -5558,8 +5618,7 @@ async function main() {
             const first = parser.parseListItem(list[0]);
             const last = parser.parseListItem(list[list.length - 1]);
 
-            const idMatch = document.URL.match(/\/(novel|webtoon|comic)\/([0-9]+)/);
-            const seriesId = idMatch ? idMatch[2] : "0000";
+            const seriesId = parser.getSeriesId();
 
             // Determine Root Folder Name (Unified with Downloader)
             const rootFolder = parser.getFormattedTitle(seriesId, first.title, last.title, utils/* getCommonPrefix */.iL);
