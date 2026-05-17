@@ -329,11 +329,8 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
         const first = parser.parseListItem(list[0]);
         const last = parser.parseListItem(list[list.length - 1]);
         
-        // Extract Series ID from URL
-        // https://.../webtoon/123456?page=...
-        // Pattern: /novel/(\d+) or /webtoon/(\d+) or /comic/(\d+)
-        const idMatch = document.URL.match(/\/(novel|webtoon|comic)\/([0-9]+)/);
-        const seriesId = idMatch ? idMatch[2] : "0000";
+        // [v1.9.4] Extract Series ID via Parser rules with robust fallback
+        const seriesId = parser.getSeriesId();
 
         // Determine Root Folder Name & Series Title
         const rootFolder = parser.getFormattedTitle(seriesId, first.title, last.title, getCommonPrefix);

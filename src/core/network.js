@@ -191,16 +191,17 @@ async function getOrCreateFolder(folderName, parentId, token, category = 'Webtoo
     
     // 3. Get or create series folder in category
     // [v1.4.0 Fix] Search by ID prefix "[12345]" instead of full name to handle title changes
-    // folderName format: "[12345] Title"
-    const idMatch = folderName.match(/^\[\d+\]/);
+    // [v1.9.4 Fix] Support alphanumeric IDs and fallback to exact match if ID is "0000" to prevent collision
+    const idMatch = folderName.match(/^\[([a-zA-Z0-9_\-]+)\]/);
     const idPrefix = idMatch ? idMatch[0] : null;
+    const rawId = idMatch ? idMatch[1] : null;
     
     let queryPart = "";
-    if (idPrefix) {
+    if (idPrefix && rawId !== "0000") {
         // Search for folders containing "[12345]"
         queryPart = `name contains '${idPrefix}'`;
     } else {
-        // Fallback: Exact match
+        // Fallback: Exact match for 0000 or invalid ID
         queryPart = `name = '${folderName.replace(/'/g, "\\'")}'`; 
     }
 
@@ -229,7 +230,7 @@ async function getOrCreateFolder(folderName, parentId, token, category = 'Webtoo
     // Filter results to ensure it starts with the ID (double check)
     let foundFolder = null;
     if (seriesResult.files && seriesResult.files.length > 0) {
-        if (idPrefix) {
+        if (idPrefix && rawId !== "0000") {
             // Find the first folder that STARTS with the ID
             foundFolder = seriesResult.files.find(f => f.name.startsWith(idPrefix));
         } else {

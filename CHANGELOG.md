@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.9.4] - 2026-05-17
+
+### ✨ 제너릭 파서 고도화 및 도메인 유연성 확보
+- **하드코딩 idMatch 제거 및 지능형 Fallback ID 추출**: 룰 설정 내에 `idMatch`가 없거나 빈 값이어도 카테고리(Webtoon/Manga/Novel)와 `urlPattern`을 분석하여 작품 고유 ID를 안전하게 파싱해내는 지능형 복구 엔진을 탑재했습니다.
+- **RegExp 조립 도메인 대응**: 복잡한 사이트 주소 로테이션(예: `sbxh1.com` 등) 환경에서 수동 도메인 매칭 부담을 없애기 위해, `urlPattern` 기반으로 정규표현식을 실시간으로 자동 조립하여 대응하는 아키텍처로 개편했습니다.
+
+### 🛡️ 이미지 격리 차단 및 폴백 무결성 보장
+- **`imageRegex`와 `imageContainer` 상호배타적 처리**: 두 방식의 동작 한계를 명확히 규정하여, `imageContainer`가 명시된 경우 광고 배너 등 페이지 전체의 이미지가 과다 파싱되는 문제를 차단했습니다.
+- **수집 규칙 최적화**: `rules.sample.json` 내 `sbxh_webtoon` 및 `sbxh_manhwa` 항목의 불필요한 `imageRegex`를 완전히 지우고, 본문 이미지만 골라내도록 `div.vw-imgs` 컨테이너 전용으로 깔끔하게 마이그레이션했습니다.
+
 ## [v1.9.3] - 2026-05-17
 
 ### ✨ UI 아키텍처 현대화 및 클래스 기반 리팩터링 완료

@@ -13,7 +13,7 @@ import { getOAuthToken, fetchHistoryDirect } from './network.js';
 import { getCommonPrefix, blobToArrayBuffer, saveFile } from './utils.js';
 
 export async function main() {
-    console.log("🚀 TokiDownloader Loaded (New Core v1.9.3)");
+    console.log("🚀 TokiDownloader Loaded (New Core v1.9.4)");
     
     const logger = LogBox.getInstance();
 
@@ -86,10 +86,15 @@ export async function main() {
     const runFilenameMigration = async () => {
         if (!confirm('현재 작품의 파일명을 표준화하시겠습니까?\n(예: "0001 - 1화.cbz" -> "0001 - 제목 1화.cbz")')) return;
         
-        const idMatch = document.URL.match(/\/(novel|webtoon|comic)\/([0-9]+)/);
-        const seriesId = idMatch ? idMatch[2] : null;
+        const parserInfo = await ParserFactory.getParser();
+        if (!parserInfo) {
+            alert('현재 사이트를 지원하는 파서를 찾을 수 없습니다.');
+            return;
+        }
+        
+        const seriesId = parserInfo.parser.getSeriesId();
 
-        if (!seriesId) {
+        if (!seriesId || seriesId === "0000") {
             alert('시리즈 ID를 찾을 수 없습니다.');
             return;
         }
@@ -166,8 +171,7 @@ export async function main() {
             const first = parser.parseListItem(list[0]);
             const last = parser.parseListItem(list[list.length - 1]);
 
-            const idMatch = document.URL.match(/\/(novel|webtoon|comic)\/([0-9]+)/);
-            const seriesId = idMatch ? idMatch[2] : "0000";
+            const seriesId = parser.getSeriesId();
 
             // Determine Root Folder Name (Unified with Downloader)
             const rootFolder = parser.getFormattedTitle(seriesId, first.title, last.title, getCommonPrefix);

@@ -28,13 +28,15 @@ export function getCommonPrefix(str1, str2) {
     while (i < str1.length && i < str2.length && str1[i] === str2[i]) {
         i++;
     }
-    let prefix = str1.substring(0, i).trim();
+    let prefix = str1.substring(0, i);
     
-    // Remove trailing partial numbers (e.g. "인싸 공명 1" → "인싸 공명")
-    // Stop at last word boundary before a number
-    prefix = prefix.replace(/\s+\d+$/, '');
+    // Remove trailing numbers (which belong to the episode number sequence)
+    // By doing this BEFORE trim(), we protect series titles that end in numbers
+    // followed by a space (e.g. "Mob Psycho 100 1" -> prefix "Mob Psycho 100 1" -> "Mob Psycho 100 ")
+    prefix = prefix.replace(/\d+$/, '');
+    prefix = prefix.replace(/[\s\-_]+$/, '');
     
-    return prefix;
+    return prefix.trim();
 }
 
 export async function waitIframeLoad(iframe, url, viewerCfg = {}) {

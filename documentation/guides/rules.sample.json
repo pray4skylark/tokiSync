@@ -60,10 +60,14 @@
       }
     },
     {
-      "id": "blacktoon_webtoon",
-      "name": "블랙툰 웹툰 전용 룰",
-      "urlPattern": ".*/webtoon/.*",
+      "id": "sbxh_webtoon",
+      "name": "SBXH 웹툰 규칙",
+      "urlPattern": ".*sbxh[0-9]*\\..*/webtoon/.*",
       "category": "Webtoon",
+      "idExtraction": {
+        "source": "url",
+        "regex": "\\/webtoon\\/([0-9]+)" 
+      },      
       "meta": {
         "title": "h1.hero-v2-title",
         "author": "div.hero-v2-author",
@@ -91,8 +95,7 @@
       },
       "viewer": {
         "fetchMethod": "iframe",
-        "imageRegex": "https?:\\\\/\\\\/[a-zA-Z0-9_.\\\\/-]+\\\\.(?:jpg|png|webp|gif)",
-        "imageContainer": "div.vw-imgs, main.vw-main",
+        "imageContainer": "div.vw-imgs",
         "imageItem": "img",
         "lazyAttrOptions": [
           "data-src",
@@ -102,9 +105,13 @@
       }
     },
     {
-      "id": "blacktoon_manhwa",
-      "name": "블랙툰 만화 전용 룰",
-      "urlPattern": ".*/manhwa/.*",
+      "id": "sbxh_manhwa",
+      "name": "SBXH 만화 규칙",
+      "urlPattern": ".*sbxh[0-9]*\\..*/manhwa/.*", 
+      "idExtraction": {
+        "source": "url",
+        "regex": "\\/manhwa\\/([0-9]+)" 
+      },
       "category": "Manga",
       "meta": {
         "title": "h1.hero-v2-title",
@@ -133,8 +140,7 @@
       },
       "viewer": {
         "fetchMethod": "iframe",
-        "imageRegex": "https?://[a-zA-Z0-9_./-]+\\.(?:jpg|png|webp|gif)",
-        "imageContainer": "div.vw-imgs, main.vw-main",
+        "imageContainer": "div.vw-imgs",
         "imageItem": "img",
         "lazyAttrOptions": [
           "data-src",
@@ -144,10 +150,14 @@
       }
     },
     {
-      "id": "blacktoon_novel",
-      "name": "블랙툰 소설 전용 룰",
-      "urlPattern": ".*/novel/.*",
+      "id": "sbxh_novel",
+      "name": "SBXH 소설 규칙",
+      "urlPattern": ".*sbxh[0-9]*\\..*/novel/.*",
       "category": "Novel",
+      "idExtraction": {
+        "source": "url",
+        "regex": "\\/novel\\/([0-9]+)" 
+      },
       "meta": {
         "title": "div.nd-info > h1",
         "author": "div.nd-meta span:first-child",
