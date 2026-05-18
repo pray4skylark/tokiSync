@@ -38,6 +38,9 @@ const internalColumnWidth = ref('auto');
 function recalcNovelPages() {
   if (props.mode !== 'page' || !rendererRef.value) {
     internalColumnWidth.value = 'auto';
+    nextTick(() => {
+      emit('ready');
+    });
     return;
   }
 
@@ -68,7 +71,6 @@ const rendererStyle = computed(() => {
 });
 
 const segmentStyle = computed(() => {
-  if (props.mode !== 'page') return {};
   return {
     lineHeight: props.settings.lineHeight || 1.8,
     fontSize: props.settings.fontSize + 'px'
@@ -94,12 +96,26 @@ watch(() => [props.paragraphs, props.mode, props.settings.fontSize, props.settin
   margin: 0 auto;
   transition: transform 0.3s cubic-bezier(0.2, 0, 0, 1);
   will-change: transform;
+  box-sizing: border-box;
+}
+
+/* Scroll mode layout padding (Matches V1 py-16 px-5 md:px-10 exactly) */
+.v2-text-renderer.scroll {
+  padding: 4rem 1.25rem 6rem;
+}
+
+@media (min-width: 768px) {
+  .v2-text-renderer.scroll {
+    padding: 4rem 2.5rem 6rem;
+  }
 }
 
 .v2-text-segment {
   display: block;
-  margin-bottom: 1.5rem;
-  word-break: break-all;
+  margin-bottom: 1.2rem;
+  word-break: break-word;
+  text-align: justify;
+  text-indent: 1.5em;
   white-space: pre-wrap;
 }
 

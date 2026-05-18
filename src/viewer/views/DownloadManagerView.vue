@@ -23,7 +23,7 @@
             <button 
               @click="runGC()" 
               :disabled="isGCRunning"
-              class="px-5 py-2.5 bg-theme-accent hover:bg-theme-accent text-theme-accent border border-theme-accent rounded-xl text-xs font-black transition-all hover:scale-105 disabled:opacity-50"
+              class="px-5 py-2.5 bg-theme-accent hover:brightness-110 text-white border border-theme-accent rounded-xl text-xs font-black transition-all hover:scale-105 disabled:opacity-50"
             >
               <span v-if="isGCRunning" class="flex items-center">
                 <svg class="w-3 h-3 animate-spin mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
@@ -58,7 +58,7 @@
                   <span 
                     class="px-2 py-1 rounded-md text-[9px] font-black uppercase tracking-tighter"
                     :class="{
-                      'bg-theme-accent text-theme-accent': item.status === 'downloading',
+                      'bg-theme-accent/20 text-theme-accent': item.status === 'downloading',
                       'bg-green-500/20 text-green-400': item.status === 'completed',
                       'bg-red-500/20 text-red-400': item.status === 'failed',
                       'bg-zinc-500/20 text-zinc-400': item.status === 'pending',

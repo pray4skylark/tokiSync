@@ -131,7 +131,7 @@
                   </div>
 
                   <!-- [v2.1] Viewer Engine Version Selection -->
-                  <div class="col-span-1 md:col-span-2 p-5 rounded-[24px] bg-theme-accent border border-theme-accent flex items-center justify-between">
+                  <div class="col-span-1 md:col-span-2 p-5 rounded-[24px] bg-black/20 border border-theme-accent flex items-center justify-between">
                     <div class="flex flex-col">
                       <span class="text-[11px] font-black text-theme-accent uppercase tracking-tighter">Viewer Engine</span>
                       <span class="text-[9px] text-theme-muted uppercase opacity-70">V1: Legacy / V2: Progress Tracking (BETA)</span>

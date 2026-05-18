@@ -68,6 +68,23 @@
                     @ready="onRendererReady" />
       
       <div v-else-if="!viewerContent && !isDownloading" class="text-zinc-600 py-20">콘텐츠 로드 대기 중...</div>
+
+      <!-- End of Chapter: 다음 화 안내 인라인 섹션 (Scroll Mode) -->
+      <div v-if="viewerContent" class="next-ep-guide">
+        <p class="next-ep-guide-label">End of Chapter</p>
+        <div v-if="nextEpisodeData" class="next-ep-guide-content">
+          <img :src="nextEpisodeData.thumbnail" class="next-ep-thumb">
+          <p class="next-ep-title">{{ nextEpisodeData.name || nextEpisodeData.title }}</p>
+          <div class="next-ep-actions">
+            <button @click="goToNextEpisode" class="next-ep-btn-primary">다음 화 보기</button>
+            <button @click="exitViewer" class="next-ep-btn-ghost">목록으로</button>
+          </div>
+        </div>
+        <div v-else class="next-ep-guide-content">
+          <p class="next-ep-last">마지막 화입니다.</p>
+          <button @click="exitViewer" class="next-ep-btn-ghost">목록으로 돌아가기</button>
+        </div>
+      </div>
     </ScrollLayer>
 
     <PageLayer v-else>
@@ -232,6 +249,12 @@ const keyboard = useKeyboard();
 
 // [v2.9-fix] Guard against redundant restore calls during page navigation
 let hasRestoredForThisEpisode = false;
+
+// [v2.9.3] 에피소드 전환 시 복구 플래그 초기화
+watch(currentEpisode, () => {
+  hasRestoredForThisEpisode = false;
+  isRestoring.value = true;
+});
 
 const isNovelMode = computed(() => viewerContent.value?.type === 'text');
 const currentImage = computed(() => viewerContent.value?.images?.[currentPage.value - 1] || null);

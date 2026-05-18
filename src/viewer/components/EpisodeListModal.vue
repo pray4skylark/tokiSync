@@ -14,7 +14,7 @@
         </div>
 
         <!-- Smart Action Bar: Integrated Read First / Resume -->
-        <div class="p-6 md:p-8 bg-theme-accent border-b border-theme-accent flex items-center justify-between">
+        <div class="p-6 md:p-8 bg-black/20 border-b border-white/5 flex items-center justify-between">
           <div class="flex-grow">
             <p v-if="lastReadEpisode" class="text-xs font-bold text-theme-accent uppercase tracking-tight mb-1">Recent Progress</p>
             <p class="text-sm font-black truncate max-w-[200px] md:max-w-xs">
@@ -22,7 +22,7 @@
             </p>
           </div>
           <button @click="handleSmartRead" 
-                  class="bg-theme-accent hover:bg-theme-accent text-white px-6 py-3 rounded-2xl font-black text-sm uppercase tracking-tighter transition-all flex items-center shadow-lg shadow-theme-accent active:scale-95">
+                  class="bg-theme-accent hover:brightness-110 text-white px-6 py-3 rounded-2xl font-black text-sm uppercase tracking-tighter transition-all flex items-center shadow-lg shadow-theme-accent active:scale-95">
             <span v-if="lastReadEpisode">Continue Reading</span>
             <span v-else>Read First Episode</span>
             <svg class="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M13 7l5 5m0 0l-5 5m5-5H6"></path></svg>
@@ -51,7 +51,7 @@
               <p class="text-sm md:text-base font-black tracking-tight truncate" :class="{'text-white': currentEpisode?.id === ep.id}">{{ ep.title }}</p>
               <div class="flex items-center mt-1 space-x-2">
                 <p class="text-[9px] font-bold uppercase tracking-tight" :class="currentEpisode?.id === ep.id ? 'text-theme-accent' : 'text-zinc-500'">{{ ep.date }}</p>
-                <span v-if="ep.isRead" class="text-[9px] font-black uppercase tracking-tighter px-1.5 py-0.5 rounded bg-theme-accent text-theme-accent">READ</span>
+                <span v-if="ep.isRead" class="text-[9px] font-black uppercase tracking-tighter px-1.5 py-0.5 rounded bg-theme-accent/20 text-theme-accent">READ</span>
               </div>
             </div>
           </div>
