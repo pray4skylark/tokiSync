@@ -1,0 +1,134 @@
+{
+  "version": "1.0",
+  "rules": [
+    {
+      "id": "blacktoon_webtoon",
+      "name": "블랙툰 웹툰 전용 룰",
+      "urlPattern": ".*/webtoon/.*",
+      "category": "Webtoon",
+      "meta": {
+        "title": "h1.hero-v2-title",
+        "author": "div.hero-v2-author",
+        "thumb": {
+          "selector": "div.hero-v2-thumb > img",
+          "attr": "src"
+        },
+        "status": "span.pill-status",
+        "tags": "div.hero-v2-tags"
+      },
+      "list": {
+        "container": "ul.ep-list-v2",
+        "item": "li.ep-row-v2",
+        "num": "span.ep-row-v2-no",
+        "title": ".ep-row-v2-title strong",
+        "sub": {
+          "selector": "span.sub",
+          "regex": "\\[(.*?)\\]"
+        },
+        "link": {
+          "selector": "a.ep-row-v2-link",
+          "attr": "href"
+        },
+        "date": "span.ep-row-v2-date"
+      },
+      "viewer": {
+        "fetchMethod": "iframe",
+        "imageRegex": "https?:\\\\/\\\\/[a-zA-Z0-9_.\\\\/-]+\\\\.(?:jpg|png|webp|gif)",
+        "imageContainer": "div.vw-imgs, main.vw-main",
+        "imageItem": "img",
+        "lazyAttrOptions": [
+          "data-src",
+          "data-lazy",
+          "src"
+        ]
+      }
+    },
+    {
+      "id": "blacktoon_manhwa",
+      "name": "블랙툰 만화 전용 룰",
+      "urlPattern": ".*/manhwa/.*",
+      "category": "Manga",
+      "meta": {
+        "title": "h1.hero-v2-title",
+        "author": "div.hero-v2-author",
+        "thumb": {
+          "selector": "div.hero-v2-thumb > img",
+          "attr": "src"
+        },
+        "status": "span.pill-status",
+        "tags": "div.hero-v2-tags"
+      },
+      "list": {
+        "container": "ul.ep-list-v2",
+        "item": "li.ep-row-v2",
+        "num": "span.ep-row-v2-no",
+        "title": ".ep-row-v2-title strong",
+        "sub": {
+          "selector": "span.sub",
+          "regex": "\\[(.*?)\\]"
+        },
+        "link": {
+          "selector": "a.ep-row-v2-link",
+          "attr": "href"
+        },
+        "date": "span.ep-row-v2-date"
+      },
+      "viewer": {
+        "fetchMethod": "iframe",
+       "imageRegex": "https?://[a-zA-Z0-9_./-]+\\.(?:jpg|png|webp|gif)",
+        "imageContainer": "div.vw-imgs, main.vw-main",
+        "imageItem": "img",
+        "lazyAttrOptions": [
+          "data-src",
+          "data-lazy",
+          "src"
+        ]
+      }
+    },
+    {
+      "id": "blacktoon_novel",
+      "name": "블랙툰 소설 전용 룰",
+      "urlPattern": ".*/novel/.*",
+      "category": "Novel",
+      "meta": {
+        "title": "div.nd-info > h1",
+        "author": "div.nd-meta span:first-child",
+        "thumb": {
+          "selector": "div.nd-thumb img",
+          "attr": "src"
+        },
+        "tags": "div.hero-v2-tags"
+      },
+      "list": {
+        "container": "ul.novel-eps",
+        "item": "li",
+        "num": "span.ne-num",
+        "title": "span.ne-title",
+        "sub": {
+          "selector": "span.sub",
+          "regex": "\\[(.*?)\\]"
+        },
+        "link": {
+          "selector": "a",
+          "attr": "href"
+        },
+        "date": "span.ne-date"
+      },
+      "viewer": {
+        "fetchMethod": "api",
+        "decryptApi": {
+          "endpoint": "/api/novel-content",
+          "cookieName": "nv",
+          "clientHeader": "shadow-v2"
+        },
+        "seriesTitle": "div.crumb a:last-of-type",
+        "episodeTitle": "h1.ne-h1",
+        "episodeNum": "div.crumb strong",
+        "novelContent": "article.novel-viewer",
+        "imageContainer": "article.novel-viewer",
+        "imageItem": "p",
+        "lazyAttrOptions": []
+      }
+    }
+  ]
+}
