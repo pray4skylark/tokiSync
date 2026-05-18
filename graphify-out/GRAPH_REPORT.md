@@ -5,12 +5,12 @@
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 2450 nodes · 5804 edges · 136 communities (117 shown, 19 thin omitted)
+- 2455 nodes · 5815 edges · 139 communities (120 shown, 19 thin omitted)
 - Extraction: 98% EXTRACTED · 2% INFERRED · 0% AMBIGUOUS · INFERRED: 136 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `7e286aa8`
+- Built from commit: `0ad3f6fe`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -90,8 +90,8 @@
 - [[_COMMUNITY_Community 72|Community 72]]
 - [[_COMMUNITY_Community 73|Community 73]]
 - [[_COMMUNITY_Community 74|Community 74]]
+- [[_COMMUNITY_Community 75|Community 75]]
 - [[_COMMUNITY_Community 76|Community 76]]
-- [[_COMMUNITY_Community 77|Community 77]]
 - [[_COMMUNITY_Community 78|Community 78]]
 - [[_COMMUNITY_Community 79|Community 79]]
 - [[_COMMUNITY_Community 80|Community 80]]
@@ -138,12 +138,15 @@
 - [[_COMMUNITY_Community 121|Community 121]]
 - [[_COMMUNITY_Community 122|Community 122]]
 - [[_COMMUNITY_Community 123|Community 123]]
+- [[_COMMUNITY_Community 124|Community 124]]
 - [[_COMMUNITY_Community 125|Community 125]]
 - [[_COMMUNITY_Community 126|Community 126]]
 - [[_COMMUNITY_Community 127|Community 127]]
-- [[_COMMUNITY_Community 128|Community 128]]
 - [[_COMMUNITY_Community 129|Community 129]]
 - [[_COMMUNITY_Community 130|Community 130]]
+- [[_COMMUNITY_Community 131|Community 131]]
+- [[_COMMUNITY_Community 132|Community 132]]
+- [[_COMMUNITY_Community 133|Community 133]]
 
 ## God Nodes (most connected - your core abstractions)
 1. `Pt()` - 47 edges
@@ -162,246 +165,246 @@
   tools/novel-decrypt-poc.user.js → src/viewer/composables/useStore.js
 - `ya()` --calls--> `nt`  [INFERRED]
   dist-viewer/assets/index.js → docs/assets/index.js
-- `ua()` --calls--> `t`  [INFERRED]
-  dist-viewer/assets/index.js → src/viewer/composables/useStore.js
-- `gd` --calls--> `t`  [INFERRED]
-  dist-viewer/assets/index.js → src/viewer/composables/useStore.js
-- `H()` --calls--> `Tt()`  [INFERRED]
+- `Ce()` --calls--> `nt`  [INFERRED]
   dist-viewer/assets/index.js → docs/assets/index.js
+- `It()` --calls--> `nt`  [INFERRED]
+  dist-viewer/assets/index.js → docs/assets/index.js
+- `wn()` --calls--> `t`  [INFERRED]
+  dist-viewer/assets/index.js → src/viewer/composables/useStore.js
 
-## Communities (136 total, 19 thin omitted)
+## Communities (139 total, 19 thin omitted)
 
 ### Community 0 - "Community 0"
 Cohesion: 0.02
-Nodes (133): _0, _a(), a0, ab, Ah, at, av, ay (+125 more)
+Nodes (129): _0, a0, ab, Ah, at, av, ay, _b (+121 more)
 
 ### Community 1 - "Community 1"
 Cohesion: 0.03
-Nodes (100): Ad(), addKeys(), Ae, ag(), Ai(), Al, bg, Bi() (+92 more)
+Nodes (96): addKeys(), Ae, ag(), Ai(), bg, bl(), cd(), cg (+88 more)
 
 ### Community 2 - "Community 2"
 Cohesion: 0.05
-Nodes (9): fs(), Jt, Kn(), le(), lh, uh, us(), uu() (+1 more)
+Nodes (26): bm, cm, Ct(), fd(), fm, gm, hp, ju() (+18 more)
 
 ### Community 3 - "Community 3"
 Cohesion: 0.06
-Nodes (40): arrayBufferToBase64(), CbzBuilder, checkInjection(), config, detectSite(), EpubBuilder, fetchHistory(), fetchImages() (+32 more)
+Nodes (63): _a(), am, An(), Be(), bn(), _c, ca(), Cc (+55 more)
 
 ### Community 4 - "Community 4"
-Cohesion: 0.08
-Nodes (62): af, ba(), Bs(), cs(), dl(), Dn(), ef, er (+54 more)
+Cohesion: 0.06
+Nodes (40): arrayBufferToBase64(), CbzBuilder, checkInjection(), config, detectSite(), EpubBuilder, fetchHistory(), fetchImages() (+32 more)
 
 ### Community 5 - "Community 5"
 Cohesion: 0.08
-Nodes (58): An(), Ar(), au(), bf, _c, ca(), Cc, Ce() (+50 more)
-
-### Community 6 - "Community 6"
-Cohesion: 0.08
 Nodes (50): TokiApiClient, checkNextEpisodeTrigger(), closeEpisodeModal(), loadViewer(), openEpisodeList(), openEpisodeListFromViewer(), preloadNextEpisode(), changeFontSize() (+42 more)
 
-### Community 7 - "Community 7"
+### Community 6 - "Community 6"
 Cohesion: 0.03
 Nodes (52): useSpread(), approxPara, appTheme, buildPageSlots(), config, container, currentEpisode, currentEpisodeIndex (+44 more)
 
-### Community 8 - "Community 8"
+### Community 7 - "Community 7"
 Cohesion: 0.06
 Nodes (34): CbzBuilder, getConfig(), initConfig(), isConfigValid(), migrateConfig(), saveConfig(), toggleDebug(), detectSite() (+26 more)
 
-### Community 9 - "Community 9"
+### Community 8 - "Community 8"
 Cohesion: 0.08
-Nodes (49): bd(), Be(), bn(), bt(), cn(), di(), Do(), ff() (+41 more)
+Nodes (51): add(), addKey(), au(), bh(), Bo, bt(), cn(), Co() (+43 more)
+
+### Community 9 - "Community 9"
+Cohesion: 0.09
+Nodes (38): Ad(), Bc(), bd(), Bs(), di(), Do(), El, fl() (+30 more)
 
 ### Community 10 - "Community 10"
+Cohesion: 0.1
+Nodes (33): isAudioRunning(), startSilentAudio(), stopSilentAudio(), getConfig(), isConfigValid(), setConfig(), showConfigModal(), detectSite() (+25 more)
+
+### Community 11 - "Community 11"
 Cohesion: 0.04
 Nodes (45): 3-1. 순환 Import 제거 (H-1), 3-2. 취소 플래그 (C-2, C-3), 3-3. fetchAndUnzip abort 처리 (C-3), 3-4. 격리된 다운로드 함수 (H-2), 3-5. saveToPersistentCache — seriesId 추가 (C-1), 4-1. exitViewer, 4-2. startReading — abort 정상 처리, 4-3. downloads 뷰 추가 (+37 more)
 
-### Community 11 - "Community 11"
-Cohesion: 0.1
-Nodes (41): applyTextSettings(), changeFontSize(), checkNextEpisodeTrigger(), closeEpisodeModal(), currentBookList, fetchAndUnzip(), fetchAndUnzipSequentialFallback(), formatSize() (+33 more)
-
 ### Community 12 - "Community 12"
-Cohesion: 0.1
-Nodes (41): applyTextSettings(), changeFontSize(), checkNextEpisodeTrigger(), closeEpisodeModal(), currentBookList, fetchAndUnzip(), fetchAndUnzipSequentialFallback(), formatSize() (+33 more)
+Cohesion: 0.05
+Nodes (10): Ao(), fc(), Ii(), Io, ml, ne, pd(), To() (+2 more)
 
 ### Community 13 - "Community 13"
-Cohesion: 0.05
-Nodes (9): Ao(), fc(), Ii(), Io, ml, pd(), To(), Uc() (+1 more)
+Cohesion: 0.1
+Nodes (41): applyTextSettings(), changeFontSize(), checkNextEpisodeTrigger(), closeEpisodeModal(), currentBookList, fetchAndUnzip(), fetchAndUnzipSequentialFallback(), formatSize() (+33 more)
 
 ### Community 14 - "Community 14"
-Cohesion: 0.08
-Nodes (29): ac(), add(), addKey(), Ap(), Bc(), dp, El, fi() (+21 more)
+Cohesion: 0.1
+Nodes (41): applyTextSettings(), changeFontSize(), checkNextEpisodeTrigger(), closeEpisodeModal(), currentBookList, fetchAndUnzip(), fetchAndUnzipSequentialFallback(), formatSize() (+33 more)
 
 ### Community 15 - "Community 15"
-Cohesion: 0.08
-Nodes (37): bh(), Bo, Co(), cr, dh(), Dr(), Ds, Ee() (+29 more)
+Cohesion: 0.07
+Nodes (29): bf, Dr(), Dt, ei, Es(), _f, gi, hf (+21 more)
 
 ### Community 16 - "Community 16"
 Cohesion: 0.05
 Nodes (39): [C-1] `episodeData` ↔ `episodeCache` 조인 불가능 문제, [C-2] AbortController — `fetch()` 기반이지만 취소 전파 설계 누락, [C-3] `exitViewer()`의 `isDownloading` 강제 리셋 시 Race Condition, code:js (// db.js version 3), code:js (// 수정 전), code:js (// useFetcher.js L373: 이곳도 순환 import 존재), code:js (// startReading() L562), code:js (async function extractImages(zip, files) {) (+31 more)
 
 ### Community 17 - "Community 17"
+Cohesion: 0.1
+Nodes (27): aa(), Ap(), ch(), cu(), Dn(), fi(), he(), ia() (+19 more)
+
+### Community 18 - "Community 18"
 Cohesion: 0.09
 Nodes (18): handleViewerClick(), loadViewerSettings(), toggleControls(), toggleCoverMode(), togglePreloadMode(), toggleRtlMode(), toggleViewMode(), updateButtonStates() (+10 more)
 
-### Community 18 - "Community 18"
-Cohesion: 0.07
-Nodes (32): aa(), cf(), Cp(), dm, du(), $e(), Ec, Ep() (+24 more)
-
 ### Community 19 - "Community 19"
-Cohesion: 0.09
-Nodes (14): API, TokiApiClient, TokiApiClient, bridge, ScriptBridge, b64urlDecode(), b64urlEncode(), getIdsFromUrl() (+6 more)
+Cohesion: 0.08
+Nodes (31): Al, Bi(), cs(), _d(), ef, ga(), hi(), It() (+23 more)
 
 ### Community 20 - "Community 20"
-Cohesion: 0.09
-Nodes (4): hh, xp(), y0(), Zn
-
-### Community 21 - "Community 21"
-Cohesion: 0.13
-Nodes (14): isAudioRunning(), startSilentAudio(), stopSilentAudio(), getConfig(), isConfigValid(), setConfig(), showConfigModal(), detectSite() (+6 more)
-
-### Community 22 - "Community 22"
 Cohesion: 0.07
 Nodes (16): { currentView, showSettings, showDownloadManager, isAddModalOpen, isSyncing, goBackToLibrary, reloadApp, appTheme, toggleTheme }, { currentView, viewerDefaults, initApp }, arr, dd, mm, name, yy, input (+8 more)
 
-### Community 23 - "Community 23"
+### Community 21 - "Community 21"
 Cohesion: 0.07
 Nodes (29): 📥 Client (Tampermonkey), 📊 Dashboard (TokiView), 📡 Server (Google Apps Script), 📜 TokiSync Update History, v1.0.0 (Initial Release) - 2025.11.28, v1.0.0 (Initial Release) - 2025.12.01, v1.1.0 (Library API) - 2025.12.01, v1.1.0 (Remote Action) - 2025.12.03 (+21 more)
 
-### Community 24 - "Community 24"
-Cohesion: 0.1
-Nodes (18): arrayBufferToBase64(), b64urlDecode(), b64urlEncode(), checkInjection(), config, fetchNovelText(), getConfig(), getCookie() (+10 more)
+### Community 22 - "Community 22"
+Cohesion: 0.14
+Nodes (24): arrayBufferToBase64(), checkInjection(), fetchHistory(), fetchHistoryDirect(), fetchImages(), generateDownloadReport(), getBooksByCacheId(), getMergeIndexFragment() (+16 more)
 
 ### Community 25 - "Community 25"
-Cohesion: 0.08
-Nodes (20): am, as(), ci, da(), Eo(), fa(), getDatabaseNames(), Hs() (+12 more)
+Cohesion: 0.11
+Nodes (17): b64urlDecode(), b64urlEncode(), checkSingleHistoryDirect(), config, fetchNovelText(), fetchToken(), getConfig(), getCookie() (+9 more)
 
 ### Community 26 - "Community 26"
-Cohesion: 0.14
-Nodes (22): fetchImages(), generateDownloadReport(), parseRangeSpec(), processItem(), SLEEP_POLICIES, tokiDownload(), arrayBufferToBase64(), fetchHistory() (+14 more)
+Cohesion: 0.12
+Nodes (26): 1. 📡 GAS 서버 배포, 2. 📥 UserScript (수집기) 설치, 3. 📊 뷰어 실행, ⚡️ TokiSync (토끼싱크) v1.10.0, ⚡️ TokiSync (토끼싱크) v1.8.3, ⚡️ TokiSync (토끼싱크) v1.9.41, ⚡️ TokiSync (토끼싱크) v1.9.5, ☁️ 다운로드 (+18 more)
 
 ### Community 27 - "Community 27"
-Cohesion: 0.12
-Nodes (3): BaseParser, extractEpisodeData(), GenericParser
+Cohesion: 0.13
+Nodes (25): Ar(), as(), ba(), cf(), cl(), du(), Ec, er (+17 more)
 
 ### Community 28 - "Community 28"
+Cohesion: 0.13
+Nodes (25): dd(), ff(), Gs(), hn, hr(), If(), ji(), jr() (+17 more)
+
+### Community 29 - "Community 29"
 Cohesion: 0.15
 Nodes (23): activeBlobUrls, base64ToBytes(), cancelDownload(), cancelViewerDownload(), downloadBytesOnly(), downloadProgress, extractImages(), fetchAndUnzip() (+15 more)
 
 ### Community 30 - "Community 30"
-Cohesion: 0.08
-Nodes (24): code:block1 (/graphify                                             # full), code:bash (if [ ! -f graphify-out/.graphify_python ]; then), code:bash (graphify cluster-only .), code:bash (graphify query "QUESTION"), code:bash ($(cat graphify-out/.graphify_python) -m graphify save-result), code:bash (graphify path "NODE_A" "NODE_B"), code:bash ($(cat graphify-out/.graphify_python) -m graphify save-result), code:bash ($(cat graphify-out/.graphify_python) -c ") (+16 more)
-
-### Community 31 - "Community 31"
 Cohesion: 0.13
 Nodes (22): analyzeList(), analyzeMeta(), analyzeViewer(), buildAiPayload(), buildRulesDraft(), clip(), detectPageType(), { draft } (+14 more)
 
+### Community 31 - "Community 31"
+Cohesion: 0.13
+Nodes (4): getImageDimensions(), MenuModal, stopSilentAudio(), TreeRuleEditor
+
+### Community 32 - "Community 32"
+Cohesion: 0.13
+Nodes (11): TokiApiClient, b64urlDecode(), b64urlEncode(), fetchNovelText(), getCookie(), getIdsFromUrl(), hmacSign(), resetNvCookie() (+3 more)
+
 ### Community 33 - "Community 33"
-Cohesion: 0.21
-Nodes (20): checkSingleHistoryDirect(), fetchHistory(), fetchHistoryDirect(), fetchImages(), fetchToken(), getBooksByCacheId(), getMergeIndexFragment(), getOrCreateFolder() (+12 more)
+Cohesion: 0.09
+Nodes (23): code:bash (mkdir -p graphify-out), code:bash ($(cat graphify-out/.graphify_python) -c "), code:bash (graphify export obsidian), code:bash (graphify export html  # auto-aggregates to community view if), code:bash (graphify export wiki), code:bash (graphify export svg), code:bash (graphify export graphml), code:bash (graphify benchmark) (+15 more)
 
 ### Community 34 - "Community 34"
-Cohesion: 0.09
-Nodes (23): code:bash (mkdir -p graphify-out), code:bash ($(cat graphify-out/.graphify_python) -c "), code:bash (LOCAL_PATH=$(graphify clone <github-url> [--branch <branch>]), code:bash (graphify export wiki), code:bash (graphify export svg), code:bash (graphify export graphml), code:bash (graphify benchmark), code:bash ($(cat graphify-out/.graphify_python) -c ") (+15 more)
-
-### Community 35 - "Community 35"
-Cohesion: 0.13
-Nodes (22): 1. 📡 GAS 서버 배포, 2. 📥 UserScript (수집기) 설치, 3. 📊 뷰어 실행, ⚡️ TokiSync (토끼싱크) v1.8.3, ⚡️ TokiSync (토끼싱크) v1.9.41, ⚡️ TokiSync (토끼싱크) v1.9.5, ☁️ 다운로드, 📜 라이선스 (+14 more)
-
-### Community 36 - "Community 36"
 Cohesion: 0.14
 Nodes (16): activeBlobUrls, allSeries, clearBlobUrls(), DEFAULT_DOMAINS, el, filterData(), handleMessage(), loadNextThumbnail() (+8 more)
 
-### Community 37 - "Community 37"
+### Community 35 - "Community 35"
 Cohesion: 0.09
 Nodes (21): 10.10. 레이지 로딩 고속화 (Hybrid Jump Engine - v1.7.4), 10.11. V1-Logic 기반 정밀 텍스트 렌더러 (Option A - v1.8.0), 10.4. 고성능 뷰어 엔진 (Virtual Scroll & UI Optimization), 10.5. Smart Double Spread (지능형 2쪽 보기), 10.6. Auto-Crop Margin Detection (자동 여백 제거), 10.7. Metadata Persistence & History Sync (v1.7.0 Final), 10.8. Viewer Stability Optimization (v1.7.0 Final), 10.9. v1.7.0 통합 엔진 최적화 및 안정화 (Final Specs) (+13 more)
 
-### Community 38 - "Community 38"
-Cohesion: 0.14
-Nodes (9): generateDownloadReport(), LogBox, markDownloadedItems(), Notifier, parseRangeSpec(), ParserFactory, saveFile(), startSilentAudio() (+1 more)
+### Community 36 - "Community 36"
+Cohesion: 0.2
+Nodes (6): extractEpisodeData(), GenericParser, markDownloadedItems(), parseRangeSpec(), ParserFactory, tokiDownload()
 
-### Community 39 - "Community 39"
-Cohesion: 0.15
-Nodes (4): getImageDimensions(), MenuModal, stopSilentAudio(), TreeRuleEditor
-
-### Community 40 - "Community 40"
-Cohesion: 0.21
-Nodes (4): ju(), Ns(), or, Xt()
-
-### Community 41 - "Community 41"
-Cohesion: 0.15
-Nodes (21): initBridge(), cleanupBlobUrls(), cleanupEpisodeData(), deleteItem(), exitViewer(), forceCloudSync(), goBackToLibrary(), goToNextEpisode() (+13 more)
-
-### Community 42 - "Community 42"
+### Community 37 - "Community 37"
 Cohesion: 0.1
 Nodes (20): 1. Project Identity & Architecture, 2.1. Viewer (Vue 3 SPA), 2.2. Core (Tampermonkey UserScript), 2.3. GAS Server (Google Apps Script), 2. File Structure & Dependencies, 3. Naming & Data Standards, 4. Theme System Conventions, 5.1. Tech-Stack Specific AI Skill Usage (+12 more)
 
-### Community 44 - "Community 44"
-Cohesion: 0.11
-Nodes (18): Changelog, 🚀 Direct Drive 업로드 안정화 및 자가 회복 로직 도입, 🐛 GAS 번들 빌더 누락 핫픽스 (DriveAccessService 해결), ✨ Kavita 호환성 강화 및 배치 다운로드 시스템, 🛠 Technical Details (v1.6.0), ✨ UI 아키텍처 현대화 및 클래스 기반 리팩터링 완료, [v1.1.3] - 2026-01-XX, [v1.6.0] - 2026-03-15 (+10 more)
+### Community 38 - "Community 38"
+Cohesion: 0.19
+Nodes (4): fs(), le(), uu(), vf()
 
-### Community 45 - "Community 45"
+### Community 39 - "Community 39"
+Cohesion: 0.16
+Nodes (20): cleanupBlobUrls(), cleanupEpisodeData(), deleteItem(), exitViewer(), forceCloudSync(), goBackToLibrary(), goToNextEpisode(), goToPrevEpisode() (+12 more)
+
+### Community 41 - "Community 41"
+Cohesion: 0.11
+Nodes (18): Changelog, 🚀 Direct Drive 업로드 안정화 및 자가 회복 로직 도입, 🐛 GAS 번들 빌더 누락 핫픽스 (DriveAccessService 해결), ✨ UI 아키텍처 현대화 및 클래스 기반 리팩터링 완료, [v1.10.0] - 2026-05-18, [v1.1.3] - 2026-01-XX, [v1.3.5] - 2026-02-06, [v1.7.3] - 2026-04-08 (+10 more)
+
+### Community 42 - "Community 42"
+Cohesion: 0.11
+Nodes (18): 🤖 AI & Agents, Antigravity Skill Bundles, Beginner → Intermediate → Advanced, code:bash (npx antigravity-awesome-skills), Contributing, 🎨 Creative & Content, Essentials & Core, 🎮 Game Development (+10 more)
+
+### Community 43 - "Community 43"
+Cohesion: 0.11
+Nodes (18): code:block1 (/graphify                                             # full), code:bash (if [ ! -f graphify-out/.graphify_python ]; then), code:bash (graphify cluster-only .), code:bash ($(cat graphify-out/.graphify_python) -c "), code:bash (python3 -m graphify.watch INPUT_PATH --debounce 3), code:bash (graphify hook install    # install), code:bash (graphify claude install), code:bash (graphify claude uninstall  # remove the section) (+10 more)
+
+### Community 44 - "Community 44"
 Cohesion: 0.14
 Nodes (17): 1. 기본 구조, 2.1 Meta (작품 정보), 2.2 List (에피소드 목록), 2.3 idMatch와 지능형 Fallback ID 추출 (v1.9.4 신규), 2.3 Viewer (본문/이미지 추출), 2.4 Viewer (본문/이미지 추출), 2. 주요 필드 설명, 3.1 동적 렌더링 대응 (`waitForSelector`) (+9 more)
 
-### Community 46 - "Community 46"
-Cohesion: 0.2
-Nodes (12): dd(), ed, fd(), ha(), hm, Jn(), qu(), si() (+4 more)
-
-### Community 47 - "Community 47"
+### Community 45 - "Community 45"
 Cohesion: 0.2
 Nodes (3): LogBox, markDownloadedItems(), Notifier
 
-### Community 48 - "Community 48"
+### Community 46 - "Community 46"
 Cohesion: 0.15
 Nodes (12): db, downloadQueue, isGCRunning, useDownloadManager(), cancelManagerDownload(), useFetcher(), ImageStrategy, isInternalSyncing (+4 more)
 
+### Community 47 - "Community 47"
+Cohesion: 0.2
+Nodes (11): allSeries, DEFAULT_DOMAINS, el, filterData(), handleMessage(), refreshDB(), renderGrid(), saveActiveSettings() (+3 more)
+
+### Community 48 - "Community 48"
+Cohesion: 0.2
+Nodes (11): allSeries, DEFAULT_DOMAINS, el, filterData(), handleMessage(), refreshDB(), renderGrid(), saveActiveSettings() (+3 more)
+
 ### Community 49 - "Community 49"
-Cohesion: 0.2
-Nodes (11): allSeries, DEFAULT_DOMAINS, el, filterData(), handleMessage(), refreshDB(), renderGrid(), saveActiveSettings() (+3 more)
-
-### Community 50 - "Community 50"
-Cohesion: 0.2
-Nodes (11): allSeries, DEFAULT_DOMAINS, el, filterData(), handleMessage(), refreshDB(), renderGrid(), saveActiveSettings() (+3 more)
-
-### Community 51 - "Community 51"
-Cohesion: 0.26
-Nodes (13): bm, cm, gm, qe(), qm, sg, ss(), ud (+5 more)
-
-### Community 52 - "Community 52"
-Cohesion: 0.12
-Nodes (15): Antigravity Skill Bundles, Beginner → Intermediate → Advanced, code:bash (npx antigravity-awesome-skills), Contributing, 🎨 Creative & Content, Essentials & Core, 🎮 Game Development, Learning Paths (+7 more)
-
-### Community 53 - "Community 53"
 Cohesion: 0.15
 Nodes (3): CbzBuilder, EpubBuilder, TxtBuilder
 
-### Community 55 - "Community 55"
+### Community 50 - "Community 50"
+Cohesion: 0.17
+Nodes (14): ac(), af, bp(), dp, Ea(), kp(), Kt(), Oc (+6 more)
+
+### Community 51 - "Community 51"
 Cohesion: 0.13
 Nodes (15): 🔧 Specialized Packs, 🍎 The "Apple Platform Design" Pack, 🎯 The "Architecture & Design" Pack, 🤖 The "Automation Builder" Pack, ☁️ The "Azure AI & Cloud" Pack, 💳 The "Commerce & Payments" Pack, 🧱 The "DDD & Evented Architecture" Pack, 📄 The "Documents & Presentations" Pack (+7 more)
 
-### Community 56 - "Community 56"
+### Community 52 - "Community 52"
 Cohesion: 0.21
 Nodes (12): apiCalls, buildReport(), _capturedRoots, cloned, collectAll(), collectPageInfo(), collectShadowContent(), entry (+4 more)
 
-### Community 57 - "Community 57"
+### Community 54 - "Community 54"
 Cohesion: 0.14
 Nodes (13): 1. Google Apps Script (Server-Side), 2. Client Scripts (GitHub Pages), 3. Bridge Scripts (UserScript), 4. 로직 규칙 및 주의사항 (Critical Logic Rules), 📄 `BookService.gs`, 📄 `js/api_client.js`, 📄 `js/main.js`, 📄 `js/viewer.js` (+5 more)
 
-### Community 58 - "Community 58"
+### Community 55 - "Community 55"
 Cohesion: 0.14
 Nodes (13): 🏗️ 1. 아키텍처 변화 (Before vs After), 📈 2. 긍정적 영향 (Benefits), ⚠️ 3. 잠재적 리스크 및 영향도 (Risks), 🎯 4. 추천 이행 전략 (Roadmap), After: 계층형 구조 (Layered), Before: 분산형 접근, GAS 드라이브 접근 계층화 및 V3 전면 도입 영향도 분석, 💡 결론 (+5 more)
 
-### Community 60 - "Community 60"
+### Community 56 - "Community 56"
+Cohesion: 0.22
+Nodes (3): mo, Qi(), Zn
+
+### Community 57 - "Community 57"
+Cohesion: 0.21
+Nodes (3): hh, Pr, y0()
+
+### Community 58 - "Community 58"
+Cohesion: 0.22
+Nodes (6): Hs(), Jt, ko(), mi(), vh, Vo()
+
+### Community 59 - "Community 59"
 Cohesion: 0.15
 Nodes (12): 1. Overview, 2. Design System (Glassmorphism), 3.1. Unified Modal System (`toki-modal`), 3.2. Detailed Settings (Advanced Config), 3.3. Tree Rule Editor (v1.9.1), 3. UI Components (Modernized), 4.1. Download Marking Logic (v1.9.1), 4.2. History Synchronization (+4 more)
 
-### Community 61 - "Community 61"
+### Community 60 - "Community 60"
 Cohesion: 0.15
 Nodes (13): code:block10 ([Agent tool call 1: files 1-15, subagent_type="general-purpo), code:bash (PROJECT_ROOT=$(cat graphify-out/.graphify_root)), code:block12 (You are a graphify extraction subagent. Read the files liste), code:bash ($(cat graphify-out/.graphify_python) -c "), code:bash ($(cat graphify-out/.graphify_python) -c "), code:bash ($(cat graphify-out/.graphify_python) -c "), code:bash ($(cat graphify-out/.graphify_python) -c "), code:bash ($(cat graphify-out/.graphify_python) -c ") (+5 more)
 
 ### Community 62 - "Community 62"
-Cohesion: 0.21
-Nodes (12): gf, mm, ne, Ni(), qs(), rf(), sf, sh() (+4 more)
+Cohesion: 0.2
+Nodes (3): getDatabaseNames(), Kn(), Lt()
 
 ### Community 63 - "Community 63"
 Cohesion: 0.17
@@ -419,121 +422,117 @@ Nodes (10): 1-1. 프로젝트 생성 및 코드 복사, 1-2. appsscript.json 매
 Cohesion: 0.33
 Nodes (7): 302(), 391(), 458(), 569(), 835(), 963(), __webpack_require__()
 
-### Community 69 - "Community 69"
-Cohesion: 0.2
-Nodes (9): ① 에피소드 목록 영역 (List Items), 1. 작품 메인 페이지 (에피소드 목록 페이지), 2. 뷰어 페이지 (개별 에피소드를 보는 페이지), ② 작품 메타데이터 및 썸네일 영역 (Metadata & Thumbnail), ③ [웹툰/만화의 경우] 본문 이미지 컨테이너, 3. 추가 필수 정보, ④ [소설의 경우] 텍스트 본문 영역 (해당 시), 4. 실제 추출 예시 (Case Study: 블랙툰) (+1 more)
+### Community 68 - "Community 68"
+Cohesion: 0.4
+Nodes (9): b64urlDecode(), b64urlEncode(), getIdsFromUrl(), getNvCookie(), hmacSign(), runBulkTest(), runDecryptTest(), sleep() (+1 more)
 
 ### Community 70 - "Community 70"
 Cohesion: 0.2
-Nodes (9): 1. [PLANNING PHASE] 기획 및 분석, 1) `src/core/downloader.js`, 2. [IMPLEMENTATION] 수행 내역, 2) `src/core/ui.js`, 3. [SELF-AUDIT] 자가 검증 및 결과, [기획 목표], 📥 다운로드 안정성 및 순서 최적화 보고서 (v2.1), [분석] (+1 more)
+Nodes (9): ① 에피소드 목록 영역 (List Items), 1. 작품 메인 페이지 (에피소드 목록 페이지), 2. 뷰어 페이지 (개별 에피소드를 보는 페이지), ② 작품 메타데이터 및 썸네일 영역 (Metadata & Thumbnail), ③ [웹툰/만화의 경우] 본문 이미지 컨테이너, 3. 추가 필수 정보, ④ [소설의 경우] 텍스트 본문 영역 (해당 시), 4. 실제 추출 예시 (Case Study: 블랙툰) (+1 more)
 
 ### Community 71 - "Community 71"
 Cohesion: 0.2
-Nodes (9): 1. 개요, 2.1. 텍스트 설정 툴바 이식, 2.2. DOM Offset 기반 정밀 트래킹 (Locator System), 2.3. 에피소드 전환 시 데이터 무결성 확보 (Flush & Reset), 2. 주요 해결 과제 및 기술 전략, 3. 기술 사양 (v2.9.2), 4. 최종 결과 요약, 리포트: V2 소설 뷰어 툴바 이식 및 진도 동기화 정밀화 (v2.9.2) (+1 more)
+Nodes (9): 1. [PLANNING PHASE] 기획 및 분석, 1) `src/core/downloader.js`, 2. [IMPLEMENTATION] 수행 내역, 2) `src/core/ui.js`, 3. [SELF-AUDIT] 자가 검증 및 결과, [기획 목표], 📥 다운로드 안정성 및 순서 최적화 보고서 (v2.1), [분석] (+1 more)
 
 ### Community 72 - "Community 72"
-Cohesion: 0.44
-Nodes (8): checkSingleHistoryDirect(), fetchHistoryDirect(), fetchToken(), getOrCreateFolder(), getOrCreateThumbnailFolder(), getToken(), sendResumableChunks(), uploadDirect()
+Cohesion: 0.2
+Nodes (9): 1. 개요, 2.1. 텍스트 설정 툴바 이식, 2.2. DOM Offset 기반 정밀 트래킹 (Locator System), 2.3. 에피소드 전환 시 데이터 무결성 확보 (Flush & Reset), 2. 주요 해결 과제 및 기술 전략, 3. 기술 사양 (v2.9.2), 4. 최종 결과 요약, 리포트: V2 소설 뷰어 툴바 이식 및 진도 동기화 정밀화 (v2.9.2) (+1 more)
 
 ### Community 73 - "Community 73"
 Cohesion: 0.44
-Nodes (8): b64urlDecode(), b64urlEncode(), fetchNovelText(), getCookie(), getIdsFromUrl(), hmacSign(), resetNvCookie(), xorDecrypt()
+Nodes (8): checkSingleHistoryDirect(), fetchHistoryDirect(), fetchToken(), getOrCreateFolder(), getOrCreateThumbnailFolder(), getToken(), sendResumableChunks(), uploadDirect()
 
 ### Community 74 - "Community 74"
+Cohesion: 0.25
+Nodes (6): bridgeFetch(), generateId(), initBridge(), isConnected, pendingRequests, useBridge()
+
+### Community 75 - "Community 75"
 Cohesion: 0.32
 Nodes (6): buildSkeleton(), generatePayload(), getNodeSignature(), IGNORE_TAGS, KEEP_ATTRS, payload
 
-### Community 76 - "Community 76"
-Cohesion: 0.29
-Nodes (5): bridgeFetch(), generateId(), isConnected, pendingRequests, useBridge()
-
-### Community 77 - "Community 77"
+### Community 78 - "Community 78"
 Cohesion: 0.25
 Nodes (6): emit, internalColumnWidth, props, rendererRef, rendererStyle, segmentStyle
 
-### Community 78 - "Community 78"
+### Community 79 - "Community 79"
 Cohesion: 0.25
 Nodes (8): 🗑️ Deprecated, 🎨 EpisodesView 전면 재설계, 🛠 Technical Details (v1.5.5), [v1.5.5] - 2026-03-03, ✨ 마지막 화 다음 에피소드 안내 화면, 🐛 모바일 터치 버그 3종 수정, ⚙️ 뷰어 이벤트 아키텍처 전면 재설계, 🌗 전역 테마 시스템 구축
 
-### Community 79 - "Community 79"
+### Community 80 - "Community 80"
 Cohesion: 0.25
 Nodes (7): 1. 수동 버그 리포트 (LogBox Export) 개요, 2. 3단계 심각도 시스템 (Severity Levels), 3. 에러 발생 맥락 (Context Tags) 전체 목록, 4. 리포트를 다루는 개발자 행동 양식, 🔴 CRITICAL (업무 중단) 목록, TokiSync Issue Tracking & Error Guide, 🟡 WARN (부분 실패 / 폴백 / 경고) 목록
 
-### Community 80 - "Community 80"
+### Community 81 - "Community 81"
 Cohesion: 0.25
 Nodes (7): 1. 🛡️ GAS V8 런타임 호이스팅 버그 완벽 해결, 2. 📖 V2 소설 뷰어 고도화 (Precision Reading), 3. ⚡ 다운로드 안정성 및 유연성 강화, 🚀 TokiSync v1.8.1 릴리스 노트, 🛠️ 기술적 개선 사항, 📦 업데이트 방법, 🌟 주요 업데이트 사항
 
-### Community 81 - "Community 81"
+### Community 82 - "Community 82"
 Cohesion: 0.25
 Nodes (7): 1. ⚙️ 동적 파이프라인: GenericParser 아키텍처 도입, 2. 🛡️ 소설 콘텐츠 복호화 엔진 구축, 3. 📊 뷰어 2.0: 소설 리더 기능 대폭 강화, 🚀 TokiSync v1.8.0 정식 릴리스 노트, 🛠️ 기술적 개선 사항, 📦 업데이트 방법, 🌟 핵심 변경 사항
 
-### Community 82 - "Community 82"
+### Community 83 - "Community 83"
 Cohesion: 0.25
 Nodes (7): 1. 빌드 설정 업데이트, 2. 가이드 문서 최신화 (Guides), 3. 신규 릴리스 노트 작성 (Reports), 🚀 TokiSync v1.8.1 문서 및 설정 동기화 워크스루, 🧪 검증 결과, 📦 배포 방식 (Branch Merge), 🛠 주요 변경 사항
 
-### Community 83 - "Community 83"
+### Community 84 - "Community 84"
 Cohesion: 0.25
 Nodes (7): 1. UI/UX 전면 현대화, 2. 소설(Novel) 엔진 고도화, 3. 다운로드 안정성 및 리포팅, Release Notes v1.8.3 (Stable), 📋 개요, 🛠 수정 및 개선, 🚀 주요 변경 사항
 
-### Community 85 - "Community 85"
+### Community 86 - "Community 86"
+Cohesion: 0.29
+Nodes (3): config, result, main()
+
+### Community 88 - "Community 88"
 Cohesion: 0.29
 Nodes (6): 1. 빌드 및 버전 관리 (Build & Versioning), 2. UI/UX 정합성 (Modernized UI), 3. 소설 엔진 및 다운로드 (Novel & Downloader), 4. 안정성 및 동기화 (Stability & Sync), 5. 최종 배포 및 공지 (Release Procedure), 🏁 TokiSync v1.8.3 Deployment Checklist
 
-### Community 86 - "Community 86"
+### Community 89 - "Community 89"
 Cohesion: 0.29
 Nodes (6): ✨ 1. 만화/웹툰 최적화 (CBZ), 📙 2. 소설 최적화 (EPUB / TXT), 📦 3. 효율적인 다운로드 정책, 📚 Kavita 및 외부 뷰어 최적화 가이드 (v1.8.3), 🚀 v1.8.3 속도 제어 (Sleep Mode), 🛠 자동 분류(Native) 모드 설정 팁
 
-### Community 87 - "Community 87"
+### Community 90 - "Community 90"
 Cohesion: 0.29
 Nodes (6): 1. 이슈 개요, 2. 전수 조사 및 조치 사항, 3. 검증 내역, GAS V8 런타임 전역 스코프(ReferenceError) 해결 보고서, ⚠️ 발견된 잠재적 충돌 위험군 (수정 대상), 🔧 해결 방안 및 수행 내역
 
-### Community 88 - "Community 88"
+### Community 91 - "Community 91"
 Cohesion: 0.33
 Nodes (5): customDeployId, folderId, GM, match, savedGasUrl
 
-### Community 89 - "Community 89"
+### Community 92 - "Community 92"
 Cohesion: 0.33
 Nodes (6): ✨ AI Agent 운영 및 검증 프로토콜 도입, 🐛 Fast Path (덮어쓰기) 안정화, ✨ Smart Skip 엔진 고도화 및 강제 재다운로드 UI, 🛠 Technical Details (v1.7.0), [v1.7.0] - 2026-03-31, ✨ 고성능 뷰어 엔진 및 하이브리드 동기화 시스템
 
-### Community 90 - "Community 90"
+### Community 93 - "Community 93"
 Cohesion: 0.33
 Nodes (6): Build an AI product, Grow traffic and conversions, Harden an existing production app, Launch and maintain open source, 🧩 Recommended Bundle Combos, Ship a SaaS MVP (2 weeks)
 
-### Community 91 - "Community 91"
+### Community 94 - "Community 94"
 Cohesion: 0.33
 Nodes (5): 🏗️ 1. 모달형 다운로드 매니저 (Download Manager), ⚡ 2. 중단 없는 백그라운드 전송, 🧹 3. 더 똑똑해진 저장소 관리 (LRU Cache), 🛠️ 4. 기타 개선 사항, 🚀 TokiSync v1.7.5 Release Notes
 
-### Community 94 - "Community 94"
+### Community 97 - "Community 97"
 Cohesion: 0.6
 Nodes (3): useKeyboard(), useStore(), useViewerInput()
 
-### Community 95 - "Community 95"
+### Community 98 - "Community 98"
 Cohesion: 0.4
 Nodes (5): 📥 Client (UserScript), 🔒 Security (Critical), 📡 Server (GAS), [v1.2.0] - 2026-02-04, 📊 Viewer
 
-### Community 96 - "Community 96"
+### Community 99 - "Community 99"
 Cohesion: 0.4
 Nodes (5): 💾 GAS 구글 드라이브 스토리지 누수 방지, [v1.5.6] - 2026-03-05, 🧩 메타데이터(Config) 링크 갱신, 🛠 배포(Deployment) 안정화 및 파이프라인 개편, 📋 프로젝트 마스터 룰 업데이트
 
-### Community 97 - "Community 97"
+### Community 100 - "Community 100"
 Cohesion: 0.4
 Nodes (5): 1) Pick by immediate goal, 2) Start with 3-5 skills, not 20, 3) Invoke skills consistently, 4) Build your personal shortlist, 📚 How to Use Bundles
 
-### Community 98 - "Community 98"
+### Community 101 - "Community 101"
 Cohesion: 0.4
 Nodes (5): code:bash ($(cat graphify-out/.graphify_python) -c "), code:bash ($(cat graphify-out/.graphify_python) -c "), code:bash ($(cat graphify-out/.graphify_python) -c "), code:bash ($(cat graphify-out/.graphify_python) -c "), For --update (incremental re-extraction)
 
-### Community 101 - "Community 101"
+### Community 103 - "Community 103"
 Cohesion: 0.67
 Nodes (4): handleNext(), handlePrev(), next(), prev()
-
-### Community 102 - "Community 102"
-Cohesion: 0.5
-Nodes (4): 🐛 UI 및 안정성 핫픽스, [v1.7.1] - 2026-03-31, 🔒 보안 정밀 점검, ✨ 소설 단행본(Single Volume) 합본 기능 고도화
-
-### Community 103 - "Community 103"
-Cohesion: 0.5
-Nodes (4): 🚀 Direct Access (Performance), 🛠 Improvements, 🛡️ Stability (Anti-Ban), [v1.3.0] - 2026-02-06
 
 ### Community 104 - "Community 104"
 Cohesion: 0.5
@@ -541,94 +540,110 @@ Nodes (4): ⚠️ Deferred Features, 📱 Unified Menu Modal (Modern UI), [v1.5.
 
 ### Community 105 - "Community 105"
 Cohesion: 0.5
-Nodes (4): 🎨 UI/UX 전면 개편 및 사용성 향상, [v1.8.3] - 2026-05-12, ✨ 다운로드 엔진 안정화 및 실패 관리 시스템, 🛠 빌드 및 기타 수정
+Nodes (4): 🐛 GAS V8 런타임 호이스팅 버그 픽스 (ReferenceError 해결), [v1.8.1] - 2026-05-08, ✨ V2 소설 뷰어 고도화 및 정밀 동기화 (Precision Reading), ✨ 다운로드 안정성 및 순서 최적화
 
 ### Community 106 - "Community 106"
 Cohesion: 0.5
-Nodes (4): 🐛 GAS V8 런타임 호이스팅 버그 픽스 (ReferenceError 해결), [v1.8.1] - 2026-05-08, ✨ V2 소설 뷰어 고도화 및 정밀 동기화 (Precision Reading), ✨ 다운로드 안정성 및 순서 최적화
+Nodes (4): 🎨 UI/UX 전면 개편 및 사용성 향상, [v1.8.3] - 2026-05-12, ✨ 다운로드 엔진 안정화 및 실패 관리 시스템, 🛠 빌드 및 기타 수정
 
 ### Community 107 - "Community 107"
 Cohesion: 0.5
-Nodes (4): 🐍 Backend & Languages, 🐍 The "Python Pro" Pack, 🦀 The "Systems Programming" Pack, 🟦 The "TypeScript & JavaScript" Pack
+Nodes (4): 🚀 Direct Access (Performance), 🛠 Improvements, 🛡️ Stability (Anti-Ban), [v1.3.0] - 2026-02-06
 
 ### Community 108 - "Community 108"
 Cohesion: 0.5
-Nodes (4): ⚡ The "Full-Stack Developer" Pack, 🖌️ The "Web Designer" Pack, 🌐 The "Web Wizard" Pack, 🌐 Web Development
+Nodes (4): 🐛 UI 및 안정성 핫픽스, [v1.7.1] - 2026-03-31, 🔒 보안 정밀 점검, ✨ 소설 단행본(Single Volume) 합본 기능 고도화
 
 ### Community 109 - "Community 109"
 Cohesion: 0.5
-Nodes (4): 🦄 Product & Business, 📊 The "Business Analyst" Pack, 📈 The "Marketing & Growth" Pack, 🦄 The "Startup Founder" Pack
+Nodes (4): ⚡ The "Full-Stack Developer" Pack, 🖌️ The "Web Designer" Pack, 🌐 The "Web Wizard" Pack, 🌐 Web Development
 
 ### Community 110 - "Community 110"
 Cohesion: 0.5
-Nodes (3): code:html (<div class="container hero-v2-inner"><div class="crumb crumb), code:html (<main class="container">), webtoon ##
+Nodes (4): 🦄 Product & Business, 📊 The "Business Analyst" Pack, 📈 The "Marketing & Growth" Pack, 🦄 The "Startup Founder" Pack
+
+### Community 111 - "Community 111"
+Cohesion: 0.5
+Nodes (4): 🐍 Backend & Languages, 🐍 The "Python Pro" Pack, 🦀 The "Systems Programming" Pack, 🟦 The "TypeScript & JavaScript" Pack
 
 ### Community 112 - "Community 112"
-Cohesion: 0.67
-Nodes (3): 🖼️ Thumbnail Optimization, 🎨 UI Improvements, [v1.4.0] - 2026-02-09
-
-### Community 113 - "Community 113"
-Cohesion: 0.67
-Nodes (3): [v1.9.4] - 2026-05-17, 🛡️ 이미지 격리 차단 및 폴백 무결성 보장, ✨ 제너릭 파서 고도화 및 도메인 유연성 확보
+Cohesion: 0.5
+Nodes (3): code:html (<div class="container hero-v2-inner"><div class="crumb crumb), code:html (<main class="container">), webtoon ##
 
 ### Community 114 - "Community 114"
 Cohesion: 0.67
-Nodes (3): Security & Compliance, 🔐 The "Security Developer" Pack, 🛡️ The "Security Engineer" Pack
+Nodes (3): [v1.9.4] - 2026-05-17, 🛡️ 이미지 격리 차단 및 폴백 무결성 보장, ✨ 제너릭 파서 고도화 및 도메인 유연성 확보
 
 ### Community 115 - "Community 115"
 Cohesion: 0.67
-Nodes (3): DevOps & Infrastructure, 🌧️ The "DevOps & Cloud" Pack, 📊 The "Observability & Monitoring" Pack
+Nodes (3): 🖼️ Thumbnail Optimization, 🎨 UI Improvements, [v1.4.0] - 2026-02-09
 
 ### Community 116 - "Community 116"
 Cohesion: 0.67
-Nodes (3): 🧰 Maintainer & OSS, 🛠️ The "OSS Maintainer" Pack, 🧱 The "Skill Author" Pack
+Nodes (3): ✨ Kavita 호환성 강화 및 배치 다운로드 시스템, 🛠 Technical Details (v1.6.0), [v1.6.0] - 2026-03-15
 
 ### Community 117 - "Community 117"
 Cohesion: 0.67
-Nodes (3): 📊 Data & Analytics, 📊 The "Data & Analytics" Pack, 🔄 The "Data Engineering" Pack
+Nodes (3): Security & Compliance, 🔐 The "Security Developer" Pack, 🛡️ The "Security Engineer" Pack
 
 ### Community 118 - "Community 118"
 Cohesion: 0.67
-Nodes (3): 🤖 AI & Agents, 🤖 The "Agent Architect" Pack, 🧠 The "LLM Application Developer" Pack
+Nodes (3): 📊 Data & Analytics, 📊 The "Data & Analytics" Pack, 🔄 The "Data Engineering" Pack
 
 ### Community 119 - "Community 119"
 Cohesion: 0.67
-Nodes (3): code:bash (graphify explain "NODE_NAME"), code:bash ($(cat graphify-out/.graphify_python) -m graphify save-result), For /graphify explain
+Nodes (3): 🧰 Maintainer & OSS, 🛠️ The "OSS Maintainer" Pack, 🧱 The "Skill Author" Pack
 
 ### Community 120 - "Community 120"
 Cohesion: 0.67
-Nodes (3): code:bash (graphify export obsidian), code:bash (graphify export html  # auto-aggregates to community view if), Step 6 - Generate Obsidian vault (opt-in) + HTML
+Nodes (3): DevOps & Infrastructure, 🌧️ The "DevOps & Cloud" Pack, 📊 The "Observability & Monitoring" Pack
 
 ### Community 121 - "Community 121"
 Cohesion: 0.67
-Nodes (3): code:bash (graphify export neo4j), code:bash (graphify export neo4j --push bolt://localhost:7687 --user ne), Step 7 - Neo4j export (only if --neo4j or --neo4j-push flag)
+Nodes (3): code:bash (LOCAL_PATH=$(graphify clone <github-url> [--branch <branch>]), code:bash (# Clone each repo, run the full pipeline on each, then merge), Step 0 - Clone GitHub repo(s) (only if a GitHub URL was given)
 
 ### Community 122 - "Community 122"
 Cohesion: 0.67
-Nodes (3): code:bash ($(cat graphify-out/.graphify_python) -c "), code:block6 (Corpus: X files · ~Y words), Step 2 - Detect files
+Nodes (3): code:bash (graphify explain "NODE_NAME"), code:bash ($(cat graphify-out/.graphify_python) -m graphify save-result), For /graphify explain
 
 ### Community 123 - "Community 123"
 Cohesion: 0.67
+Nodes (3): code:bash (graphify query "QUESTION"), code:bash ($(cat graphify-out/.graphify_python) -m graphify save-result), For /graphify query
+
+### Community 124 - "Community 124"
+Cohesion: 0.67
+Nodes (3): code:bash (graphify path "NODE_A" "NODE_B"), code:bash ($(cat graphify-out/.graphify_python) -m graphify save-result), For /graphify path
+
+### Community 125 - "Community 125"
+Cohesion: 0.67
+Nodes (3): code:bash (graphify export neo4j), code:bash (graphify export neo4j --push bolt://localhost:7687 --user ne), Step 7 - Neo4j export (only if --neo4j or --neo4j-push flag)
+
+### Community 126 - "Community 126"
+Cohesion: 0.67
 Nodes (3): code:bash (python3 -m graphify.serve graphify-out/graph.json), code:json ({), Step 7d - MCP server (only if --mcp flag)
 
+### Community 127 - "Community 127"
+Cohesion: 0.67
+Nodes (3): code:bash ($(cat graphify-out/.graphify_python) -c "), code:block6 (Corpus: X files · ~Y words), Step 2 - Detect files
+
 ## Knowledge Gaps
-- **641 isolated node(s):** `loaderMajor`, `requiredMajor`, `IGNORE_TAGS`, `KEEP_ATTRS`, `payload` (+636 more)
+- **643 isolated node(s):** `loaderMajor`, `requiredMajor`, `IGNORE_TAGS`, `KEEP_ATTRS`, `payload` (+638 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **19 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `r()` connect `Community 14` to `Community 0`, `Community 1`, `Community 2`, `Community 4`, `Community 5`, `Community 40`, `Community 9`, `Community 13`, `Community 46`, `Community 15`, `Community 18`, `Community 19`, `Community 25`, `Community 62`?**
+- **Why does `r()` connect `Community 8` to `Community 0`, `Community 1`, `Community 2`, `Community 3`, `Community 32`, `Community 38`, `Community 9`, `Community 12`, `Community 15`, `Community 17`, `Community 19`, `Community 28`?**
   _High betweenness centrality (0.070) - this node is a cross-community bridge._
-- **Why does `tokiDownload()` connect `Community 26` to `Community 19`, `Community 21`?**
+- **Why does `tokiDownload()` connect `Community 10` to `Community 32`?**
   _High betweenness centrality (0.053) - this node is a cross-community bridge._
-- **Why does `qn()` connect `Community 1` to `Community 0`, `Community 4`, `Community 14`, `Community 19`, `Community 20`, `Community 29`?**
+- **Why does `qn()` connect `Community 1` to `Community 0`, `Community 32`, `Community 2`, `Community 9`, `Community 15`?**
   _High betweenness centrality (0.052) - this node is a cross-community bridge._
 - **Are the 9 inferred relationships involving `_t()` (e.g. with `Bc()` and `zc()`) actually correct?**
   _`_t()` has 9 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `loaderMajor`, `requiredMajor`, `IGNORE_TAGS` to the rest of the system?**
-  _641 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _643 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Community 0` be split into smaller, more focused modules?**
   _Cohesion score 0.02 - nodes in this community are weakly interconnected._
 - **Should `Community 1` be split into smaller, more focused modules?**

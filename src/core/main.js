@@ -13,7 +13,7 @@ import { getOAuthToken, fetchHistoryDirect } from './network.js';
 import { getCommonPrefix, blobToArrayBuffer, saveFile } from './utils.js';
 
 export async function main() {
-    console.log("🚀 TokiDownloader Loaded (New Core v1.9.5)");
+    console.log("🚀 TokiDownloader Loaded (New Core v1.10.0)");
     
     const logger = LogBox.getInstance();
 

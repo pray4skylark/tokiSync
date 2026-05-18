@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [v1.9.5] - 2026-05-18
+## [v1.10.0] - 2026-05-18
 
 ### ✨ 파싱 규칙 가져오기(Import) 다중 선택 모달 도입 및 초기 데드락 제거
 - **가져오기 방식 다변화 (모달 팝업)**: 트리 에디터의 "가져오기" 클릭 시 로컬 JSON 파일과 원격 URL을 자유롭게 선택하여 가져올 수 있는 Glassmorphism 스타일 모달을 구축했습니다.
