@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.9.41
+// @version      1.9.5
 // @description  Toki series sites -> Google Drive syncing tool (Bundled)
 // @author       pray4skylark
 // @updateURL    https://pray4skylark.github.io/tokiSync/tokiSync.user.js
@@ -1792,12 +1792,44 @@ class RuleManager {
     static async getRules() {
         let rules = [...this.#builtInRules];
 
-        // 1. Load Custom Rules from GM storage
+        // 1. Fetch Remote Rules (Background cache update & retrieval)
+        let remoteRules = [];
+        const cacheStr = typeof GM_getValue !== 'undefined' ? GM_getValue("TOKI_REMOTE_RULES_CACHE", "") : "";
+        let hasCache = false;
+
+        if (cacheStr) {
+            try {
+                remoteRules = JSON.parse(cacheStr);
+                hasCache = true;
+            } catch (e) {}
+        }
+
+        const configUrl = typeof GM_getValue !== 'undefined' ? GM_getValue(_config_js__WEBPACK_IMPORTED_MODULE_0__/* .CFG_REMOTE_RULE_URL */ .rn, "") : "";
+        const targetUrl = configUrl.trim() || "https://pray4skylark.github.io/tokiSync/rules.json";
+
+        const updatePromise = this.fetchRemoteRules(targetUrl).then(fetched => {
+            if (fetched) return fetched;
+            return null;
+        });
+
+        if (!hasCache) {
+            const fetched = await updatePromise;
+            if (fetched) remoteRules = fetched;
+        } else {
+            // Background update
+            updatePromise.catch(() => {});
+        }
+
+        if (remoteRules.length > 0) {
+            rules = [...remoteRules, ...rules];
+        }
+
+        // 2. Load Custom Rules from GM storage
         if (typeof GM_getValue !== 'undefined') {
             const customStr = GM_getValue(_config_js__WEBPACK_IMPORTED_MODULE_0__/* .CFG_CUSTOM_RULES */ .PT, '[]');
             try {
                 const customRules = JSON.parse(customStr);
-                if (Array.isArray(customRules)) {
+                if (Array.isArray(customRules) && customRules.length > 0) {
                     // Custom rules at the beginning to take precedence during matching
                     rules = [...customRules, ...rules];
                 }
@@ -1908,6 +1940,41 @@ class RuleManager {
             }
         }
         return null;
+    }
+
+    /**
+     * Fetch rules from remote URL
+     */
+    static async fetchRemoteRules(url) {
+        return new Promise((resolve) => {
+            if (typeof GM_xmlhttpRequest === 'undefined') {
+                resolve(null);
+                return;
+            }
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url: url,
+                onload: (res) => {
+                    try {
+                        const data = JSON.parse(res.responseText);
+                        let rules = data.rules || data;
+                        if (Array.isArray(rules)) {
+                            if (typeof GM_setValue !== 'undefined') {
+                                GM_setValue("TOKI_REMOTE_RULES_CACHE", JSON.stringify(rules));
+                            }
+                            resolve(rules);
+                        } else {
+                            resolve(null);
+                        }
+                    } catch (e) {
+                        console.error('[RuleManager] Parse remote rules failed:', e);
+                        resolve(null);
+                    }
+                },
+                onerror: () => resolve(null),
+                ontimeout: () => resolve(null)
+            });
+        });
     }
 }
 
@@ -2091,9 +2158,10 @@ async function fetchNovelText(episodeUrl, config = {}, _isRetry = false) {
 /* harmony export */   Nk: function() { return /* binding */ setConfig; },
 /* harmony export */   PT: function() { return /* binding */ CFG_CUSTOM_RULES; },
 /* harmony export */   Vh: function() { return /* binding */ showConfigModal; },
+/* harmony export */   rn: function() { return /* binding */ CFG_REMOTE_RULE_URL; },
 /* harmony export */   zj: function() { return /* binding */ getConfig; }
 /* harmony export */ });
-/* unused harmony exports CFG_URL_KEY, CFG_ID_KEY, CFG_FOLDER_ID, CFG_POLICY_KEY, CFG_API_KEY, CFG_SLEEP_MODE, CFG_SMART_SKIP_RATIO, CFG_NOVEL_MODE, CFG_NOVEL_FORMAT, CFG_REMOTE_RULE_URL */
+/* unused harmony exports CFG_URL_KEY, CFG_ID_KEY, CFG_FOLDER_ID, CFG_POLICY_KEY, CFG_API_KEY, CFG_SLEEP_MODE, CFG_SMART_SKIP_RATIO, CFG_NOVEL_MODE, CFG_NOVEL_FORMAT */
 const CFG_URL_KEY = "TOKI_GAS_URL"; // legacy
 const CFG_ID_KEY = "TOKI_GAS_ID";
 const CFG_FOLDER_ID = "TOKI_FOLDER_ID";
@@ -2130,6 +2198,11 @@ function getConfig() {
         ? `https://script.google.com/macros/s/${finalGasId}/exec` 
         : gasUrl;
 
+    let remoteRuleUrl = GM_getValue(CFG_REMOTE_RULE_URL, "");
+    if (!remoteRuleUrl || remoteRuleUrl.trim() === "") {
+        remoteRuleUrl = "https://pray4skylark.github.io/tokiSync/rules.json";
+    }
+
     return {
         gasId: finalGasId,
         gasUrl: finalGasUrl,
@@ -2140,7 +2213,7 @@ function getConfig() {
         smartSkipRatio: parseInt(GM_getValue(CFG_SMART_SKIP_RATIO, "50"), 10), // default 50% of Max
         novelMode: GM_getValue(CFG_NOVEL_MODE, "perChapter"), // default: chapter-by-chapter
         novelFormat: GM_getValue(CFG_NOVEL_FORMAT, "epub"), // default: EPUB
-        remoteRuleUrl: GM_getValue(CFG_REMOTE_RULE_URL, ""),
+        remoteRuleUrl: remoteRuleUrl,
         customRules: GM_getValue(CFG_CUSTOM_RULES, "[]")
     };
 }
@@ -4122,33 +4195,110 @@ class TreeRuleEditor {
         };
 
         overlay.querySelector('#tree-btn-import').onclick = () => {
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.accept = '.json';
-            input.onchange = (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = (ev) => {
-                    try {
-                        const imported = JSON.parse(ev.target.result);
-                        const rules = Array.isArray(imported) ? imported : (imported.rules || []);
-                        const mode = confirm('기존 규칙과 합치시겠습니까? (취소 시 전체 덮어쓰기)') ? 'merge' : 'overwrite';
-                        
-                        if (mode === 'overwrite') {
-                            this.rules = rules;
-                        } else {
-                            RuleManager/* RuleManager */.u.bulkImport(rules, 'merge');
-                            this.rules = RuleManager/* RuleManager */.u.getCustomRules();
-                        }
-                        this.render();
-                    } catch (err) {
-                        alert('JSON 파싱 오류: ' + err.message);
-                    }
-                };
-                reader.readAsText(file);
+            const selectOverlay = document.createElement('div');
+            selectOverlay.className = 'toki-modal-overlay';
+            selectOverlay.style.zIndex = '20002'; // Above Tree Editor
+            selectOverlay.onclick = (e) => { if(e.target === selectOverlay) selectOverlay.remove(); };
+            
+            selectOverlay.innerHTML = `
+                <div class="toki-modal toki-compact-modal" style="max-width: 400px; padding: 24px;">
+                    <div class="toki-modal-header" style="margin-bottom: 20px;">
+                        <div class="toki-modal-title" style="font-size: 16px;">📥 규칙 가져오기 방식 선택</div>
+                        <button class="toki-modal-close" id="import-select-close" title="닫기">&times;</button>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px;">
+                        <button class="toki-btn-action toki-btn-lavender" id="import-choose-file">
+                            📂 로컬 JSON 파일 선택
+                        </button>
+                        <button class="toki-btn-action toki-btn-secondary" id="import-choose-url">
+                            🌐 원격 URL 주소 입력
+                        </button>
+                    </div>
+                    <div id="import-url-input-container" class="toki-hidden" style="margin-top: 16px; border-top: 1px solid rgba(255, 255, 255, 0.1); padding-top: 16px;">
+                        <div class="toki-control-group" style="margin-bottom: 16px;">
+                            <label class="toki-label">원격 규칙 URL 주소</label>
+                            <input type="text" id="import-url-input" class="toki-input" placeholder="https://..." value="https://pray4skylark.github.io/tokiSync/rules.json">
+                        </div>
+                        <button class="toki-btn-action" id="import-btn-fetch" style="width: 100%;">
+                            <span>가져오기 실행</span>
+                        </button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(selectOverlay);
+
+            selectOverlay.querySelector('#import-select-close').onclick = () => selectOverlay.remove();
+
+            const handleRulesImport = (rules) => {
+                const rulesArr = Array.isArray(rules) ? rules : (rules.rules || []);
+                if (!Array.isArray(rulesArr) || rulesArr.length === 0) {
+                    alert('가져올 규칙이 유효하지 않거나 비어 있습니다.');
+                    return;
+                }
+                const mode = confirm('기존 규칙과 합치시겠습니까? (취소 시 전체 덮어쓰기)') ? 'merge' : 'overwrite';
+                if (mode === 'overwrite') {
+                    this.rules = rulesArr;
+                } else {
+                    RuleManager/* RuleManager */.u.bulkImport(rulesArr, 'merge');
+                    this.rules = RuleManager/* RuleManager */.u.getCustomRules();
+                }
+                this.render();
+                selectOverlay.remove();
             };
-            input.click();
+
+            // File selection
+            selectOverlay.querySelector('#import-choose-file').onclick = () => {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = '.json';
+                input.onchange = (e) => {
+                    const file = e.target.files[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (ev) => {
+                        try {
+                            const imported = JSON.parse(ev.target.result);
+                            handleRulesImport(imported);
+                        } catch (err) {
+                            alert('JSON 파싱 오류: ' + err.message);
+                        }
+                    };
+                    reader.readAsText(file);
+                };
+                input.click();
+            };
+
+            // URL input toggle
+            selectOverlay.querySelector('#import-choose-url').onclick = () => {
+                const container = selectOverlay.querySelector('#import-url-input-container');
+                container.classList.remove('toki-hidden');
+            };
+
+            // Fetch remote URL
+            selectOverlay.querySelector('#import-btn-fetch').onclick = async () => {
+                const url = selectOverlay.querySelector('#import-url-input').value.trim();
+                if (!url) {
+                    alert('URL을 입력해주세요.');
+                    return;
+                }
+                const fetchBtn = selectOverlay.querySelector('#import-btn-fetch');
+                fetchBtn.disabled = true;
+                fetchBtn.innerHTML = '<span>⏳ 가져오는 중...</span>';
+                
+                try {
+                    const fetched = await RuleManager/* RuleManager */.u.fetchRemoteRules(url);
+                    if (fetched) {
+                        handleRulesImport(fetched);
+                    } else {
+                        alert('원격 규칙을 가져오는데 실패했습니다. URL 주소 및 네트워크 상태를 확인하세요.');
+                    }
+                } catch (err) {
+                    alert('오류 발생: ' + err.message);
+                } finally {
+                    fetchBtn.disabled = false;
+                    fetchBtn.innerHTML = '<span>가져오기 실행</span>';
+                }
+            };
         };
 
         overlay.querySelector('#tree-btn-test').onclick = async () => {
@@ -5460,13 +5610,11 @@ async function generateDownloadReport(seriesTitle, seriesId, listCount, failedEp
 
 
 async function main() {
-    console.log("🚀 TokiDownloader Loaded (New Core v1.9.41)");
+    console.log("🚀 TokiDownloader Loaded (New Core v1.9.5)");
     
     const logger = ui.LogBox.getInstance();
 
-    // -- 0. Pre-detection & Core States --
-    const siteInfo = await (0,detector/* detectSite */.T)();
-    if(!siteInfo) return; 
+    // -- 0. Core Logic starts after helper function definitions --
 
     // -- Helper Functions for Menu Actions --
 
@@ -5597,6 +5745,29 @@ async function main() {
             console.error(e);
         }
     };
+
+    // -- 1. GM Menus (Must be registered early to prevent deadlocks) --
+    if (typeof GM_registerMenuCommand !== 'undefined') {
+        GM_registerMenuCommand('⚙️ 설정 (Settings)', () => (0,core_config/* showConfigModal */.Vh)());
+        GM_registerMenuCommand('🧩 파싱 규칙 관리', () => {
+            const editor = new ui/* TreeRuleEditor */.AC();
+            editor.show();
+        });
+        GM_registerMenuCommand('📜 로그창 토글 (Log)', () => logger.toggle());
+        GM_registerMenuCommand('🌐 Viewer 열기', openViewer);
+        GM_registerMenuCommand('📥 전체 다운로드', () => {
+            const config = (0,core_config/* getConfig */.zj)();
+            tokiDownload(undefined, config.policy);
+        });
+        GM_registerMenuCommand('📂 파일명 표준화 (Migration)', runFilenameMigration);
+    }
+
+    // -- 2. Pre-detection & Core States --
+    const siteInfo = await (0,detector/* detectSite */.T)();
+    if(!siteInfo) {
+        console.warn('[TokiSync] 사이트 매칭 실패. 탬퍼몽키 메뉴를 통해 설정을 확인하세요.');
+        return; 
+    }
 
     // -- History Sync (Async) & Cross-Tab Auto Refresh --
     let lastSyncTime = Date.now();
@@ -5798,21 +5969,6 @@ async function main() {
     });
 
 
-    // -- 2. Register Legacy Menu Commands (Fallback) --
-    if (typeof GM_registerMenuCommand !== 'undefined') {
-        GM_registerMenuCommand('⚙️ 설정 (Settings)', () => (0,core_config/* showConfigModal */.Vh)());
-        GM_registerMenuCommand('🧩 파싱 규칙 관리', () => {
-            const editor = new ui/* TreeRuleEditor */.AC();
-            editor.show();
-        });
-        GM_registerMenuCommand('📜 로그창 토글 (Log)', () => logger.toggle());
-        GM_registerMenuCommand('🌐 Viewer 열기', openViewer);
-        GM_registerMenuCommand('📥 전체 다운로드', () => {
-            const config = (0,core_config/* getConfig */.zj)();
-            tokiDownload(undefined, config.policy);
-        });
-        GM_registerMenuCommand('📂 파일명 표준화 (Migration)', runFilenameMigration);
-    }
 
     // -- 3. Bridge Listener --
     window.addEventListener("message", async (event) => {
