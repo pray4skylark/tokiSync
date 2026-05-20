@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.10.0
+// @version      1.10.1
 // @description  Toki series sites -> Google Drive syncing tool (Bundled)
 // @author       pray4skylark
 // @updateURL    https://pray4skylark.github.io/tokiSync/tokiSync.user.js
@@ -1257,6 +1257,21 @@ class GenericParser extends BaseParser {
                 return [];
             }
         }
+
+        // [v1.9.5] 광고 및 불필요 요소 제거 (exclude / remove)
+        const excludeRule = viewerCfg.exclude || viewerCfg.remove;
+        if (excludeRule) {
+            const excludeSelectors = Array.isArray(excludeRule) ? excludeRule : [excludeRule];
+            for (const selector of excludeSelectors) {
+                try {
+                    const targets = container.querySelectorAll(selector);
+                    targets.forEach(el => el.remove());
+                } catch (e) {
+                    console.warn(`[GenericParser] 요소 제거 실패 (셀렉터: ${selector}):`, e);
+                }
+            }
+        }
+
         const imgs = Array.from(container.querySelectorAll(viewerCfg.imageItem || 'img'));
 
         return imgs.map(img => {
@@ -2138,8 +2153,25 @@ async function fetchNovelText(episodeUrl, config = {}, _isRetry = false) {
         const data = await resp.json();
         if (!data.ok || !data.payload) return null;
 
-        // 6. XOR 복호화
-        return xorDecrypt(data.payload, xorKey);
+        // 6. XOR 복호화 및 후처리 정제 (JSON 껍데기 제거 및 이스케이프 복원)
+        const rawText = xorDecrypt(data.payload, xorKey);
+        if (!rawText) return null;
+
+        let cleanText = rawText;
+        
+        // 1) 앞부분 JSON 껍데기 제거 (text/html 형식 모두 대응)
+        cleanText = cleanText.replace(/^\{"kind"\s*:\s*"(text|html)"\s*,\s*"(text|html)"\s*:\s*"/, '');
+        
+        // 2) 뒷부분 JSON 껍데기 제거 (", "css":"" } 또는 "} 로 끝나는 모든 경우 대응)
+        cleanText = cleanText.replace(/"\s*(,\s*"css"\s*:\s*""\s*)?\}$/, '');
+        
+        // 3) 줄바꿈 이스케이프(\n) 복원
+        cleanText = cleanText.replace(/\\n/g, '\n');
+        
+        // 4) 따옴표 이스케이프(\") 복원
+        cleanText = cleanText.replace(/\\"/g, '"');
+
+        return cleanText;
 
     } catch (e) {
         console.error('[Decryptor] 복호화 과정 중 예외 발생:', e);
@@ -4577,6 +4609,39 @@ class CbzBuilder {
 }
 
 ;// ./src/core/txt.js
+/**
+ * 소설 본문의 HTML 태그를 제거하고 가독성 좋게 줄바꿈을 문단 단위로 정제하는 함수
+ */
+function cleanNovelParagraphs(html) {
+    if (!html) return "";
+
+    // 1. HTML 태그를 줄바꿈 및 공백으로 치환
+    let text = html
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/p>/gi, '\n')
+        .replace(/<\/div>/gi, '\n')
+        .replace(/<[^>]+>/g, ''); // 나머지 HTML 태그 완전 제거
+
+    // 2. HTML 엔티티 치환
+    text = text
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&')
+        .replace(/&quot;/g, '"');
+
+    // 3. 각 줄의 좌우 공백 트리밍 및 유령 문자 정리
+    text = text
+        .split('\n')
+        .map(line => line.trim())
+        .join('\n');
+
+    // 4. 3개 이상 과도한 연속 줄바꿈을 2개(\n\n, 빈 줄 1개)로 제한
+    text = text.replace(/\n{3,}/g, '\n\n');
+
+    return text.trim();
+}
+
 class TxtBuilder {
     constructor() {
         this.content = "";
@@ -4584,7 +4649,7 @@ class TxtBuilder {
 
     addChapter(title, textContent) {
         this.content += `\n\n=== ${title} ===\n\n`;
-        this.content += textContent;
+        this.content += cleanNovelParagraphs(textContent);
     }
 
     async build(metadata = {}) {
@@ -4666,21 +4731,7 @@ async function processItem(item, builder, siteInfo, iframe, parser, seriesTitle 
         const text = await (0,novel_decryptor/* fetchNovelText */.U)(item.src, viewerCfg.decryptApi || {});
 
         if (text) {
-            let cleanText = text;
-            
-            // 1. 앞부분 껍데기 제거 (text 또는 html 형식을 모두 지원하며, 문자열 시작 부분만 타겟팅)
-            cleanText = cleanText.replace(/^\{"kind"\s*:\s*"(text|html)"\s*,\s*"(text|html)"\s*:\s*"/, '');
-            
-            // 2. 뒷부분 껍데기 제거 (", "css":"" } 또는 "} 로 끝나는 모든 경우 대응)
-            cleanText = cleanText.replace(/"\s*(,\s*"css"\s*:\s*""\s*)?\}$/, '');
-            
-            // 3. 줄바꿈 이스케이프(\n)를 실제 줄바꿈으로 변환
-            cleanText = cleanText.replace(/\\n/g, '\n');
-            
-            // 4. 따옴표 이스케이프(\")를 실제 쌍따옴표로 변환
-            cleanText = cleanText.replace(/\\"/g, '"');
-
-            builder.addChapter(item.title, cleanText);
+            builder.addChapter(item.title, text);
             logger.log(`✅ 복호화 성공: ${item.title}`, 'Downloader');
         } else {
             throw new Error(`복호화 실패 (API 응답 없음)`);
@@ -5610,7 +5661,7 @@ async function generateDownloadReport(seriesTitle, seriesId, listCount, failedEp
 
 
 async function main() {
-    console.log("🚀 TokiDownloader Loaded (New Core v1.10.0)");
+    console.log("🚀 TokiDownloader Loaded (New Core v1.10.1)");
     
     const logger = ui.LogBox.getInstance();
 
