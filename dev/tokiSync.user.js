@@ -5661,7 +5661,7 @@ async function generateDownloadReport(seriesTitle, seriesId, listCount, failedEp
 
 
 async function main() {
-    console.log("🚀 TokiDownloader Loaded (New Core v1.10.0)");
+    console.log("🚀 TokiDownloader Loaded (New Core v1.10.1)");
     
     const logger = ui.LogBox.getInstance();
 
