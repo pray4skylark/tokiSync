@@ -1,0 +1,12 @@
+{
+  "title": "tokiSync Dynamic Parser Rule System",
+  "summary": "JSON 기반 동적 파싱 규칙 시스템의 스키마 정의, 필드 명세, 고급 기능(keyDiscovery, imageRegex, waitForSelector), 그리고 신규 사이트 파서 개발을 위한 DOM 추출 가이드.",
+  "created": "2026-05-13T15:28:00+09:00",
+  "lastModified": "2026-05-13T15:28:00+09:00",
+  "references": [
+    "documentation/guides/DYNAMIC_RULE_GUIDE.md",
+    "documentation/guides/NEW_PARSER_DOM_GUIDE.md",
+    "documentation/guides/rules.sample.json"
+  ],
+  "tags": ["parser", "json-rules", "dynamic-parsing", "dom-extraction", "webtoon", "novel"]
+}

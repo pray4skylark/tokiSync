@@ -1,0 +1,12 @@
+{
+  "title": "tokiSync Downloader Policy & V2 Reader Sync Specs",
+  "summary": "다운로더 5단계 속도 정책(SLEEP_POLICIES), API 복호화 강제 very_slow 정책, 범위 다운로드 오름차순 정렬 로직. V2 소설 뷰어의 DOM Offset 기반 Locator 시스템, Flush & Reset 에피소드 전환 안전장치 명세.",
+  "created": "2026-05-13T15:28:00+09:00",
+  "lastModified": "2026-05-13T15:28:00+09:00",
+  "references": [
+    "documentation/reports/download_optimization_report.md",
+    "documentation/reports/v2_reader_sync_optimization.md",
+    "src/core/downloader.js"
+  ],
+  "tags": ["downloader", "sleep-policy", "novel-decryption", "v2-reader", "dom-locator", "progress-sync"]
+}

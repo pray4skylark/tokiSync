@@ -1,0 +1,9 @@
+{
+  "summary": "Technical specifications for tokiSync v1.9.0 UI/UX and the dynamic parser rule system.",
+  "title": "tokiSync v1.9.0 UI & Parser Specs",
+  "created_at": "2026-05-13T12:22:00Z",
+  "references": [
+    "file:///Users/pray4skylark/Documents/WorkSpace/tokiSync/src/core/parsers/GenericParser.js",
+    "file:///Users/pray4skylark/Documents/WorkSpace/tokiSync/documentation/guides/toki_parser_rules.json"
+  ]
+}

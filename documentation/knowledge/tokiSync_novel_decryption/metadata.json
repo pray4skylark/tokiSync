@@ -1,0 +1,9 @@
+{
+  "summary": "Core mechanism and security analysis of the API-based novel content decryption system in tokiSync.",
+  "title": "tokiSync Novel Decryption Logic",
+  "created_at": "2026-05-13T12:22:00Z",
+  "references": [
+    "file:///Users/pray4skylark/Documents/WorkSpace/tokiSync/src/core/novel-decryptor.js",
+    "file:///Users/pray4skylark/Documents/WorkSpace/tokiSync/src/core/downloader.js"
+  ]
+}

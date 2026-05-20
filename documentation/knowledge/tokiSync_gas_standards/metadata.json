@@ -1,0 +1,9 @@
+{
+  "summary": "Development standards and architectural patterns for Google Apps Script (GAS) integration in tokiSync.",
+  "title": "tokiSync GAS Development Standards",
+  "created_at": "2026-05-13T12:22:00Z",
+  "references": [
+    "file:///Users/pray4skylark/Documents/WorkSpace/tokiSync/google_app_script/TokiSync_Server_Bundle.gs",
+    "file:///Users/pray4skylark/Documents/WorkSpace/tokiSync/src/core/gas.js"
+  ]
+}

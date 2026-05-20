@@ -1,0 +1,8 @@
+{
+  "summary": "Technical specs for the Viewer V2 rendering engine, focusing on precision synchronization and locator systems.",
+  "title": "tokiSync Viewer V2 Architecture (Refined)",
+  "created_at": "2026-05-13T14:10:00Z",
+  "references": [
+    "file:///Users/pray4skylark/Documents/WorkSpace/tokiSync/src/viewer/"
+  ]
+}

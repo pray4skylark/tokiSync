@@ -1,0 +1,10 @@
+{
+  "summary": "Specification of the four core immutable algorithms of tokiSync. Crucial for maintaining data integrity and performance.",
+  "title": "tokiSync Core Algorithms (Immutable Rules)",
+  "created_at": "2026-05-13T14:10:00Z",
+  "references": [
+    "PROJECT_HANDOVER_MASTER.md",
+    "src/core/downloader.js",
+    "src/viewer/composables/useVirtualScroll.js"
+  ]
+}
