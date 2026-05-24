@@ -131,14 +131,11 @@ async function fetchMediaViaPopup(episodeUrl, targetType = 'novel', config = {})
                 if (activePopupRef && !activePopupRef.closed) {
                     let popupUrl = 'unknown';
                     try { popupUrl = activePopupRef.location.href; } catch(e) { popupUrl = 'CORS/Blocked'; }
-                    console.debug(`[Controller-Debug] 📢 강제 지시문 주입 (Heartbeat) | 팝업상태: 활성, URL접근: ${popupUrl}, targetType: ${targetType}`);
                     activePopupRef.postMessage({
                         type: 'TOKI_START_EXTRACTION',
                         targetType: targetType,
                         viewerCfg: config.viewerCfg || {}
                     }, '*');
-                } else {
-                    console.debug(`[Controller-Debug] ⚠️ 강제 지시문 주입 실패 - 팝업 닫힘 또는 참조 유실`);
                 }
             };
 
@@ -149,8 +146,6 @@ async function fetchMediaViaPopup(episodeUrl, targetType = 'novel', config = {})
 
         const messageHandler = async (event) => {
             if (!event.data) return;
-
-            console.debug(`[Controller-Debug] 📩 팝업으로부터 메시지 수신:`, event.data.type, event.data);
 
             // 1. Handshake Backup (if window.opener is still alive, fallback gracefully)
             if (event.data.type === 'TOKI_WORKER_READY') {
@@ -220,12 +215,6 @@ async function fetchMediaViaPopup(episodeUrl, targetType = 'novel', config = {})
             cleanup();
             console.error(`[Controller] 팝업 미디어 수집 타임아웃 발생 (45초) - 유형: ${targetType}`);
             closeActivePopup();
-            
-            if (typeof window.downloadTokiLogs === 'function') {
-                console.log(`[Controller-Debug] 타임아웃 발생으로 인해 전체 디버그 로그 파일을 강제 다운로드합니다.`);
-                window.downloadTokiLogs();
-            }
-            
             resolve(null);
         }, timeoutDuration);
 
@@ -233,11 +222,9 @@ async function fetchMediaViaPopup(episodeUrl, targetType = 'novel', config = {})
             if (activePopupRef && !activePopupRef.closed) {
                 console.log('[Controller] 기존 팝업 재활용 (location.replace 우회):', episodeUrl);
                 try {
-                    console.debug(`[Controller-Debug] location.replace 호출 직전... 현재 window.name: ${activePopupRef.name}`);
                     activePopupRef.location.replace(episodeUrl);
                     // Force-bind name to prevent browser security cleanups
                     activePopupRef.name = 'tokisync-novel-worker';
-                    console.debug(`[Controller-Debug] location.replace 호출 완료, name 재바인딩 수행. (설정된 name: ${activePopupRef.name})`);
                 } catch (replaceErr) {
                     console.warn('[Controller] location.replace 보안 차단 발생, href 폴백 전환:', replaceErr);
                     activePopupRef.location.href = episodeUrl;

@@ -64,8 +64,7 @@ import { scrollToLoad, fetchBlobWithXHR, blobToArrayBuffer, waitForContent, slee
         originalConsole.log("🗑️ 텍스트 로그 초기화 완료.");
     };
 
-    console.debug(`[Worker-Debug] 스크립트 진입점 로드됨 | URL: ${location.href}`);
-    console.debug(`[Worker-Debug] window.name: "${window.name}", window.opener 존재여부: ${!!window.opener}`);
+
 
     // =============================================================
     // 🛡️ [보안 극복] 네이티브 함수 가로채기 (Proxy 기반 위장)
@@ -94,7 +93,7 @@ import { scrollToLoad, fetchBlobWithXHR, blobToArrayBuffer, waitForContent, slee
         isSessionWorker
     );
 
-    console.debug(`[Worker-Debug] isWorkerPopup 판정 결과: ${isWorkerPopup} (session flag: ${isSessionWorker})`);
+
 
     if (isWorkerPopup) {
         // 향후 location.replace 등으로 인한 컨텍스트 소실(짝수 회차 방어)을 대비해 현재 탭(세션)에 워커 각인
@@ -133,7 +132,6 @@ import { scrollToLoad, fetchBlobWithXHR, blobToArrayBuffer, waitForContent, slee
 
         // 지시 수신 리스너 셋업
         window.addEventListener('message', async (event) => {
-            console.debug(`[Worker-Debug] 📩 부모 메시지 수신:`, event.data ? event.data.type : 'unknown data', event.data);
             if (event.data && event.data.type === 'TOKI_START_EXTRACTION') {
                 // --- Cloudflare/Captcha Check ---
                 const isCloudflare = document.title.includes('Just a moment') ||
@@ -150,7 +148,6 @@ import { scrollToLoad, fetchBlobWithXHR, blobToArrayBuffer, waitForContent, slee
                 }
 
                 if (isExtracting) {
-                    console.debug('⚠️ [Worker-Debug] 이미 추출 작업이 진행 중이므로 중복 지시(Heartbeat)를 무시합니다.');
                     return;
                 }
                 isExtracting = true;
@@ -296,7 +293,6 @@ import { scrollToLoad, fetchBlobWithXHR, blobToArrayBuffer, waitForContent, slee
 
                         // 4) 1차 추출 및 다운로드 실행
                         let finalImages = extractImageUrls();
-                        console.debug(`[Worker-Debug] 1차 이미지 URL 추출 개수: ${finalImages.length}개`, finalImages);
                         console.log(`🎯 [TokiSync-Worker] 1차 이미지 주소 ${finalImages.length}개 추출. 다운로드 개시...`);
                         let downloadedData = await runImageDownloads(finalImages);
 
@@ -320,7 +316,6 @@ import { scrollToLoad, fetchBlobWithXHR, blobToArrayBuffer, waitForContent, slee
                         console.log(`🎯 [TokiSync-Worker] 모든 이미지 수집 완료 (최종 성공: ${downloadedData.filter(d => d.data).length}/${downloadedData.length})`);
 
                         if (parentWin) {
-                            console.debug(`[Worker-Debug] 🚀 부모 창으로 데이터 전송 시도... parentWin 활성 상태: ${!parentWin.closed}`);
                             parentWin.postMessage({
                                 type: 'TOKI_MEDIA_DATA',
                                 data: {
