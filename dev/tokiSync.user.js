@@ -2137,14 +2137,11 @@ async function fetchMediaViaPopup(episodeUrl, targetType = 'novel', config = {})
                 if (activePopupRef && !activePopupRef.closed) {
                     let popupUrl = 'unknown';
                     try { popupUrl = activePopupRef.location.href; } catch(e) { popupUrl = 'CORS/Blocked'; }
-                    console.debug(`[Controller-Debug] 📢 강제 지시문 주입 (Heartbeat) | 팝업상태: 활성, URL접근: ${popupUrl}, targetType: ${targetType}`);
                     activePopupRef.postMessage({
                         type: 'TOKI_START_EXTRACTION',
                         targetType: targetType,
                         viewerCfg: config.viewerCfg || {}
                     }, '*');
-                } else {
-                    console.debug(`[Controller-Debug] ⚠️ 강제 지시문 주입 실패 - 팝업 닫힘 또는 참조 유실`);
                 }
             };
 
@@ -2155,8 +2152,6 @@ async function fetchMediaViaPopup(episodeUrl, targetType = 'novel', config = {})
 
         const messageHandler = async (event) => {
             if (!event.data) return;
-
-            console.debug(`[Controller-Debug] 📩 팝업으로부터 메시지 수신:`, event.data.type, event.data);
 
             // 1. Handshake Backup (if window.opener is still alive, fallback gracefully)
             if (event.data.type === 'TOKI_WORKER_READY') {
@@ -2226,12 +2221,6 @@ async function fetchMediaViaPopup(episodeUrl, targetType = 'novel', config = {})
             cleanup();
             console.error(`[Controller] 팝업 미디어 수집 타임아웃 발생 (45초) - 유형: ${targetType}`);
             closeActivePopup();
-            
-            if (typeof window.downloadTokiLogs === 'function') {
-                console.log(`[Controller-Debug] 타임아웃 발생으로 인해 전체 디버그 로그 파일을 강제 다운로드합니다.`);
-                window.downloadTokiLogs();
-            }
-            
             resolve(null);
         }, timeoutDuration);
 
@@ -2239,11 +2228,9 @@ async function fetchMediaViaPopup(episodeUrl, targetType = 'novel', config = {})
             if (activePopupRef && !activePopupRef.closed) {
                 console.log('[Controller] 기존 팝업 재활용 (location.replace 우회):', episodeUrl);
                 try {
-                    console.debug(`[Controller-Debug] location.replace 호출 직전... 현재 window.name: ${activePopupRef.name}`);
                     activePopupRef.location.replace(episodeUrl);
                     // Force-bind name to prevent browser security cleanups
                     activePopupRef.name = 'tokisync-novel-worker';
-                    console.debug(`[Controller-Debug] location.replace 호출 완료, name 재바인딩 수행. (설정된 name: ${activePopupRef.name})`);
                 } catch (replaceErr) {
                     console.warn('[Controller] location.replace 보안 차단 발생, href 폴백 전환:', replaceErr);
                     activePopupRef.location.href = episodeUrl;
@@ -6329,8 +6316,7 @@ async function main() {
         originalConsole.log("🗑️ 텍스트 로그 초기화 완료.");
     };
 
-    console.debug(`[Worker-Debug] 스크립트 진입점 로드됨 | URL: ${location.href}`);
-    console.debug(`[Worker-Debug] window.name: "${window.name}", window.opener 존재여부: ${!!window.opener}`);
+
 
     // =============================================================
     // 🛡️ [보안 극복] 네이티브 함수 가로채기 (Proxy 기반 위장)
@@ -6359,7 +6345,7 @@ async function main() {
         isSessionWorker
     );
 
-    console.debug(`[Worker-Debug] isWorkerPopup 판정 결과: ${isWorkerPopup} (session flag: ${isSessionWorker})`);
+
 
     if (isWorkerPopup) {
         // 향후 location.replace 등으로 인한 컨텍스트 소실(짝수 회차 방어)을 대비해 현재 탭(세션)에 워커 각인
@@ -6398,7 +6384,6 @@ async function main() {
 
         // 지시 수신 리스너 셋업
         window.addEventListener('message', async (event) => {
-            console.debug(`[Worker-Debug] 📩 부모 메시지 수신:`, event.data ? event.data.type : 'unknown data', event.data);
             if (event.data && event.data.type === 'TOKI_START_EXTRACTION') {
                 // --- Cloudflare/Captcha Check ---
                 const isCloudflare = document.title.includes('Just a moment') ||
@@ -6415,7 +6400,6 @@ async function main() {
                 }
 
                 if (isExtracting) {
-                    console.debug('⚠️ [Worker-Debug] 이미 추출 작업이 진행 중이므로 중복 지시(Heartbeat)를 무시합니다.');
                     return;
                 }
                 isExtracting = true;
@@ -6561,7 +6545,6 @@ async function main() {
 
                         // 4) 1차 추출 및 다운로드 실행
                         let finalImages = extractImageUrls();
-                        console.debug(`[Worker-Debug] 1차 이미지 URL 추출 개수: ${finalImages.length}개`, finalImages);
                         console.log(`🎯 [TokiSync-Worker] 1차 이미지 주소 ${finalImages.length}개 추출. 다운로드 개시...`);
                         let downloadedData = await runImageDownloads(finalImages);
 
@@ -6585,7 +6568,6 @@ async function main() {
                         console.log(`🎯 [TokiSync-Worker] 모든 이미지 수집 완료 (최종 성공: ${downloadedData.filter(d => d.data).length}/${downloadedData.length})`);
 
                         if (parentWin) {
-                            console.debug(`[Worker-Debug] 🚀 부모 창으로 데이터 전송 시도... parentWin 활성 상태: ${!parentWin.closed}`);
                             parentWin.postMessage({
                                 type: 'TOKI_MEDIA_DATA',
                                 data: {
