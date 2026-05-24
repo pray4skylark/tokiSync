@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.10.1
+// @version      1.20.0
 // @description  Toki series sites -> Google Drive syncing tool (Bundled)
 // @author       pray4skylark
 // @updateURL    https://pray4skylark.github.io/tokiSync/tokiSync.user.js
@@ -37,7 +37,7 @@
 // @connect      *
 // @require      https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js
 // @require      https://cdnjs.cloudflare.com/ajax/libs/jszip-utils/0.1.0/jszip-utils.js
-// @run-at       document-end
+// @run-at       document-start
 // @license      MIT
 // ==/UserScript==
 
@@ -2000,19 +2000,22 @@ class RuleManager {
 /***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
 
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
-/* harmony export */   U: function() { return /* binding */ fetchNovelText; }
+/* harmony export */   UT: function() { return /* binding */ fetchNovelText; },
+/* harmony export */   dI: function() { return /* binding */ closeActivePopup; },
+/* harmony export */   gq: function() { return /* binding */ fetchComicImages; }
 /* harmony export */ });
 /**
- * [전략 B] 소설 API 기반 복호화 모듈
- * Closed Shadow DOM 및 XOR 암호화를 우회하여 API를 통해 직접 평문을 추출합니다.
+ * [하이브리드 멀티 엔진] 소설 렌더링 기반 동적 수집 모듈 (Popup Controller & API Decryptor)
+ * - 플랜 B (기본): 팝업 통신 및 Shadow DOM Piercing 수집 (액티브)
+ * - 플랜 C (폴백): JWT 토큰 디코딩 + 동적 Nonce 추출 API 직접 복호화 (페이퍼 플랜 대기)
  */
 
-// 이스케이프 유무 모두 대응: "token":"eyJ..." 또는 \"token\":\"eyJ...\"
-const RE_TOKEN = /\\?"token\\?":\\?"(eyJ[A-Za-z0-9_-]+[A-Za-z0-9_=.-]*)\\?"/;
+let activePopupRef = null;
 
-/**
- * Base64URL 디코딩
- */
+// =============================================================
+// 🛠️ 공통 유틸리티 & Base64 / 암호학 헬퍼 함수
+// =============================================================
+
 function b64urlDecode(str) {
     const pad = str.length % 4 === 0 ? '' : '='.repeat(4 - str.length % 4);
     const bin = atob(str.replace(/-/g, '+').replace(/_/g, '/') + pad);
@@ -2021,18 +2024,12 @@ function b64urlDecode(str) {
     return bytes;
 }
 
-/**
- * Base64URL 인코딩
- */
 function b64urlEncode(bytes) {
     let bin = '';
     for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
     return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-/**
- * HMAC-SHA256 서명 (Proof 생성용)
- */
 async function hmacSign(secret, message) {
     const enc = new TextEncoder();
     const key = await crypto.subtle.importKey(
@@ -2043,12 +2040,10 @@ async function hmacSign(secret, message) {
     return b64urlEncode(new Uint8Array(sig));
 }
 
-/**
- * XOR 복호화
- */
-function xorDecrypt(payloadB64, keyB64) {
+function xorDecrypt(payloadB64, token) {
     const payload = b64urlDecode(payloadB64);
-    const key = b64urlDecode(keyB64);
+    const xorKey = token.split('.')[0];
+    const key = new TextEncoder().encode(xorKey);
     const result = new Uint8Array(payload.length);
     for (let i = 0; i < payload.length; i++) {
         result[i] = payload[i] ^ key[i % key.length];
@@ -2056,43 +2051,230 @@ function xorDecrypt(payloadB64, keyB64) {
     return new TextDecoder('utf-8').decode(result);
 }
 
-/**
- * document.cookie에서 특정 쿠키 값 가져오기
- */
 function getCookie(name) {
     const match = document.cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
     return match ? decodeURIComponent(match[1]) : null;
 }
 
-/**
- * nv 쿠키 삭제 후 새로 발급 (세션 차단 복구용)
- */
 async function resetNvCookie(cookieName) {
     console.log(`[Decryptor] ${cookieName} 쿠키 리셋 중...`);
-    // 모든 경로에 대해 쿠키 삭제
     document.cookie = `${cookieName}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
-    // 새 쿠키 발급
     await fetch('/api/nv-issue', { method: 'POST', credentials: 'same-origin' });
     console.log(`[Decryptor] ${cookieName} 쿠키 재발급 완료`);
 }
 
-/**
- * URL에서 novelId와 episodeId 추출
- */
 function getIdsFromUrl(url) {
     const match = url.match(/\/novel\/(\d+)\/(\d+)/);
     if (!match) return null;
     return { novelId: match[1], episodeId: match[2] };
 }
 
-/**
- * [Main] 에피소드 URL로부터 평문 텍스트를 직접 추출하여 반환
- * @param {string} episodeUrl 에피소드 주소
- * @param {Object} config 규칙의 decryptApi 설정
- * @param {boolean} _isRetry 내부 재시도 여부 (외부에서 사용 금지)
- * @returns {Promise<string|null>} 복호화된 평문 (실패 시 null)
- */
-async function fetchNovelText(episodeUrl, config = {}, _isRetry = false) {
+function getValidNonce(token) {
+    try {
+        const base64UrlPayload = token.split('.')[0];
+        const base64Payload = base64UrlPayload.replace(/-/g, '+').replace(/_/g, '/');
+        const binStr = atob(base64Payload);
+        const bytes = new Uint8Array(binStr.length);
+        for (let i = 0; i < binStr.length; i++) {
+            bytes[i] = binStr.charCodeAt(i);
+        }
+        const decodedString = new TextDecoder('utf-8').decode(bytes);
+        const tokenData = JSON.parse(decodedString);
+
+        if (tokenData && tokenData.nonce) {
+            console.log("[Decryptor] 신형 토큰 감지 - 내장된 Nonce 추출 완료:", tokenData.nonce);
+            return tokenData.nonce;
+        }
+    } catch (e) {
+        console.warn("[Decryptor] 토큰 디코딩 중 오류 발생, 기존 폴백 적용:", e);
+    }
+    console.log("[Decryptor] 구형 토큰 감지 - 랜덤 Nonce를 생성합니다.");
+    return b64urlEncode(crypto.getRandomValues(new Uint8Array(24)));
+}
+
+// 이스케이프 대응 토큰 정규식
+const RE_TOKEN = /\\?"token\\?":\\?"(eyJ[A-Za-z0-9_-]+[A-Za-z0-9_=.-]*)\\?"/;
+
+// =============================================================
+// 팝업 수집 창 리소스 관리 헬퍼
+// =============================================================
+
+function closeActivePopup() {
+    if (activePopupRef && !activePopupRef.closed) {
+        console.log('[Controller] 액티브 팝업 세션 수동 폐쇄');
+        activePopupRef.close();
+    }
+    activePopupRef = null;
+}
+
+// =============================================================
+// 🏛️ 플랜 B Engine: 팝업 렌더링 IPC 수집 엔진 (액티브)
+// =============================================================
+
+async function fetchMediaViaPopup(episodeUrl, targetType = 'novel', config = {}) {
+    const timeoutDuration = config.timeout || 45000;
+
+    return new Promise((resolve) => {
+        let timeoutId = null;
+        let pushInterval = null;
+
+        const cleanup = () => {
+            window.removeEventListener('message', messageHandler);
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+                timeoutId = null;
+            }
+            if (pushInterval) {
+                clearInterval(pushInterval);
+                pushInterval = null;
+            }
+        };
+
+        const startPushHeartbeat = () => {
+            if (pushInterval) clearInterval(pushInterval);
+
+            const sendInstruction = () => {
+                if (activePopupRef && !activePopupRef.closed) {
+                    let popupUrl = 'unknown';
+                    try { popupUrl = activePopupRef.location.href; } catch(e) { popupUrl = 'CORS/Blocked'; }
+                    console.debug(`[Controller-Debug] 📢 강제 지시문 주입 (Heartbeat) | 팝업상태: 활성, URL접근: ${popupUrl}, targetType: ${targetType}`);
+                    activePopupRef.postMessage({
+                        type: 'TOKI_START_EXTRACTION',
+                        targetType: targetType,
+                        viewerCfg: config.viewerCfg || {}
+                    }, '*');
+                } else {
+                    console.debug(`[Controller-Debug] ⚠️ 강제 지시문 주입 실패 - 팝업 닫힘 또는 참조 유실`);
+                }
+            };
+
+            // Immediate execution, then interval every 1.5 seconds
+            sendInstruction();
+            pushInterval = setInterval(sendInstruction, 1500);
+        };
+
+        const messageHandler = async (event) => {
+            if (!event.data) return;
+
+            console.debug(`[Controller-Debug] 📩 팝업으로부터 메시지 수신:`, event.data.type, event.data);
+
+            // 1. Handshake Backup (if window.opener is still alive, fallback gracefully)
+            if (event.data.type === 'TOKI_WORKER_READY') {
+                if (activePopupRef && !activePopupRef.closed) {
+                    console.log(`[Controller] 📢 자식 팝업 READY 수신. 동작 지시문 즉시 주입 -> 유형: ${targetType}`);
+                    activePopupRef.postMessage({
+                        type: 'TOKI_START_EXTRACTION',
+                        targetType: targetType,
+                        viewerCfg: config.viewerCfg || {}
+                    }, '*');
+                }
+                return;
+            }
+
+            // 2. 캡차/클라우드플레어 대기 상태 수신
+            if (event.data.type === 'TOKI_CAPTCHA_DETECTED') {
+                console.warn(`[Controller] ⚠️ 팝업에서 클라우드플레어/캡차 통과 화면이 감지되었습니다. 타임아웃을 5분으로 연장합니다.`);
+                if (timeoutId) {
+                    clearTimeout(timeoutId);
+                    timeoutId = setTimeout(() => {
+                        cleanup();
+                        console.error(`[Controller] 캡차/클라우드플레어 통과 시간 초과 (5분) - 유형: ${targetType}`);
+                        closeActivePopup();
+                        resolve(null);
+                    }, 300000); // 5분 연장
+                }
+                return;
+            }
+
+            // 3. Data collection complete
+            if (event.data.type === 'TOKI_MEDIA_DATA') {
+                const { contentType, content, images, novelId, episodeId } = event.data.data;
+                
+                // [보안/무결성] 이전 팝업 페이지(잔류 워커)가 보낸 고스트 데이터 필터링
+                const expectedIds = getIdsFromUrl(episodeUrl);
+                if (expectedIds && episodeId && episodeId !== '0') {
+                    if (expectedIds.episodeId !== episodeId) {
+                        console.warn(`[Controller] ⚠️ 이전 페이지의 지연된 고스트 데이터를 차단했습니다. (요청: ${expectedIds.episodeId} != 수신: ${episodeId})`);
+                        return;
+                    }
+                }
+                
+                if (contentType === targetType) {
+                    cleanup();
+
+                    // WAF mitigation delay (Jitter 3s - 5s)
+                    const jitterDelay = 3000 + Math.random() * 2000;
+                    console.log(`[Controller] WAF 행동 패턴 탐지 방어: 랜덤 지터 대기 시작... (${(jitterDelay / 1000).toFixed(2)}초)`);
+                    
+                    await new Promise(r => setTimeout(r, jitterDelay));
+                    console.log(`[Controller] 지터 대기 완료. 다운로드 큐로 데이터 전달.`);
+                    
+                    if (targetType === 'novel') {
+                        console.log(`[Controller] 팝업으로부터 소설 본문 수집 성공 - 길이: ${content.length}자`);
+                        resolve(content);
+                    } else {
+                        console.log(`[Controller] 팝업으로부터 만화 이미지 수집 성공 - 개수: ${images.length}개`);
+                        resolve(images);
+                    }
+                }
+            }
+        };
+
+        window.addEventListener('message', messageHandler);
+
+        timeoutId = setTimeout(() => {
+            cleanup();
+            console.error(`[Controller] 팝업 미디어 수집 타임아웃 발생 (45초) - 유형: ${targetType}`);
+            closeActivePopup();
+            
+            if (typeof window.downloadTokiLogs === 'function') {
+                console.log(`[Controller-Debug] 타임아웃 발생으로 인해 전체 디버그 로그 파일을 강제 다운로드합니다.`);
+                window.downloadTokiLogs();
+            }
+            
+            resolve(null);
+        }, timeoutDuration);
+
+        try {
+            if (activePopupRef && !activePopupRef.closed) {
+                console.log('[Controller] 기존 팝업 재활용 (location.replace 우회):', episodeUrl);
+                try {
+                    console.debug(`[Controller-Debug] location.replace 호출 직전... 현재 window.name: ${activePopupRef.name}`);
+                    activePopupRef.location.replace(episodeUrl);
+                    // Force-bind name to prevent browser security cleanups
+                    activePopupRef.name = 'tokisync-novel-worker';
+                    console.debug(`[Controller-Debug] location.replace 호출 완료, name 재바인딩 수행. (설정된 name: ${activePopupRef.name})`);
+                } catch (replaceErr) {
+                    console.warn('[Controller] location.replace 보안 차단 발생, href 폴백 전환:', replaceErr);
+                    activePopupRef.location.href = episodeUrl;
+                    activePopupRef.name = 'tokisync-novel-worker';
+                }
+            } else {
+                console.log('[Controller] 신규 수집용 팝업 생성:', episodeUrl);
+                activePopupRef = window.open(episodeUrl, 'tokisync-novel-worker', 'width=100,height=100,left=0,top=0,noopener=false');
+                if (!activePopupRef) {
+                    throw new Error('브라우저에 의해 팝업 차단이 감지되었습니다.');
+                }
+            }
+
+            // Immediately start pushing active extraction commands downwards
+            startPushHeartbeat();
+
+        } catch (err) {
+            cleanup();
+            console.error('[Controller] 팝업 수집 세션 기동 실패:', err);
+            closeActivePopup();
+            alert(`[TokiSync 팝업 차단 알림]\n\n브라우저 주소창 우측에서 [팝업 및 리다이렉트 항상 허용]으로 설정해 주셔야 정상 수집이 가능합니다.\n\n허용 후 다시 시도해 주세요.\n(오류: ${err.message})`);
+            resolve(null);
+        }
+    });
+}
+
+// =============================================================
+// 🏛️ 플랜 C Engine: API 직접 복호화 엔진 (페이퍼 플랜 대기 상태)
+// =============================================================
+
+async function fetchNovelTextViaApi(episodeUrl, config = {}, _isRetry = false) {
     const endpoint = config.endpoint || '/api/novel-content';
     const cookieName = config.cookieName || 'nv';
     const clientHeader = config.clientHeader || 'shadow-v2';
@@ -2101,27 +2283,26 @@ async function fetchNovelText(episodeUrl, config = {}, _isRetry = false) {
         const ids = getIdsFromUrl(episodeUrl);
         if (!ids) return null;
 
-        // 1. Fresh Token 추출 (토큰은 에피소드별 + 짧은 TTL이므로 항상 새로 가져옴)
+        // 1. Fresh Token 추출
         const html = await fetch(episodeUrl, { credentials: 'same-origin' }).then(r => r.text());
         const tokenMatch = html.match(RE_TOKEN);
         if (!tokenMatch) {
-            console.warn('[Decryptor] 토큰 추출 실패 (API 호출 중단)');
+            console.warn('[Decryptor-API] 토큰 추출 실패 (API 호출 중단)');
             return null;
         }
         const token = tokenMatch[1];
 
-        // 2. 쿠키 확인 (XOR 키)
+        // 2. 쿠키 확인
         let cookie = getCookie(cookieName);
         if (!cookie) {
-            console.log('[Decryptor] 쿠키 없음 - nv-issue 시도');
+            console.log('[Decryptor-API] 쿠키 없음 - nv-issue 시도');
             await fetch('/api/nv-issue', { method: 'POST', credentials: 'same-origin' });
             cookie = getCookie(cookieName);
         }
         if (!cookie) return null;
-        const xorKey = cookie.split('.')[0];
 
-        // 3. Proof 생성 (HMAC)
-        const nonce = b64urlEncode(crypto.getRandomValues(new Uint8Array(24)));
+        // 3. Proof 생성 (동적 Nonce 추출 연동)
+        const nonce = getValidNonce(token);
         const proof = await hmacSign(cookie, `${token}.${nonce}.${navigator.userAgent}`);
 
         // 4. API 호출
@@ -2142,41 +2323,64 @@ async function fetchNovelText(episodeUrl, config = {}, _isRetry = false) {
         // 5. API 실패 시 — 세션 차단 감지 → 쿠키 리셋 후 1회 재시도
         if (!resp.ok) {
             if (!_isRetry) {
-                console.warn(`[Decryptor] API 실패 (${resp.status}) → 세션 차단 의심, 쿠키 리셋 후 재시도`);
+                console.warn(`[Decryptor-API] API 실패 (${resp.status}) → 세션 차단 의심, 쿠키 리셋 후 재시도`);
                 await resetNvCookie(cookieName);
-                return fetchNovelText(episodeUrl, config, true); // 재시도는 딱 1회
+                return fetchNovelTextViaApi(episodeUrl, config, true);
             }
-            console.error(`[Decryptor] 재시도 후에도 실패 (${resp.status})`);
+            console.error(`[Decryptor-API] 재시도 후에도 실패 (${resp.status})`);
             return null;
         }
 
         const data = await resp.json();
         if (!data.ok || !data.payload) return null;
 
-        // 6. XOR 복호화 및 후처리 정제 (JSON 껍데기 제거 및 이스케이프 복원)
-        const rawText = xorDecrypt(data.payload, xorKey);
-        if (!rawText) return null;
+        // 6. XOR 복호화 및 URI 디코딩 정제 (신형 스펙 보정 적용)
+        let resultString = xorDecrypt(data.payload, token);
+        if (!resultString) return null;
 
-        let cleanText = rawText;
-        
-        // 1) 앞부분 JSON 껍데기 제거 (text/html 형식 모두 대응)
-        cleanText = cleanText.replace(/^\{"kind"\s*:\s*"(text|html)"\s*,\s*"(text|html)"\s*:\s*"/, '');
-        
-        // 2) 뒷부분 JSON 껍데기 제거 (", "css":"" } 또는 "} 로 끝나는 모든 경우 대응)
-        cleanText = cleanText.replace(/"\s*(,\s*"css"\s*:\s*""\s*)?\}$/, '');
-        
-        // 3) 줄바꿈 이스케이프(\n) 복원
-        cleanText = cleanText.replace(/\\n/g, '\n');
-        
-        // 4) 따옴표 이스케이프(\") 복원
-        cleanText = cleanText.replace(/\\"/g, '"');
+        if (resultString.startsWith('%')) {
+            resultString = decodeURIComponent(resultString);
+        }
 
-        return cleanText;
+        return resultString;
 
     } catch (e) {
-        console.error('[Decryptor] 복호화 과정 중 예외 발생:', e);
+        console.error('[Decryptor-API] 복호화 과정 중 예외 발생:', e);
         return null;
     }
+}
+
+// =============================================================
+// 🏛️ 통합 게이트웨이 진입점 (Gateway)
+// =============================================================
+
+async function fetchNovelText(episodeUrl, config = {}) {
+    console.log('[Controller] 소설 본문 수집 개시 - 플랜 B (팝업 IPC) 가동');
+    
+    // 1순위: 플랜 B (팝업 IPC) 실행
+    const content = await fetchMediaViaPopup(episodeUrl, 'novel', config);
+    
+    if (content) {
+        return content;
+    }
+    
+    console.warn('[Controller] 플랜 B (팝업 IPC) 수집 실패 또는 차단 감지');
+    
+    // 2순위: 플랜 C (API 직접 복호화) - 페이퍼 플랜 대기 상태
+    // ⚠️ 긴급 상황 시 아래 조건을 true로 변경하여 즉시 런타임에 투입 가능합니다.
+    const EMERGENCY_API_FALLBACK = false;
+    
+    if (EMERGENCY_API_FALLBACK) {
+        console.log('[Controller] 🚨 긴급 폴백 가동: 플랜 C (API 직접 복호화) 실행');
+        return await fetchNovelTextViaApi(episodeUrl, config);
+    }
+    
+    return null;
+}
+
+async function fetchComicImages(episodeUrl, config = {}) {
+    console.log('[Controller] 만화 이미지 수집 개시 - 팝업 IPC 가동');
+    return await fetchMediaViaPopup(episodeUrl, 'comic', config);
 }
 
 
@@ -2463,14 +2667,14 @@ function isConfigValid() {
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
 /* harmony export */   Kt: function() { return /* binding */ fetchBlobWithXHR; },
 /* harmony export */   OJ: function() { return /* binding */ saveFile; },
+/* harmony export */   UF: function() { return /* binding */ waitForContent; },
 /* harmony export */   Vs: function() { return /* binding */ scrollToLoad; },
 /* harmony export */   _L: function() { return /* binding */ blobToArrayBuffer; },
-/* harmony export */   eO: function() { return /* binding */ waitIframeLoad; },
 /* harmony export */   getImageDimensions: function() { return /* binding */ getImageDimensions; },
 /* harmony export */   iL: function() { return /* binding */ getCommonPrefix; },
 /* harmony export */   yy: function() { return /* binding */ sleep; }
 /* harmony export */ });
-/* unused harmony export waitForContent */
+/* unused harmony export waitIframeLoad */
 /* harmony import */ var _gas_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(488);
 /* harmony import */ var _ui_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(989);
 
@@ -2582,7 +2786,7 @@ async function waitIframeLoad(iframe, url, viewerCfg = {}) {
             
             if (isCaptcha || isCloudflare) {
                 console.warn('[Captcha] 감지됨! 사용자 조치 필요');
-                const logger = _ui_js__WEBPACK_IMPORTED_MODULE_1__.LogBox.getInstance();
+                const logger = LogBox.getInstance();
                 logger.error('[Captcha] 캡차가 감지되었습니다. 해결 후 "재개" 버튼을 눌러주세요.');
                 await pauseForCaptcha(url);
                 logger.log('[Captcha] 해결 확인됨! 원본 주소로 다운로드 프레임 재개 중...', 'System');
@@ -3063,7 +3267,7 @@ async function extractEpisodeData(targetDoc, parser, siteInfo, isStaticDoc = fal
         // [전략 B] DOM 추출 실패 + API 복호화 설정이 있는 경우 폴백 시도
         if (!extractedData.content && viewerCfg.decryptApi && episodeUrl) {
             logger.log('[Extractor] DOM 추출 실패 - API 복호화 폴백 시도...', 'Extractor');
-            extractedData.content = await (0,_novel_decryptor_js__WEBPACK_IMPORTED_MODULE_2__/* .fetchNovelText */ .U)(episodeUrl, viewerCfg.decryptApi);
+            extractedData.content = await (0,_novel_decryptor_js__WEBPACK_IMPORTED_MODULE_2__/* .fetchNovelText */ .UT)(episodeUrl, viewerCfg.decryptApi);
             if (extractedData.content) {
                 logger.log('✅ API 복호화 폴백 성공', 'Extractor');
             }
@@ -4709,141 +4913,89 @@ const SLEEP_POLICIES = {
     very_slow: { min: 10000, max: 30000 } // 매우 느림 (10-30초)
 };
 
-// Processing Loop에 해당되는 로직을 분리 한다.
 async function processItem(item, builder, siteInfo, iframe, parser, seriesTitle = "", targetDoc = null) {
     const { category } = siteInfo;
     const isNovel = (category === 'Novel' || category === 'novel');
     const viewerCfg = parser.rule.viewer || {};
-    const fetchMethod = viewerCfg.fetchMethod || (isNovel ? 'xhr' : 'iframe');
 
-    // Apply Dynamic Sleep based on Policy
+    const logger = ui.LogBox.getInstance();
     const config = (0,core_config/* getConfig */.zj)();
     let policy = SLEEP_POLICIES[config.sleepMode] || SLEEP_POLICIES.agile;
 
-    let iframeDoc = targetDoc;
-    let isStaticDoc = false;
+    if (isNovel) {
+        logger.log(`[소설] 추출 중: ${item.title}`, 'Downloader');
 
-    // [전략 B] fetchMethod === 'api'는 targetDoc 여부와 무관하게 항상 API 경로 우선
-    if (fetchMethod === 'api') {
-        const logger = ui.LogBox.getInstance();
-        logger.log(`[API] 직접 복호화 시도 중 (대기: ${policy.min / 1000}~${policy.max / 1000}초): ${item.title}`, 'Downloader');
-
-        const text = await (0,novel_decryptor/* fetchNovelText */.U)(item.src, viewerCfg.decryptApi || {});
+        const text = await (0,novel_decryptor/* fetchNovelText */.UT)(item.src, {
+            ...(viewerCfg.decryptApi || {}),
+            viewerCfg: viewerCfg
+        });
 
         if (text) {
             builder.addChapter(item.title, text);
-            logger.log(`✅ 복호화 성공: ${item.title}`, 'Downloader');
+            logger.log(`✅ 추출 성공: ${item.title}`, 'Downloader');
         } else {
-            throw new Error(`복호화 실패 (API 응답 없음)`);
+            throw new Error(`추출 실패 (본문 응답 없음)`);
         }
 
         await (0,utils/* sleep */.yy)(policy.min, policy.max);
-        return; // DOM 파이프라인 완전 우회
-    }
-
-    if (!iframeDoc) {
-        if (fetchMethod === 'xhr') {
-            const logger = ui.LogBox.getInstance();
-            logger.log(`[XHR] 문서 파싱 중...`, 'Downloader');
-            
-            const responseText = await new Promise((resolve, reject) => {
-                if (typeof GM_xmlhttpRequest === 'undefined') {
-                    reject(new Error("GM_xmlhttpRequest 권한이 없습니다. iframe 폴백을 설정해주세요."));
-                    return;
-                }
-                GM_xmlhttpRequest({
-                    method: 'GET',
-                    url: item.src,
-                    headers: { "Referer": window.location.origin },
-                    onload: (res) => resolve(res.responseText),
-                    onerror: (err) => reject(new Error("네트워크 오류: " + (err.statusText || 'Unknown')))
-                });
-            });
-
-            const parserObj = new DOMParser();
-            iframeDoc = parserObj.parseFromString(responseText, "text/html");
-            isStaticDoc = true;
-
-            await (0,utils/* sleep */.yy)(policy.min, policy.max);
-        } else {
-            await (0,utils/* waitIframeLoad */.eO)(iframe, item.src, viewerCfg);
-            await (0,utils/* sleep */.yy)(policy.min, policy.max);
-            
-            try {
-                const win = iframe.contentWindow;
-                if (!win) throw new Error("NoWindow");
-                iframeDoc = win.document;
-                const title = iframeDoc.title; // CORS/Access Check
-                
-                // [v1.8.1] 만약 내용이 아예 없거나 보안 차단 문구가 보인다면 에러 발생시켜 XHR로 유도
-                if (!title || title.includes('403') || title.includes('Cloudflare')) {
-                    if (iframeDoc.body.innerHTML.length < 100) {
-                        throw new Error("IframeBlockedOrEmpty");
-                    }
-                }
-            } catch (e) {
-                console.warn('[Downloader] iframe 접근 차단 감지(CORS). XHR 방식으로 즉시 폴백합니다.', e);
-                const responseText = await new Promise((resolve, reject) => {
-                    GM_xmlhttpRequest({
-                        method: 'GET',
-                        url: item.src,
-                        headers: { "Referer": window.location.origin },
-                        onload: (res) => resolve(res.responseText),
-                        onerror: (err) => reject(new Error("XHR 폴백 실패: " + (err.statusText || 'Unknown')))
-                    });
-                });
-                const parserObj = new DOMParser();
-                iframeDoc = parserObj.parseFromString(responseText, "text/html");
-                isStaticDoc = true;
-            }
-        }
-    }
-
-    // --- [v1.8.2] 1단계: 모듈화된 파이프라인(Extractor) 호출 ---
-    const extractedData = await (0,extractor/* extractEpisodeData */.d)(iframeDoc, parser, siteInfo, isStaticDoc, item.src);
-    
-    // 메타데이터가 뷰어에서 추출되었다면 활용 (단건 다운로드 등)
-    const finalTitle = extractedData.episodeTitle && extractedData.episodeTitle !== "UnknownEpisode" 
-                       ? extractedData.episodeTitle 
-                       : item.title;
-
-    if (isNovel) {
-        if (!extractedData.content) {
-            throw new Error(`텍스트 본문 추출 실패 (DOM 또는 API 모두 감지 불가)`);
-        }
-        builder.addChapter(finalTitle, extractedData.content);
     } 
     else {
-        const logger = ui.LogBox.getInstance();
-        const mergedUrls = extractedData.urls;
+        logger.log(`[만화] 추출 중: ${item.title}`, 'Downloader');
 
-        if (mergedUrls.length === 0) {
-            throw new Error(`이미지 URL 감지 실패 (뷰어 컨테이너 또는 속성 탐색 불가)`);
+        // 자식 팝업 내부에서 스크롤 로드 및 이미지 다운로드까지 전담하여 ArrayBuffer 패키지 회신
+        const popupImages = await (0,novel_decryptor/* fetchComicImages */.gq)(item.src, {
+            viewerCfg: viewerCfg
+        });
+
+        if (popupImages && popupImages.length > 0) {
+            // 부모 탭에서 ArrayBuffer 패키지를 Blob 배열로 환원 (MIME 형식 기반 확장자 유입)
+            const resolvedImages = popupImages.map(img => {
+                const getExtFromMime = (mime) => {
+                    if (!mime) return '.jpg';
+                    const lower = mime.toLowerCase();
+                    if (lower.includes('png')) return '.png';
+                    if (lower.includes('webp')) return '.webp';
+                    if (lower.includes('gif')) return '.gif';
+                    return '.jpg';
+                };
+
+                const mimeType = img.type || 'image/jpeg';
+                const ext = getExtFromMime(mimeType);
+
+                if (img.data) {
+                    return {
+                        url: img.url,
+                        blob: new Blob([img.data], { type: mimeType }),
+                        ext: ext,
+                        isMissing: false
+                    };
+                } else {
+                    return {
+                        url: img.url,
+                        blob: new Blob([]),
+                        ext: ext,
+                        isMissing: true
+                    };
+                }
+            });
+
+            // 제목 정제 규칙 적용
+            let chapterTitleOnly = item.title;
+            if (seriesTitle && chapterTitleOnly.startsWith(seriesTitle)) {
+                chapterTitleOnly = chapterTitleOnly.replace(seriesTitle, '').trim();
+            }
+
+            const chapterMatch = chapterTitleOnly.match(/(\d+)화/);
+            const chapterNum = chapterMatch ? chapterMatch[1].padStart(4, '0') : item.num;
+            const cleanChapterTitle = `${chapterNum} ${chapterTitleOnly}`;
+
+            builder.addChapter(cleanChapterTitle, resolvedImages);
+            logger.log(`✅ 추출 및 다운로드 성공: ${item.title} (이미지 ${resolvedImages.length}개)`, 'Downloader');
+        } else {
+            throw new Error(`추출 실패 (이미지 팝업 패키지 획득 불가)`);
         }
 
-        // Fetch Images Parallel
-        let images = await fetchImages(mergedUrls);
-        
-        // [v1.7.3] Deep Fallback: 기준 하향 (70KB -> 30KB) 및 누락 확인
-        const suspiciousCount = images.filter(img => img.blob.size < 30000 || img.isMissing).length;
-        if (suspiciousCount > mergedUrls.length / 2) {
-            logger.warn(`[Deep Fallback] 다수의 저용량 이미지 감지 (${suspiciousCount}/${mergedUrls.length}). 2초 후 강제 재스크롤 재시도...`, 'System');
-            await (0,utils/* sleep */.yy)(2000); // v1.7.2: 5s -> 2s
-            await (0,utils/* scrollToLoad */.Vs)(iframeDoc, 12000); // 더 길게 대기
-            const finalRetryUrls = parser.getImageList(iframeDoc);
-            images = await fetchImages(finalRetryUrls);
-        }
-
-        // Add chapter to builder
-        let chapterTitleOnly = item.title;
-        if (seriesTitle && chapterTitleOnly.startsWith(seriesTitle)) {
-            chapterTitleOnly = chapterTitleOnly.replace(seriesTitle, '').trim();
-        }
-
-        const chapterMatch = chapterTitleOnly.match(/(\d+)화/);
-        const chapterNum = chapterMatch ? chapterMatch[1].padStart(4, '0') : item.num;
-        const cleanChapterTitle = `${chapterNum} ${chapterTitleOnly}`;
-        builder.addChapter(cleanChapterTitle, images);
+        await (0,utils/* sleep */.yy)(policy.min, policy.max);
     }
 }
 
@@ -5497,6 +5649,13 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
         (0,anti_sleep/* stopSilentAudio */.Cv)();
         logger.log('[Anti-Sleep] 백그라운드 모드 자동 종료');
         
+        // [Cleanup 팝업 세션] 다운로드 종료 후 액티브 팝업 폐쇄
+        try {
+            (0,novel_decryptor/* closeActivePopup */.dI)();
+        } catch (popupErr) {
+            console.warn('[Downloader] 팝업 클린업 실패:', popupErr);
+        }
+
         // Cleanup
         const iframe = document.querySelector('iframe');
         if (iframe) iframe.remove();
@@ -5504,7 +5663,7 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
 }
 
 async function fetchImages(imageUrls) {
-    const logger = ui.LogBox.getInstance();
+    const logger = LogBox.getInstance();
     const promises = imageUrls.map(async (src) => {
         let retries = 3;
         let lastBlob = null;
@@ -5512,7 +5671,7 @@ async function fetchImages(imageUrls) {
         
         while (retries > 0) {
             try {
-                const blob = await (0,utils/* fetchBlobWithXHR */.Kt)(src);
+                const blob = await fetchBlobWithXHR(src);
                 
                 if (blob.size === 0) {
                     throw new Error("빈 이미지 데이터 (Blob size 0)");
@@ -5661,7 +5820,7 @@ async function generateDownloadReport(seriesTitle, seriesId, listCount, failedEp
 
 
 async function main() {
-    console.log("🚀 TokiDownloader Loaded (New Core v1.10.1)");
+    console.log("🚀 TokiDownloader Loaded (New Core v1.20.0)");
     
     const logger = ui.LogBox.getInstance();
 
@@ -6110,6 +6269,351 @@ async function main() {
 
 (async function () {
     'use strict';
+
+    // =============================================================
+    // 📝 [통합 로깅 시스템] localStorage 기반 부모-자식 통합 로그 캡처
+    // =============================================================
+    const originalConsole = {
+        log: console.log,
+        debug: console.debug,
+        warn: console.warn,
+        error: console.error
+    };
+    
+    const ctxMarker = (window.name === 'tokisync-novel-worker' || (window.opener && window.name === '')) ? '[Worker]' : '[Parent]';
+
+    function saveLogToStorage(level, args) {
+        try {
+            const msg = args.map(a => {
+                if (a && typeof a === 'object') {
+                    try { return JSON.stringify(a); } catch(e) { return String(a); }
+                }
+                return String(a);
+            }).join(' ');
+            
+            const now = new Date();
+            const timeStr = now.toISOString().split('T')[1].replace('Z', '') + '.' + String(now.getMilliseconds()).padStart(3, '0');
+            const line = `[${timeStr}] ${ctxMarker} [${level}] ${msg}\n`;
+            
+            let existing = localStorage.getItem('TOKI_DEBUG_LOGS') || '';
+            if (existing.length > 300000) existing = existing.slice(-150000);
+            localStorage.setItem('TOKI_DEBUG_LOGS', existing + line);
+        } catch (err) {}
+    }
+
+    console.log = function(...args) { saveLogToStorage('LOG', args); originalConsole.log.apply(this, args); };
+    console.debug = function(...args) { saveLogToStorage('DEBUG', args); originalConsole.debug.apply(this, args); };
+    console.warn = function(...args) { saveLogToStorage('WARN', args); originalConsole.warn.apply(this, args); };
+    console.error = function(...args) { saveLogToStorage('ERROR', args); originalConsole.error.apply(this, args); };
+
+    window.downloadTokiLogs = function() {
+        try {
+            const logs = localStorage.getItem('TOKI_DEBUG_LOGS') || '로그가 없습니다.';
+            const blob = new Blob([logs], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `tokisync_debug_${new Date().getTime()}.txt`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            originalConsole.log("💾 텍스트 로그 파일 다운로드 완료.");
+        } catch (e) {
+            originalConsole.error("로그 다운로드 실패:", e);
+        }
+    };
+    
+    window.clearTokiLogs = function() {
+        localStorage.removeItem('TOKI_DEBUG_LOGS');
+        originalConsole.log("🗑️ 텍스트 로그 초기화 완료.");
+    };
+
+    console.debug(`[Worker-Debug] 스크립트 진입점 로드됨 | URL: ${location.href}`);
+    console.debug(`[Worker-Debug] window.name: "${window.name}", window.opener 존재여부: ${!!window.opener}`);
+
+    // =============================================================
+    // 🛡️ [보안 극복] 네이티브 함수 가로채기 (Proxy 기반 위장)
+    // =============================================================
+    const originalAttachShadow = Element.prototype.attachShadow;
+
+    Element.prototype.attachShadow = new Proxy(originalAttachShadow, {
+        apply(target, thisArg, argumentsList) {
+            if (argumentsList[0] && argumentsList[0].mode === 'closed') {
+                console.log('[TokiSync-Worker] 🔒 닫힌 Shadow DOM 감지 -> Open 모드로 개방 완료');
+                argumentsList[0].mode = 'open';
+            }
+            return Reflect.apply(target, thisArg, argumentsList);
+        }
+    });
+
+    // =============================================================
+    // 🚀 [자식 팝업 - Worker] 다형성 미디어 수집 및 부모 창 IPC 브릿지
+    // =============================================================
+    let isSessionWorker = false;
+    try { isSessionWorker = sessionStorage.getItem('tokisync_worker_flag') === '1'; } catch(e) {}
+
+    const isWorkerPopup = (
+        window.name === 'tokisync-novel-worker' || 
+        (window.opener && window.name === '') ||
+        isSessionWorker
+    );
+
+    console.debug(`[Worker-Debug] isWorkerPopup 판정 결과: ${isWorkerPopup} (session flag: ${isSessionWorker})`);
+
+    if (isWorkerPopup) {
+        // 향후 location.replace 등으로 인한 컨텍스트 소실(짝수 회차 방어)을 대비해 현재 탭(세션)에 워커 각인
+        try { sessionStorage.setItem('tokisync_worker_flag', '1'); } catch(e) {}
+        console.log("🚀 [TokiSync-Worker] 자식 팝업 수동 대기 모드 기동");
+        
+        // window.opener 은폐 및 로컬 참조 복사
+        const parentWin = window.opener;
+        try {
+            Object.defineProperty(window, 'opener', { value: null });
+        } catch (e) {
+            window.opener = null;
+        }
+
+        // 부모 창에게 준비 완료 신호 전송 (부모가 지시를 줄 때까지 1초마다 Heartbeat)
+        let readyInterval = null;
+        const startReadyHeartbeat = () => {
+            if (readyInterval) clearInterval(readyInterval);
+            
+            const sendReady = () => {
+                if (parentWin) {
+                    console.log("[TokiSync-Worker] 📢 부모 창에 준비 완료 신호 전송 (Handshake Heartbeat)");
+                    parentWin.postMessage({
+                        type: 'TOKI_WORKER_READY',
+                        timestamp: Date.now()
+                    }, '*');
+                }
+            };
+
+            sendReady();
+            readyInterval = setInterval(sendReady, 1000);
+        };
+
+        // 중복 실행 방지용 락(Lock)
+        let isExtracting = false;
+
+        // 지시 수신 리스너 셋업
+        window.addEventListener('message', async (event) => {
+            console.debug(`[Worker-Debug] 📩 부모 메시지 수신:`, event.data ? event.data.type : 'unknown data', event.data);
+            if (event.data && event.data.type === 'TOKI_START_EXTRACTION') {
+                // --- Cloudflare/Captcha Check ---
+                const isCloudflare = document.title.includes('Just a moment') ||
+                                     document.getElementById('cf-challenge-running') ||
+                                     document.querySelector('.cf-browser-verification') ||
+                                     document.getElementById('challenge-running');
+                
+                if (isCloudflare) {
+                    console.warn("⚠️ [TokiSync-Worker] 클라우드플레어 인증/대기 페이지 감지. 통과를 대기합니다.");
+                    if (parentWin) {
+                        parentWin.postMessage({ type: 'TOKI_CAPTCHA_DETECTED', timestamp: Date.now() }, '*');
+                    }
+                    return; // 캡차가 통과되어 새 페이지로 리다이렉트 될 때까지 중복 실행을 막으며 조용히 대기
+                }
+
+                if (isExtracting) {
+                    console.debug('⚠️ [Worker-Debug] 이미 추출 작업이 진행 중이므로 중복 지시(Heartbeat)를 무시합니다.');
+                    return;
+                }
+                isExtracting = true;
+
+                const { targetType, viewerCfg } = event.data;
+                console.log(`🚀 [TokiSync-Worker] 부모의 동작 지시문 수신 완료! (유형: ${targetType})`);
+
+                // 하트비트 즉각 해제
+                if (readyInterval) {
+                    clearInterval(readyInterval);
+                    readyInterval = null;
+                }
+
+                if (targetType === 'novel') {
+                    // [소설 수집 동작]
+                    let attempt = 0;
+                    const checkInterval = setInterval(() => {
+                        attempt++;
+                        console.log(`[TokiSync-Worker] 소설 Shadow DOM 대기 중... (시도: ${attempt}회)`);
+
+                        const novelSel = viewerCfg.novelContent || '#novel_content';
+                        // 동적 셀렉터 및 폴백 적용
+                        const shadowHost = document.querySelector(novelSel)?.getRootNode()?.host
+                                        || document.querySelector('.novel-epub-rendered')?.getRootNode()?.host
+                                        || document.querySelector('.vw-bot-mini--novel')?.parentElement?.querySelector('div[style*="--novel-font-size"]');
+
+                        if (shadowHost && shadowHost.shadowRoot) {
+                            clearInterval(checkInterval);
+                            let content = '';
+
+                            // 1차: <p> 태그 수집
+                            const pTags = shadowHost.shadowRoot.querySelectorAll('.novel-epub-rendered p, p');
+                            if (pTags.length > 0) {
+                                content = Array.from(pTags)
+                                    .map(p => p.textContent.trim())
+                                    .filter(text => text.length > 0)
+                                    .join('\n\n');
+                            } else {
+                                // 2차 폴백: innerText
+                                const bodyEl = shadowHost.shadowRoot.querySelector('.novel-epub-rendered');
+                                if (bodyEl) {
+                                    content = bodyEl.innerText || bodyEl.textContent;
+                                } else {
+                                    // 3차 폴백: 노이즈 제거
+                                    const tempDiv = document.createElement('div');
+                                    tempDiv.innerHTML = shadowHost.shadowRoot.innerHTML;
+                                    tempDiv.querySelectorAll('style, script').forEach(el => el.remove());
+                                    content = tempDiv.innerText || tempDiv.textContent;
+                                }
+                            }
+
+                            if (content && content.trim().length > 100) {
+                                console.log(`🎯 [TokiSync-Worker] 소설 텍스트 정밀 조립 완료 - 길이: ${content.length}자`);
+                                if (parentWin) {
+                                    parentWin.postMessage({
+                                        type: 'TOKI_MEDIA_DATA',
+                                        data: {
+                                            novelId: location.pathname.split('/')[2] || '0',
+                                            episodeId: location.pathname.split('/')[3] || '0',
+                                            contentType: 'novel',
+                                            content: content.trim(),
+                                            images: null,
+                                            nextUrl: document.querySelector('a#next_episode')?.href || null,
+                                            timestamp: Date.now()
+                                        }
+                                    }, '*');
+                                }
+                            }
+                        }
+                    }, 500);
+                } else if (targetType === 'comic') {
+                    // [만화 수집 동작]
+                    try {
+                        console.log("[TokiSync-Worker] ⏳ 웹툰/만화 콘텐츠 DOM 렌더링 대기 시작...");
+                        
+                        // 1) 팝업 창 내부에 실제 만화 이미지 요소가 렌더링될 때까지 최대 10초 대기
+                        const contentDoc = await (0,utils/* waitForContent */.UF)(window, 10000, viewerCfg);
+                        
+                        if (!contentDoc) {
+                            console.warn("[TokiSync-Worker] ⚠️ 10초 대기 내에 콘텐츠 렌더링 미감지. 갈무리 우선 진행.");
+                        } else {
+                            console.log("[TokiSync-Worker] 🎯 웹툰 콘텐츠 감지 완료! 1.5초 안정화 대기 시작...");
+                        }
+
+                        // 2) 1.5초 DOM 안정화 딜레이 (사용자 제안 반영 - 스크롤 꼬임 완벽 방지)
+                        await (0,utils/* sleep */.yy)(1500);
+
+                        console.log("[TokiSync-Worker] 🚀 1.5초 안정화 완료. 1차 스크롤 및 다운로드 돌입.");
+
+                        // 3) 지연 로딩 이미지 스크롤 활성화 (부모가 제공한 viewerCfg 적용)
+                        await (0,utils/* scrollToLoad */.Vs)(document, 25000, viewerCfg);
+
+                        // 이미지 다운로드를 처리하는 비동기 헬퍼 정의 (동시성 5개 한계 제어)
+                        const runImageDownloads = async (imageUrls) => {
+                            const downloaded = [];
+                            const CONCURRENCY_LIMIT = 5;
+
+                            for (let i = 0; i < imageUrls.length; i += CONCURRENCY_LIMIT) {
+                                const chunk = imageUrls.slice(i, i + CONCURRENCY_LIMIT);
+                                const chunkPromises = chunk.map(async (url, index) => {
+                                    const globalIndex = i + index;
+                                    try {
+                                        const blob = await (0,utils/* fetchBlobWithXHR */.Kt)(url);
+                                        const arrayBuffer = await (0,utils/* blobToArrayBuffer */._L)(blob);
+                                        return {
+                                            url,
+                                            index: globalIndex,
+                                            data: arrayBuffer,
+                                            size: blob.size,
+                                            type: blob.type
+                                        };
+                                    } catch (err) {
+                                        console.error(`[TokiSync-Worker] 이미지 다운로드 실패 (${url}):`, err);
+                                        return {
+                                            url,
+                                            index: globalIndex,
+                                            data: null,
+                                            error: err.message
+                                        };
+                                    }
+                                });
+
+                                const chunkResults = await Promise.all(chunkPromises);
+                                downloaded.push(...chunkResults);
+                            }
+                            return downloaded;
+                        };
+
+                        // 이미지 URL 목록을 추출하는 헬퍼 정의 (하이브리드 파싱)
+                        const extractImageUrls = () => {
+                            let imageSelector = '.view-padding img, .viewer-main img, #v_content img, .img-tag';
+                            if (viewerCfg.imageContainer) {
+                                const itemSel = viewerCfg.imageItem || 'img';
+                                imageSelector = viewerCfg.imageContainer.split(',').map(c => `${c.trim()} ${itemSel}`).join(', ');
+                            }
+
+                            const urls = Array.from(document.querySelectorAll(imageSelector))
+                                .map(img => img.src || img.dataset.src || img.dataset.original)
+                                .filter(src => src && !src.includes('blank.gif') && !src.includes('loading.gif'))
+                                .map(src => src.trim());
+                            return urls;
+                        };
+
+                        // 4) 1차 추출 및 다운로드 실행
+                        let finalImages = extractImageUrls();
+                        console.debug(`[Worker-Debug] 1차 이미지 URL 추출 개수: ${finalImages.length}개`, finalImages);
+                        console.log(`🎯 [TokiSync-Worker] 1차 이미지 주소 ${finalImages.length}개 추출. 다운로드 개시...`);
+                        let downloadedData = await runImageDownloads(finalImages);
+
+                        // ── [iframe 명작 딥 폴백 로직 100% 재활용 이식] ──
+                        // 만약 크기가 30KB 미만인 더미 플레이스홀더 이미지나 누락된 파일이 절반 이상인 경우 2차 정밀 재스크롤 구동
+                        const suspiciousCount = downloadedData.filter(d => !d.data || d.size < 30000).length;
+                        
+                        if (suspiciousCount > finalImages.length / 2) {
+                            console.warn(`⚠️ [Deep Fallback] 다수의 저용량/누락 이미지 감지 (${suspiciousCount}/${finalImages.length}). 2초 후 15초 강제 재스크롤 재시도!`);
+                            await (0,utils/* sleep */.yy)(2000);
+                            
+                            // 2차 정밀 강제 징검다리 스크롤 기동 (15초)
+                            await (0,utils/* scrollToLoad */.Vs)(document, 15000, viewerCfg);
+                            
+                            // 최종 재추출 및 2차 재다운로드 단행
+                            finalImages = extractImageUrls();
+                            console.log(`🎯 [Deep Fallback] 2차 이미지 주소 ${finalImages.length}개 재추출. 최종 다운로드 재수행...`);
+                            downloadedData = await runImageDownloads(finalImages);
+                        }
+
+                        console.log(`🎯 [TokiSync-Worker] 모든 이미지 수집 완료 (최종 성공: ${downloadedData.filter(d => d.data).length}/${downloadedData.length})`);
+
+                        if (parentWin) {
+                            console.debug(`[Worker-Debug] 🚀 부모 창으로 데이터 전송 시도... parentWin 활성 상태: ${!parentWin.closed}`);
+                            parentWin.postMessage({
+                                type: 'TOKI_MEDIA_DATA',
+                                data: {
+                                    novelId: location.pathname.split('/')[2] || '0',
+                                    episodeId: location.pathname.split('/')[3] || '0',
+                                    contentType: 'comic',
+                                    content: null,
+                                    images: downloadedData,
+                                    nextUrl: document.querySelector('a#next_episode')?.href || null,
+                                    timestamp: Date.now()
+                                }
+                            }, '*');
+                        }
+                    } catch (err) {
+                        console.error('[TokiSync-Worker] 만화 이미지 수집 중 예외 발생:', err);
+                    }
+                }
+            }
+        });
+
+        // 팝업 로딩 시 핸드셰이킹 시작
+        if (document.readyState === 'complete' || document.readyState === 'interactive') {
+            startReadyHeartbeat();
+        } else {
+            window.addEventListener('DOMContentLoaded', startReadyHeartbeat);
+        }
+        return; // 팝업 모드에서는 다운로더 UI 등 메인 스크립트 실행 조기 종료 (Early Exit)
+    }
     
     // Viewer Config Injection (Zero-Config)
     if (location.hostname.includes('github.io') || location.hostname.includes('localhost') || location.hostname.includes('127.0.0.1')) {
@@ -6243,5 +6747,6 @@ async function main() {
         window.addEventListener('load', startMain);
     }
 })();
+
 /******/ })()
 ;
