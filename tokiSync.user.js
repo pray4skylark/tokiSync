@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.20.0
+// @version      1.20.5
 // @description  Toki series sites -> Google Drive syncing tool (Bundled)
 // @author       pray4skylark
 // @updateURL    https://pray4skylark.github.io/tokiSync/tokiSync.user.js
@@ -2111,7 +2111,7 @@ function closeActivePopup() {
 // 🏛️ 플랜 B Engine: 팝업 렌더링 IPC 수집 엔진 (액티브)
 // =============================================================
 
-async function fetchMediaViaPopup(episodeUrl, targetType = 'novel', config = {}) {
+async function fetchMediaViaPopupSingleAttempt(episodeUrl, targetType = 'novel', config = {}) {
     const timeoutDuration = config.timeout || 45000;
 
     return new Promise((resolve) => {
@@ -2137,14 +2137,11 @@ async function fetchMediaViaPopup(episodeUrl, targetType = 'novel', config = {})
                 if (activePopupRef && !activePopupRef.closed) {
                     let popupUrl = 'unknown';
                     try { popupUrl = activePopupRef.location.href; } catch(e) { popupUrl = 'CORS/Blocked'; }
-                    console.debug(`[Controller-Debug] 📢 강제 지시문 주입 (Heartbeat) | 팝업상태: 활성, URL접근: ${popupUrl}, targetType: ${targetType}`);
                     activePopupRef.postMessage({
                         type: 'TOKI_START_EXTRACTION',
                         targetType: targetType,
                         viewerCfg: config.viewerCfg || {}
                     }, '*');
-                } else {
-                    console.debug(`[Controller-Debug] ⚠️ 강제 지시문 주입 실패 - 팝업 닫힘 또는 참조 유실`);
                 }
             };
 
@@ -2155,8 +2152,6 @@ async function fetchMediaViaPopup(episodeUrl, targetType = 'novel', config = {})
 
         const messageHandler = async (event) => {
             if (!event.data) return;
-
-            console.debug(`[Controller-Debug] 📩 팝업으로부터 메시지 수신:`, event.data.type, event.data);
 
             // 1. Handshake Backup (if window.opener is still alive, fallback gracefully)
             if (event.data.type === 'TOKI_WORKER_READY') {
@@ -2226,12 +2221,6 @@ async function fetchMediaViaPopup(episodeUrl, targetType = 'novel', config = {})
             cleanup();
             console.error(`[Controller] 팝업 미디어 수집 타임아웃 발생 (45초) - 유형: ${targetType}`);
             closeActivePopup();
-            
-            if (typeof window.downloadTokiLogs === 'function') {
-                console.log(`[Controller-Debug] 타임아웃 발생으로 인해 전체 디버그 로그 파일을 강제 다운로드합니다.`);
-                window.downloadTokiLogs();
-            }
-            
             resolve(null);
         }, timeoutDuration);
 
@@ -2239,11 +2228,9 @@ async function fetchMediaViaPopup(episodeUrl, targetType = 'novel', config = {})
             if (activePopupRef && !activePopupRef.closed) {
                 console.log('[Controller] 기존 팝업 재활용 (location.replace 우회):', episodeUrl);
                 try {
-                    console.debug(`[Controller-Debug] location.replace 호출 직전... 현재 window.name: ${activePopupRef.name}`);
                     activePopupRef.location.replace(episodeUrl);
                     // Force-bind name to prevent browser security cleanups
                     activePopupRef.name = 'tokisync-novel-worker';
-                    console.debug(`[Controller-Debug] location.replace 호출 완료, name 재바인딩 수행. (설정된 name: ${activePopupRef.name})`);
                 } catch (replaceErr) {
                     console.warn('[Controller] location.replace 보안 차단 발생, href 폴백 전환:', replaceErr);
                     activePopupRef.location.href = episodeUrl;
@@ -2251,7 +2238,7 @@ async function fetchMediaViaPopup(episodeUrl, targetType = 'novel', config = {})
                 }
             } else {
                 console.log('[Controller] 신규 수집용 팝업 생성:', episodeUrl);
-                activePopupRef = window.open(episodeUrl, 'tokisync-novel-worker', 'width=100,height=100,left=0,top=0,noopener=false');
+                activePopupRef = window.open(episodeUrl, 'tokisync-novel-worker', 'width=50,height=400,left=0,top=0,noopener=false');
                 if (!activePopupRef) {
                     throw new Error('브라우저에 의해 팝업 차단이 감지되었습니다.');
                 }
@@ -2268,6 +2255,33 @@ async function fetchMediaViaPopup(episodeUrl, targetType = 'novel', config = {})
             resolve(null);
         }
     });
+}
+
+async function fetchMediaViaPopup(episodeUrl, targetType = 'novel', config = {}) {
+    const MAX_RETRIES = 3;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        console.log(`[Controller] 🚀 팝업 미디어 수집 시도 시작 (${attempt}/${MAX_RETRIES}) - URL: ${episodeUrl}`);
+        
+        // 2회차 재시도부터는 기존 팝업 세션을 강력 종료하고 1.5초 여유 딜레이 확보하여 찌꺼기 완벽 클린업
+        if (attempt > 1) {
+            console.warn(`[Controller] ⚠️ 이전 시도 실패 감지. 팝업 세션을 강제 파괴하고 재설정합니다.`);
+            closeActivePopup();
+            await new Promise(r => setTimeout(r, 1500));
+        }
+        
+        try {
+            const result = await fetchMediaViaPopupSingleAttempt(episodeUrl, targetType, config);
+            if (result && result.length > 0) {
+                console.log(`[Controller] 🎉 팝업 미디어 수집 시도 (${attempt}/${MAX_RETRIES}) 최종 성공!`);
+                return result;
+            }
+            console.warn(`[Controller] ⚠️ 팝업 미디어 수집 시도 (${attempt}/${MAX_RETRIES}) 실패 (획득 패키지 부재)`);
+        } catch (err) {
+            console.error(`[Controller] ❌ 팝업 미디어 수집 중 예외 발생 (시도 ${attempt}/${MAX_RETRIES}):`, err);
+        }
+    }
+    console.error(`[Controller] 🛑 총 ${MAX_RETRIES}회의 모든 팝업 수집 시도가 실패했습니다. - URL: ${episodeUrl}`);
+    return null;
 }
 
 // =============================================================
@@ -5820,7 +5834,7 @@ async function generateDownloadReport(seriesTitle, seriesId, listCount, failedEp
 
 
 async function main() {
-    console.log("🚀 TokiDownloader Loaded (New Core v1.20.0)");
+    console.log("🚀 TokiDownloader Loaded (New Core v1.20.5)");
     
     const logger = ui.LogBox.getInstance();
 
@@ -6329,8 +6343,7 @@ async function main() {
         originalConsole.log("🗑️ 텍스트 로그 초기화 완료.");
     };
 
-    console.debug(`[Worker-Debug] 스크립트 진입점 로드됨 | URL: ${location.href}`);
-    console.debug(`[Worker-Debug] window.name: "${window.name}", window.opener 존재여부: ${!!window.opener}`);
+
 
     // =============================================================
     // 🛡️ [보안 극복] 네이티브 함수 가로채기 (Proxy 기반 위장)
@@ -6359,7 +6372,7 @@ async function main() {
         isSessionWorker
     );
 
-    console.debug(`[Worker-Debug] isWorkerPopup 판정 결과: ${isWorkerPopup} (session flag: ${isSessionWorker})`);
+
 
     if (isWorkerPopup) {
         // 향후 location.replace 등으로 인한 컨텍스트 소실(짝수 회차 방어)을 대비해 현재 탭(세션)에 워커 각인
@@ -6398,7 +6411,6 @@ async function main() {
 
         // 지시 수신 리스너 셋업
         window.addEventListener('message', async (event) => {
-            console.debug(`[Worker-Debug] 📩 부모 메시지 수신:`, event.data ? event.data.type : 'unknown data', event.data);
             if (event.data && event.data.type === 'TOKI_START_EXTRACTION') {
                 // --- Cloudflare/Captcha Check ---
                 const isCloudflare = document.title.includes('Just a moment') ||
@@ -6415,7 +6427,6 @@ async function main() {
                 }
 
                 if (isExtracting) {
-                    console.debug('⚠️ [Worker-Debug] 이미 추출 작업이 진행 중이므로 중복 지시(Heartbeat)를 무시합니다.');
                     return;
                 }
                 isExtracting = true;
@@ -6561,7 +6572,6 @@ async function main() {
 
                         // 4) 1차 추출 및 다운로드 실행
                         let finalImages = extractImageUrls();
-                        console.debug(`[Worker-Debug] 1차 이미지 URL 추출 개수: ${finalImages.length}개`, finalImages);
                         console.log(`🎯 [TokiSync-Worker] 1차 이미지 주소 ${finalImages.length}개 추출. 다운로드 개시...`);
                         let downloadedData = await runImageDownloads(finalImages);
 
@@ -6585,7 +6595,6 @@ async function main() {
                         console.log(`🎯 [TokiSync-Worker] 모든 이미지 수집 완료 (최종 성공: ${downloadedData.filter(d => d.data).length}/${downloadedData.length})`);
 
                         if (parentWin) {
-                            console.debug(`[Worker-Debug] 🚀 부모 창으로 데이터 전송 시도... parentWin 활성 상태: ${!parentWin.closed}`);
                             parentWin.postMessage({
                                 type: 'TOKI_MEDIA_DATA',
                                 data: {
