@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.20.0
+// @version      1.20.5
 // @description  Toki series sites -> Google Drive syncing tool (Bundled)
 // @author       pray4skylark
 // @updateURL    https://pray4skylark.github.io/tokiSync/tokiSync.user.js
@@ -2111,7 +2111,7 @@ function closeActivePopup() {
 // 🏛️ 플랜 B Engine: 팝업 렌더링 IPC 수집 엔진 (액티브)
 // =============================================================
 
-async function fetchMediaViaPopup(episodeUrl, targetType = 'novel', config = {}) {
+async function fetchMediaViaPopupSingleAttempt(episodeUrl, targetType = 'novel', config = {}) {
     const timeoutDuration = config.timeout || 45000;
 
     return new Promise((resolve) => {
@@ -2238,7 +2238,7 @@ async function fetchMediaViaPopup(episodeUrl, targetType = 'novel', config = {})
                 }
             } else {
                 console.log('[Controller] 신규 수집용 팝업 생성:', episodeUrl);
-                activePopupRef = window.open(episodeUrl, 'tokisync-novel-worker', 'width=100,height=100,left=0,top=0,noopener=false');
+                activePopupRef = window.open(episodeUrl, 'tokisync-novel-worker', 'width=50,height=400,left=0,top=0,noopener=false');
                 if (!activePopupRef) {
                     throw new Error('브라우저에 의해 팝업 차단이 감지되었습니다.');
                 }
@@ -2255,6 +2255,33 @@ async function fetchMediaViaPopup(episodeUrl, targetType = 'novel', config = {})
             resolve(null);
         }
     });
+}
+
+async function fetchMediaViaPopup(episodeUrl, targetType = 'novel', config = {}) {
+    const MAX_RETRIES = 3;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        console.log(`[Controller] 🚀 팝업 미디어 수집 시도 시작 (${attempt}/${MAX_RETRIES}) - URL: ${episodeUrl}`);
+        
+        // 2회차 재시도부터는 기존 팝업 세션을 강력 종료하고 1.5초 여유 딜레이 확보하여 찌꺼기 완벽 클린업
+        if (attempt > 1) {
+            console.warn(`[Controller] ⚠️ 이전 시도 실패 감지. 팝업 세션을 강제 파괴하고 재설정합니다.`);
+            closeActivePopup();
+            await new Promise(r => setTimeout(r, 1500));
+        }
+        
+        try {
+            const result = await fetchMediaViaPopupSingleAttempt(episodeUrl, targetType, config);
+            if (result && result.length > 0) {
+                console.log(`[Controller] 🎉 팝업 미디어 수집 시도 (${attempt}/${MAX_RETRIES}) 최종 성공!`);
+                return result;
+            }
+            console.warn(`[Controller] ⚠️ 팝업 미디어 수집 시도 (${attempt}/${MAX_RETRIES}) 실패 (획득 패키지 부재)`);
+        } catch (err) {
+            console.error(`[Controller] ❌ 팝업 미디어 수집 중 예외 발생 (시도 ${attempt}/${MAX_RETRIES}):`, err);
+        }
+    }
+    console.error(`[Controller] 🛑 총 ${MAX_RETRIES}회의 모든 팝업 수집 시도가 실패했습니다. - URL: ${episodeUrl}`);
+    return null;
 }
 
 // =============================================================
@@ -5807,7 +5834,7 @@ async function generateDownloadReport(seriesTitle, seriesId, listCount, failedEp
 
 
 async function main() {
-    console.log("🚀 TokiDownloader Loaded (New Core v1.20.0)");
+    console.log("🚀 TokiDownloader Loaded (New Core v1.20.5)");
     
     const logger = ui.LogBox.getInstance();
 
