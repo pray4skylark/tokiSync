@@ -4,6 +4,8 @@
  * - 플랜 C (폴백): JWT 토큰 디코딩 + 동적 Nonce 추출 API 직접 복호화 (페이퍼 플랜 대기)
  */
 
+import { activeWorkers, WORKER_STAGE } from './queue.js';
+
 let activePopupRef = null;
 
 // =============================================================
@@ -99,6 +101,15 @@ export function closeActivePopup() {
         activePopupRef.close();
     }
     activePopupRef = null;
+
+    // activeWorkers 맵 내 모든 활성 팝업 강제 폐쇄
+    for (const [id, popupRef] of activeWorkers.entries()) {
+        if (popupRef && !popupRef.closed) {
+            console.log(`[Controller] 멀티큐 액티브 팝업(${id}) 강제 폐쇄`);
+            popupRef.close();
+        }
+    }
+    activeWorkers.clear();
 }
 
 // =============================================================

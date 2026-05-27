@@ -3,11 +3,22 @@
  * 영속성 디스크 큐 및 이벤트 기반 세마포어 스케줄러 엔진
  */
 
+export const WORKER_STAGE = {
+  INIT: 'STAGE_INIT',             // 초기화 및 Handshake 대기 중
+  DOM_READY: 'STAGE_DOM_READY',   // 콘텐츠 DOM 렌더링 및 안정화 대기 중
+  SCROLLING: 'STAGE_SCROLLING',   // 지연 로딩 극복을 위한 강제 스크롤 중
+  PARSING: 'STAGE_PARSING',       // 미디어 분석 및 복호화 처리 중
+  DOWNLOADING: 'STAGE_DOWNLOADING',// XHR 이미지 다운로드 중
+  UPLOADING: 'STAGE_UPLOADING',   // 구글 드라이브 Resumable 업로드 중
+  COMPLETED: 'STAGE_COMPLETED',   // 전체 태스크 성공 완료
+  FAILED: 'STAGE_FAILED'          // 예외 및 수집 실패
+};
+
 const STORAGE_KEY = 'tokisync_download_queue';
 const MAX_CONCURRENCY = 2; // 최대 동시 다운로드 수
 
 // 임시 팝업 창 참조 보관용 맵 (Liveness check 및 재활용 루프 대비)
-const activeWorkers = new Map();
+export const activeWorkers = new Map();
 
 // Tampermonkey 환경 및 Node.js/일반 브라우저 환경 간의 영속성 호환 래퍼
 const getRawQueue = () => {
@@ -66,6 +77,7 @@ export const addEpisodesToQueue = (episodes, novelTitle) => {
         episodeUrl: ep.url,
         status: 'pending',
         progressPercent: 0,
+        stage: WORKER_STAGE.INIT, // 🌟 실시간 세부 작업 단계 초기화
         retryCount: 0,
         addedAt: Date.now()
       });

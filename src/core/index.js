@@ -1,7 +1,11 @@
 import { main } from './main.js';
 import { getConfig } from './config.js';
-import { scrollToLoad, fetchBlobWithXHR, blobToArrayBuffer, waitForContent, sleep } from './utils.js';
-import { getQueue, addEpisodesToQueue, updateQueueItem, clearQueue, removeCompletedItems, getQueueStats } from './queue.js';
+import { scrollToLoad, fetchBlobWithXHR, blobToArrayBuffer, waitForContent, sleep, saveFile } from './utils.js';
+import { getQueue, addEpisodesToQueue, updateQueueItem, clearQueue, removeCompletedItems, getQueueStats, WORKER_STAGE, activeWorkers } from './queue.js';
+import { EpubBuilder } from './epub.js';
+import { CbzBuilder } from './cbz.js';
+import { TxtBuilder } from './txt.js';
+import { LogBox } from './ui.js';
 
 (async function () {
     'use strict';
@@ -74,7 +78,8 @@ import { getQueue, addEpisodesToQueue, updateQueueItem, clearQueue, removeComple
         updateQueueItem,
         clearQueue,
         removeCompletedItems,
-        getQueueStats
+        getQueueStats,
+        WORKER_STAGE
     };
 
 
@@ -121,6 +126,25 @@ import { getQueue, addEpisodesToQueue, updateQueueItem, clearQueue, removeComple
             window.opener = null;
         }
 
+        // 고유 ID 식별자 추출 (예: TestNovel_1)
+        const getEpisodeId = () => {
+            const novelId = location.pathname.split('/')[2] || '0';
+            const episodeId = location.pathname.split('/')[3] || '0';
+            return `${novelId}_${episodeId}`;
+        };
+
+        // 실시간 진행 단계 및 진행률 부모에게 정형 보고하는 유틸
+        const reportProgress = (percent, stage) => {
+            if (parentWin) {
+                parentWin.postMessage({
+                    type: 'TOKISYNC_WORKER_PROGRESS',
+                    id: getEpisodeId(),
+                    percent: Math.min(100, Math.max(0, Math.round(percent))),
+                    stage: stage
+                }, '*');
+            }
+        };
+
         // 부모 창에게 준비 완료 신호 전송 (부모가 지시를 줄 때까지 1초마다 Heartbeat)
         let readyInterval = null;
         const startReadyHeartbeat = () => {
@@ -131,9 +155,11 @@ import { getQueue, addEpisodesToQueue, updateQueueItem, clearQueue, removeComple
                     console.log("[TokiSync-Worker] 📢 부모 창에 준비 완료 신호 전송 (Handshake Heartbeat)");
                     parentWin.postMessage({
                         type: 'TOKI_WORKER_READY',
+                        id: getEpisodeId(),
                         timestamp: Date.now()
                     }, '*');
                 }
+                reportProgress(0, 'STAGE_INIT');
             };
 
             sendReady();
@@ -157,6 +183,7 @@ import { getQueue, addEpisodesToQueue, updateQueueItem, clearQueue, removeComple
                     if (parentWin) {
                         parentWin.postMessage({ type: 'TOKI_CAPTCHA_DETECTED', timestamp: Date.now() }, '*');
                     }
+                    reportProgress(0, 'STAGE_INIT');
                     return; // 캡차가 통과되어 새 페이지로 리다이렉트 될 때까지 중복 실행을 막으며 조용히 대기
                 }
 
@@ -174,9 +201,13 @@ import { getQueue, addEpisodesToQueue, updateQueueItem, clearQueue, removeComple
                     readyInterval = null;
                 }
 
+                reportProgress(10, 'STAGE_DOM_READY');
+
                 if (targetType === 'novel') {
                     // [소설 수집 동작]
                     let attempt = 0;
+                    reportProgress(20, 'STAGE_DOM_READY');
+                    
                     const checkInterval = setInterval(() => {
                         attempt++;
                         console.log(`[TokiSync-Worker] 소설 Shadow DOM 대기 중... (시도: ${attempt}회)`);
@@ -189,6 +220,7 @@ import { getQueue, addEpisodesToQueue, updateQueueItem, clearQueue, removeComple
 
                         if (shadowHost && shadowHost.shadowRoot) {
                             clearInterval(checkInterval);
+                            reportProgress(50, 'STAGE_PARSING');
                             let content = '';
 
                             // 1차: <p> 태그 수집
@@ -213,6 +245,7 @@ import { getQueue, addEpisodesToQueue, updateQueueItem, clearQueue, removeComple
                             }
 
                             if (content && content.trim().length > 100) {
+                                reportProgress(90, 'STAGE_PARSING');
                                 console.log(`🎯 [TokiSync-Worker] 소설 텍스트 정밀 조립 완료 - 길이: ${content.length}자`);
                                 if (parentWin) {
                                     parentWin.postMessage({
@@ -235,6 +268,7 @@ import { getQueue, addEpisodesToQueue, updateQueueItem, clearQueue, removeComple
                     // [만화 수집 동작]
                     try {
                         console.log("[TokiSync-Worker] ⏳ 웹툰/만화 콘텐츠 DOM 렌더링 대기 시작...");
+                        reportProgress(20, 'STAGE_DOM_READY');
                         
                         // 1) 팝업 창 내부에 실제 만화 이미지 요소가 렌더링될 때까지 최대 10초 대기
                         const contentDoc = await waitForContent(window, 10000, viewerCfg);
@@ -246,9 +280,11 @@ import { getQueue, addEpisodesToQueue, updateQueueItem, clearQueue, removeComple
                         }
 
                         // 2) 1.5초 DOM 안정화 딜레이 (사용자 제안 반영 - 스크롤 꼬임 완벽 방지)
+                        reportProgress(30, 'STAGE_DOM_READY');
                         await sleep(1500);
 
                         console.log("[TokiSync-Worker] 🚀 1.5초 안정화 완료. 1차 스크롤 및 다운로드 돌입.");
+                        reportProgress(40, 'STAGE_SCROLLING');
 
                         // 3) 지연 로딩 이미지 스크롤 활성화 (부모가 제공한 viewerCfg 적용)
                         await scrollToLoad(document, 25000, viewerCfg);
@@ -257,6 +293,9 @@ import { getQueue, addEpisodesToQueue, updateQueueItem, clearQueue, removeComple
                         const runImageDownloads = async (imageUrls) => {
                             const downloaded = [];
                             const CONCURRENCY_LIMIT = 5;
+                            let processedCount = 0;
+
+                            reportProgress(0, 'STAGE_DOWNLOADING');
 
                             for (let i = 0; i < imageUrls.length; i += CONCURRENCY_LIMIT) {
                                 const chunk = imageUrls.slice(i, i + CONCURRENCY_LIMIT);
@@ -265,6 +304,12 @@ import { getQueue, addEpisodesToQueue, updateQueueItem, clearQueue, removeComple
                                     try {
                                         const blob = await fetchBlobWithXHR(url);
                                         const arrayBuffer = await blobToArrayBuffer(blob);
+                                        processedCount++;
+                                        
+                                        // 진행률 계산
+                                        const percent = (processedCount / imageUrls.length) * 100;
+                                        reportProgress(percent, 'STAGE_DOWNLOADING');
+
                                         return {
                                             url,
                                             index: globalIndex,
@@ -274,6 +319,10 @@ import { getQueue, addEpisodesToQueue, updateQueueItem, clearQueue, removeComple
                                         };
                                     } catch (err) {
                                         console.error(`[TokiSync-Worker] 이미지 다운로드 실패 (${url}):`, err);
+                                        processedCount++;
+                                        const percent = (processedCount / imageUrls.length) * 100;
+                                        reportProgress(percent, 'STAGE_DOWNLOADING');
+
                                         return {
                                             url,
                                             index: globalIndex,
@@ -315,6 +364,7 @@ import { getQueue, addEpisodesToQueue, updateQueueItem, clearQueue, removeComple
                         
                         if (suspiciousCount > finalImages.length / 2) {
                             console.warn(`⚠️ [Deep Fallback] 다수의 저용량/누락 이미지 감지 (${suspiciousCount}/${finalImages.length}). 2초 후 15초 강제 재스크롤 재시도!`);
+                            reportProgress(35, 'STAGE_SCROLLING');
                             await sleep(2000);
                             
                             // 2차 정밀 강제 징검다리 스크롤 기동 (15초)
@@ -344,6 +394,7 @@ import { getQueue, addEpisodesToQueue, updateQueueItem, clearQueue, removeComple
                         }
                     } catch (err) {
                         console.error('[TokiSync-Worker] 만화 이미지 수집 중 예외 발생:', err);
+                        reportProgress(0, 'STAGE_FAILED');
                     }
                 }
             }
@@ -357,7 +408,173 @@ import { getQueue, addEpisodesToQueue, updateQueueItem, clearQueue, removeComple
         }
         return; // 팝업 모드에서는 다운로더 UI 등 메인 스크립트 실행 조기 종료 (Early Exit)
     }
-    
+
+    if (!isWorkerPopup) {
+        // =============================================================
+        // 🚦 [부모 창 - Controller] 자식 팝업 통합 IPC 메시지 수신기
+        // =============================================================
+        window.addEventListener('message', (event) => {
+            if (!event.data || !event.data.type) return;
+
+            const msg = event.data;
+
+            // 1. 자식의 실시간 진행률 및 세부 단계 수신 ➡️ 큐 업데이트 및 정형 로그 출력
+            if (msg.type === 'TOKISYNC_WORKER_PROGRESS') {
+                const { id, percent, stage } = msg;
+                updateQueueItemProgress(id, percent);
+                updateQueueItem(id, { stage });
+
+                const queue = getQueue();
+                const item = queue.find(i => i.id === id);
+                if (item) {
+                    let stageText = '대기 중';
+                    if (stage === WORKER_STAGE.INIT) stageText = '초기화 중';
+                    else if (stage === WORKER_STAGE.DOM_READY) stageText = '페이지 로딩 중';
+                    else if (stage === WORKER_STAGE.SCROLLING) stageText = '스크롤 스캔 중';
+                    else if (stage === WORKER_STAGE.PARSING) stageText = '미디어 파싱 중';
+                    else if (stage === WORKER_STAGE.DOWNLOADING) stageText = '다운로드 중';
+                    else if (stage === WORKER_STAGE.UPLOADING) stageText = '구글드라이브 업로드 중';
+                    else if (stage === WORKER_STAGE.COMPLETED) stageText = '완료';
+                    else if (stage === WORKER_STAGE.FAILED) stageText = '실패';
+
+                    const logger = LogBox.getInstance();
+                    logger.log(`[수집 진행] [${item.episodeTitle}] -> ${stageText} (${percent}%)`, 'Queue');
+                }
+            }
+
+            // 2. 자식 팝업이 준비 완료(READY)를 알릴 때 ➡️ Handshake 매핑 및 동작 지시 주입
+            if (msg.type === 'TOKI_WORKER_READY') {
+                const { id } = msg;
+                const queue = getQueue();
+                const item = queue.find(i => i.id === id);
+
+                if (item && item.status === 'processing') {
+                    const popupRef = activeWorkers.get(id);
+                    if (popupRef && !popupRef.closed) {
+                        const config = getConfig();
+                        const isNovel = item.episodeUrl.includes('/novel/');
+
+                        console.log(`[Controller] 📢 자식 팝업 Handshake READY (${id}) -> 동작 지시 주입`);
+                        popupRef.postMessage({
+                            type: 'TOKI_START_EXTRACTION',
+                            targetType: isNovel ? 'novel' : 'comic',
+                            viewerCfg: config.viewerCfg || {}
+                        }, '*');
+                    }
+                }
+            }
+
+            // 3. 자식이 미디어 수집 완료 데이터 전송 시 ➡️ 업로드 단행 및 다음 큐 재귀 이송 (Recycling)
+            if (msg.type === 'TOKI_MEDIA_DATA') {
+                const { novelId, episodeId, contentType, content, images } = msg.data;
+                const id = `${novelId}_${episodeId}`;
+                
+                const queue = getQueue();
+                const item = queue.find(i => i.id === id);
+
+                if (item && item.status === 'processing') {
+                    const logger = LogBox.getInstance();
+                    logger.log(`📥 [큐 수집 완료] ${item.title} ${item.episodeTitle} 수집 완료. 드라이브 업로드 단행...`, 'Queue');
+                    
+                    updateQueueItem(id, { stage: WORKER_STAGE.UPLOADING, progressPercent: 0 });
+
+                    // 비동기로 업로드 및 릴레이 연쇄 수행 (메시지 스레드 블로킹 방지)
+                    (async () => {
+                        try {
+                            const config = getConfig();
+                            const isNovel = (contentType === 'novel');
+                            let blob = null;
+                            let extension = isNovel ? (config.novelFormat || 'epub') : 'cbz';
+                            const fullFilename = `${item.id}`; // "작품명_회차" 형태로 파일명 일원화
+
+                            // 1. 빌더를 통한 에셋 패키징
+                            if (isNovel) {
+                                const builder = config.novelFormat === 'txt' ? new TxtBuilder() : new EpubBuilder();
+                                builder.addChapter(item.episodeTitle, content);
+                                const zip = await builder.build({
+                                    series: item.title,
+                                    title: item.episodeTitle,
+                                    number: id.split('_')[1],
+                                    writer: 'TokiSync'
+                                });
+                                blob = await zip.generateAsync({ type: 'blob' });
+                            } else {
+                                const builder = new CbzBuilder();
+                                const resolvedImages = images.map(img => {
+                                    const mimeType = img.type || 'image/jpeg';
+                                    return {
+                                        url: img.url,
+                                        blob: img.data ? new Blob([img.data], { type: mimeType }) : new Blob([]),
+                                        ext: img.type?.includes('png') ? '.png' : (img.type?.includes('webp') ? '.webp' : '.jpg'),
+                                        isMissing: !img.data
+                                    };
+                                });
+                                builder.addChapter(item.episodeTitle, resolvedImages);
+                                const zip = await builder.build({
+                                    series: item.title,
+                                    title: item.episodeTitle,
+                                    number: id.split('_')[1],
+                                    writer: 'TokiSync'
+                                });
+                                blob = await zip.generateAsync({ type: 'blob' });
+                            }
+
+                            // 2. 구글 드라이브 / 로컬 저장 실행
+                            await saveFile(blob, fullFilename, config.gasUrl ? 'drive' : 'local', extension, {
+                                folderName: item.title,
+                                category: contentType
+                            });
+
+                            logger.success(`✅ [큐 업로드 완료] ${item.title} ${item.episodeTitle} 저장 성공!`, 'Queue');
+                            updateQueueItem(id, { status: 'completed', stage: WORKER_STAGE.COMPLETED, progressPercent: 100 });
+
+                            // 3. 대망의 자식 팝업 100% 재사용(Window Recycling) 루프 기동
+                            const popupRef = activeWorkers.get(id);
+                            if (popupRef && !popupRef.closed) {
+                                const nextQueue = getQueue();
+                                const nextItem = nextQueue.find(i => i.status === 'pending');
+
+                                if (nextItem) {
+                                    console.log(`♻️ [Queue Recycling] 팝업 재사용 단행 -> 다음 에피소드: ${nextItem.episodeTitle}`);
+                                    
+                                    // 팝업 참조 키 이송
+                                    activeWorkers.delete(id);
+                                    activeWorkers.set(nextItem.id, popupRef);
+
+                                    // 상태 processing 변경
+                                    updateQueueItem(nextItem.id, { status: 'processing', stage: WORKER_STAGE.INIT });
+
+                                    // 인간 행동 패턴 모사를 위한 1.5초~3초 랜덤 지연 완충 후 location.replace 작동
+                                    const delay = Math.floor(Math.random() * 1500) + 1500;
+                                    setTimeout(() => {
+                                        try {
+                                            if (popupRef && !popupRef.closed) {
+                                                popupRef.location.replace(nextItem.episodeUrl);
+                                                popupRef.name = `tokisync_novel_worker_${nextItem.id}`.replace(/[^a-zA-Z0-9_]/g, '');
+                                            }
+                                        } catch (replaceErr) {
+                                            console.warn('[Queue Recycling] location.replace 보안 차단 발생, href 폴백:', replaceErr);
+                                            popupRef.location.href = nextItem.episodeUrl;
+                                        }
+                                    }, delay);
+                                } else {
+                                    // 대기열이 완전히 끝났으므로 팝업 창 수동 폐쇄
+                                    console.log('[Queue Recycling] 모든 대기열 수집 완료. 팝업 창을 닫습니다.');
+                                    popupRef.close();
+                                    activeWorkers.delete(id);
+                                }
+                            }
+
+                        } catch (uploadErr) {
+                            logger.error(`❌ [큐 업로드 실패] ${item.title} ${item.episodeTitle}: ${uploadErr.message}`, 'Queue');
+                            updateQueueItem(id, { status: 'failed', stage: WORKER_STAGE.FAILED, errorMsg: uploadErr.message });
+                        }
+                    })();
+                }
+            }
+        });
+    }
+
     // Viewer Config Injection (Zero-Config)
     if (location.hostname.includes('github.io') || location.hostname.includes('localhost') || location.hostname.includes('127.0.0.1')) {
         console.log("📂 TokiView (Frontend) detected. Injecting Config...");
