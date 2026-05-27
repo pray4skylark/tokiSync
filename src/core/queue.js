@@ -1,5 +1,5 @@
 /**
- * tokiSync v2.0.0 - Persistent Multi-Queue Batch Core
+ * tokiSync v1.21.0 - Persistent Multi-Queue Batch Core
  * 영속성 디스크 큐 코어 엔진
  */
 
@@ -65,6 +65,7 @@ export const addEpisodesToQueue = (episodes, novelTitle) => {
         episodeTitle: ep.title,
         episodeUrl: ep.url,
         status: 'pending',
+        progressPercent: 0, // 🌟 실시간 다운로드 진행률 (0 ~ 100)
         retryCount: 0,
         addedAt: Date.now()
       });
@@ -79,9 +80,9 @@ export const addEpisodesToQueue = (episodes, novelTitle) => {
 };
 
 /**
- * 특정 큐 아이템 상태 갱신
+ * 특정 큐 아이템 상태 및 정보 갱신
  * @param {string} id 아이템 고유 ID
- * @param {Object} updates 변경할 필드셋 ({ status, retryCount, errorMsg, ... })
+ * @param {Object} updates 변경할 필드셋 ({ status, progressPercent, retryCount, errorMsg, ... })
  * @returns {boolean} 갱신 성공 여부
  */
 export const updateQueueItem = (id, updates) => {
@@ -98,6 +99,17 @@ export const updateQueueItem = (id, updates) => {
     return true;
   }
   return false;
+};
+
+/**
+ * 특정 큐 아이템의 실시간 진행률 고속 갱신
+ * @param {string} id 아이템 고유 ID
+ * @param {number} percent 0 ~ 100 사이의 진행 백분율
+ * @returns {boolean} 갱신 성공 여부
+ */
+export const updateQueueItemProgress = (id, percent) => {
+  const sanitizedPercent = Math.min(100, Math.max(0, Math.round(percent)));
+  return updateQueueItem(id, { progressPercent: sanitizedPercent });
 };
 
 /**
