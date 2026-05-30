@@ -45,97 +45,509 @@
 /******/ 	"use strict";
 /******/ 	var __webpack_modules__ = ({
 
-/***/ 209:
+/***/ 302:
 /***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
 
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
-/* harmony export */   Cv: function() { return /* binding */ stopSilentAudio; },
-/* harmony export */   S2: function() { return /* binding */ isAudioRunning; },
-/* harmony export */   yS: function() { return /* binding */ startSilentAudio; }
+/* harmony export */   $8: function() { return /* binding */ initQueueScheduler; },
+/* harmony export */   G8: function() { return /* binding */ getQueueItemId; },
+/* harmony export */   Gg: function() { return /* binding */ updateQueueItem; },
+/* harmony export */   IS: function() { return /* binding */ getQueue; },
+/* harmony export */   WB: function() { return /* binding */ WORKER_STAGE; },
+/* harmony export */   d$: function() { return /* binding */ removeQueueItem; },
+/* harmony export */   gi: function() { return /* binding */ runSchedulerOnce; },
+/* harmony export */   id: function() { return /* binding */ addEpisodesToQueue; },
+/* harmony export */   mR: function() { return /* binding */ activeWorkers; }
 /* harmony export */ });
+/* unused harmony exports transitionQueueItemsForRelay, updateQueueItemProgress, clearQueue, removeCompletedItems, removeCompletedAndFailedItems, getQueueStats, getQueuePaused, setQueuePaused, stopAllWorkers */
 /**
- * Anti-Sleep Module
- * Prevents browser tab throttling by playing silent audio
+ * tokiSync v1.21.0 - Persistent Multi-Queue Batch Core
+ * 영속성 디스크 큐 및 이벤트 기반 세마포어 스케줄러 엔진
  */
 
-let audioContext = null;
-let audioEl = null;
-let oscillator = null;
+const WORKER_STAGE = {
+  INIT: 'STAGE_INIT',             // 초기화 및 Handshake 대기 중
+  DOM_READY: 'STAGE_DOM_READY',   // 콘텐츠 DOM 렌더링 및 안정화 대기 중
+  SCROLLING: 'STAGE_SCROLLING',   // 지연 로딩 극복을 위한 강제 스크롤 중
+  PARSING: 'STAGE_PARSING',       // 미디어 분석 및 복호화 처리 중
+  DOWNLOADING: 'STAGE_DOWNLOADING',// XHR 이미지 다운로드 중
+  UPLOADING: 'STAGE_UPLOADING',   // 구글 드라이브 Resumable 업로드 중
+  COMPLETED: 'STAGE_COMPLETED',   // 전체 태스크 성공 완료
+  FAILED: 'STAGE_FAILED'          // 예외 및 수집 실패
+};
 
-function startSilentAudio() {
-    if (audioContext && audioContext.state === 'running') {
-        console.log('[Anti-Sleep] Already running');
-        return;
+const STORAGE_KEY = 'tokisync_download_queue';
+const MAX_CONCURRENCY = 2; // 최대 동시 다운로드 수
+
+// 임시 팝업 창 참조 보관용 맵 (Liveness check 및 재활용 루프 대비)
+const activeWorkers = new Map();
+const closedCounts = new Map(); // Track closed counts for liveness check independently to avoid polluting activeWorkers window references
+
+// Tampermonkey 환경 및 Node.js/일반 브라우저 환경 간의 영속성 호환 래퍼
+const getRawQueue = () => {
+  try {
+    if (typeof GM_getValue !== 'undefined') {
+      return GM_getValue(STORAGE_KEY, []);
+    }
+    if (typeof localStorage !== 'undefined') {
+      const val = localStorage.getItem(STORAGE_KEY);
+      return val ? JSON.parse(val) : [];
+    }
+  } catch (e) {
+    console.error('[TokiSync Queue] Failed to read queue from storage:', e);
+  }
+  return [];
+};
+
+const saveRawQueue = (queue) => {
+  try {
+    if (typeof GM_setValue !== 'undefined') {
+      GM_setValue(STORAGE_KEY, queue);
+      return;
+    }
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(queue));
+    }
+  } catch (e) {
+    console.error('[TokiSync Queue] Failed to save queue to storage:', e);
+  }
+};
+
+// 32비트 FNV-1a 해시를 36진수 아스키 문자열로 변환하여 한글 유실 없는 고유 아스키 ID 보장
+function tokiHash(str) {
+  let hash = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return Math.abs(hash).toString(36);
+}
+
+/**
+ * 작품명과 회차번호 기반의 고유 FNV 해시 ID 생성 헬퍼
+ */
+const getQueueItemId = (title, episodeNum) => {
+  const hashPart = tokiHash(`${title}_${episodeNum}`);
+  return `toki_${hashPart}`;
+};
+
+
+/**
+ * 대기열 전체 목록 조회
+ */
+const getQueue = () => {
+  return getRawQueue();
+};
+
+/**
+ * 에피소드 대기열 다중 추가
+ */
+const addEpisodesToQueue = (episodes, novelTitle) => {
+  const queue = getRawQueue();
+  let addedCount = 0;
+
+  episodes.forEach(ep => {
+    // FNV 해시를 적용하여 작품명 한글 유실을 차단하고 100% 안전한 고유 아스키 식별자 생성
+    const hashPart = tokiHash(`${novelTitle}_${ep.episodeNum}`);
+    const id = `toki_${hashPart}`;
+    
+    // 이미 존재하는지 중복성 검사
+    const exists = queue.some(item => item.id === id);
+    if (!exists) {
+      queue.push({
+        id,
+        title: novelTitle,
+        episodeTitle: ep.title,
+        episodeUrl: ep.url,
+        episodeNum: ep.episodeNum || '',
+        folderId: ep.folderId || '',             // 구글 드라이브 스캔 위치 폴더 ID 보존
+        category: ep.category || 'Manga',       // 파서 룰 카테고리 (워커 targetType 판별용)
+        viewerCfg: ep.viewerCfg || {},           // 파서 룰 viewer 설정 (워커 이미지 셀렉터용)
+        rootFolder: ep.rootFolder || '',
+        destination: ep.destination || 'local',
+        novelFormat: ep.novelFormat || 'epub',
+        matchedRule: ep.matchedRule || {},
+        protocolDomain: ep.protocolDomain || '',
+        status: 'pending',
+        progressPercent: 0,
+        stage: WORKER_STAGE.INIT,
+        retryCount: 0,
+        addedAt: Date.now()
+      });
+      addedCount++;
+    }
+  });
+
+  if (addedCount > 0) {
+    saveRawQueue(queue);
+  }
+  return addedCount;
+};
+
+/**
+ * 특정 큐 아이템 상태 및 정보 갱신
+ */
+const updateQueueItem = (id, updates) => {
+  const queue = getRawQueue();
+  const index = queue.findIndex(item => item.id === id);
+
+  if (index !== -1) {
+    queue[index] = {
+      ...queue[index],
+      ...updates,
+      completedAt: updates.status === 'completed' ? Date.now() : queue[index].completedAt
+    };
+    saveRawQueue(queue);
+    return true;
+  }
+  return false;
+};
+
+/**
+ * 팝업 재사용(Relay) 시 디스크 I/O 갭으로 인한 세마포어 중복 기동을 차단하기 위한 원자적 전이 함수
+ */
+const transitionQueueItemsForRelay = (completedId, nextId) => {
+  const queue = getRawQueue();
+  let changed = false;
+
+  const compIndex = queue.findIndex(item => item.id === completedId);
+  if (compIndex !== -1) {
+    queue[compIndex] = {
+      ...queue[compIndex],
+      status: 'completed',
+      stage: WORKER_STAGE.COMPLETED,
+      progressPercent: 100,
+      completedAt: Date.now()
+    };
+    changed = true;
+  }
+
+  const nextIndex = queue.findIndex(item => item.id === nextId);
+  if (nextIndex !== -1) {
+    queue[nextIndex] = {
+      ...queue[nextIndex],
+      status: 'processing',
+      stage: WORKER_STAGE.INIT,
+      progressPercent: 0
+    };
+    changed = true;
+  }
+
+  if (changed) {
+    saveRawQueue(queue);
+  }
+  return changed;
+};
+
+/**
+ * 특정 큐 아이템의 실시간 진행률 고속 갱신
+ */
+const updateQueueItemProgress = (id, percent) => {
+  const sanitizedPercent = Math.min(100, Math.max(0, Math.round(percent)));
+  return updateQueueItem(id, { progressPercent: sanitizedPercent });
+};
+
+/**
+ * 대기열 전체 초기화
+ */
+const clearQueue = () => {
+  saveRawQueue([]);
+};
+
+/**
+ * 완료된(completed) 항목들 일괄 삭제
+ */
+const removeCompletedItems = () => {
+  const queue = getRawQueue();
+  const filtered = queue.filter(item => item.status !== 'completed');
+  saveRawQueue(filtered);
+};
+
+/**
+ * 특정 큐 아이템을 대기열에서 개별 제거
+ * 만약 진행 중인(processing) 아이템이라면 활성 자식 팝업을 강제 폐쇄 처리
+ */
+const removeQueueItem = (id) => {
+  const queue = getRawQueue();
+  const index = queue.findIndex(item => item.id === id);
+  if (index !== -1) {
+    const item = queue[index];
+    // 진행 중인 워커인 경우 팝업 즉시 강제 폐쇄 및 맵에서 삭제
+    if (item.status === 'processing') {
+      const popupRef = activeWorkers.get(id);
+      try {
+        if (popupRef && !popupRef.closed) {
+          popupRef.close();
+        }
+      } catch (e) {
+        console.warn(`[Queue] 개별 삭제 중 자식 팝업 close 실패: ${id}`, e);
+      }
+      activeWorkers.delete(id);
+      closedCounts.delete(id);
     }
     
-    try {
-        if (!audioContext) {
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        }
-        
-        if (audioContext.state === 'suspended') {
-            audioContext.resume();
-        }
-        
-        const dest = audioContext.createMediaStreamDestination();
-        const gain = audioContext.createGain();
-        
-        oscillator = audioContext.createOscillator();
-        oscillator.frequency.value = 1; // 1Hz (Inaudible)
-        oscillator.type = 'sine';
-        gain.gain.value = 0.001; // Near silence
-        
-        oscillator.connect(gain);
-        gain.connect(dest);
-        oscillator.start();
-        
-        if (!audioEl) {
-            audioEl = document.createElement('audio');
-            audioEl.classList.add('toki-hidden');
-            document.body.appendChild(audioEl);
-        }
-        
-        audioEl.srcObject = dest.stream;
-        audioEl.play()
-            .then(() => console.log('🔊 [Anti-Sleep] Audio started successfully'))
-            .catch(e => {
-                console.warn('🚫 [Anti-Sleep] Autoplay blocked:', e);
-                throw e; // Re-throw to let caller handle
-            });
-            
-    } catch (e) {
-        console.error('[Anti-Sleep] Failed to start:', e);
-        throw e;
-    }
-}
+    const filtered = queue.filter(q => q.id !== id);
+    saveRawQueue(filtered);
+    return true;
+  }
+  return false;
+};
 
-function stopSilentAudio() {
-    try {
-        if (oscillator) {
-            oscillator.stop();
-            oscillator.disconnect();
-            oscillator = null;
-        }
-        
-        if (audioEl) {
-            audioEl.pause();
-            audioEl.srcObject = null;
-        }
-        
-        if (audioContext) {
-            audioContext.close().then(() => {
-                audioContext = null;
-                console.log('🔇 [Anti-Sleep] Audio stopped');
-            });
-        }
-    } catch (e) {
-        console.error('[Anti-Sleep] Failed to stop:', e);
-    }
-}
+/**
+ * 완료(completed) 및 실패(failed) 항목들 일괄 삭제 (큐 청소)
+ */
+const removeCompletedAndFailedItems = () => {
+  const queue = getRawQueue();
+  const filtered = queue.filter(item => item.status !== 'completed' && item.status !== 'failed');
+  saveRawQueue(filtered);
+};
 
-function isAudioRunning() {
-    return audioContext && audioContext.state === 'running';
-}
+/**
+ * 현재 대기열의 상태별 카운트 통계 조회
+ */
+const getQueueStats = () => {
+  const queue = getRawQueue();
+  const stats = {
+    total: queue.length,
+    pending: 0,
+    processing: 0,
+    completed: 0,
+    failed: 0
+  };
+
+  queue.forEach(item => {
+    if (stats[item.status] !== undefined) {
+      stats[item.status]++;
+    }
+  });
+
+  return stats;
+};
+
+// =============================================================
+// 🚦 [2단계] 백그라운드 세마포어 및 이벤트 기반 스케줄러 구현
+// =============================================================
+
+const PAUSED_KEY = 'tokisync_queue_paused';
+
+/**
+ * 전역 큐 일시 정지 상태 조회 (GM 스토리지 연동으로 멀티 탭 실시간 공유)
+ */
+const getQueuePaused = () => {
+  try {
+    if (typeof GM_getValue !== 'undefined') {
+      return GM_getValue(PAUSED_KEY, false);
+    }
+    if (typeof localStorage !== 'undefined') {
+      return localStorage.getItem(PAUSED_KEY) === 'true';
+    }
+  } catch (e) {}
+  return false;
+};
+
+/**
+ * 전역 큐 일시 정지 상태 설정
+ */
+const setQueuePaused = (paused) => {
+  try {
+    if (typeof GM_setValue !== 'undefined') {
+      GM_setValue(PAUSED_KEY, paused);
+      return;
+    }
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(PAUSED_KEY, String(paused));
+    }
+  } catch (e) {}
+};
+
+/**
+ * 모든 자식 팝업을 강제 폐쇄하고 큐를 중단 청소하는 완전 정지
+ */
+const stopAllWorkers = () => {
+  console.log('[Queue] ⏹️ 모든 활성 자식 팝업 강제 폐쇄 및 수집 중단 집행...');
+  
+  // 1. 모든 팝업 창 즉시 닫기
+  for (const [id, popupRef] of activeWorkers.entries()) {
+    try {
+      if (popupRef && !popupRef.closed) {
+        popupRef.close();
+      }
+    } catch (e) {
+      console.warn(`[Queue] 팝업 close 오류: ${id}`, e);
+    }
+  }
+  activeWorkers.clear();
+  closedCounts.clear();
+
+  // 2. 큐 대기열 전체 청소 및 중단 마킹
+  const queue = getRawQueue();
+  const updatedQueue = queue.map(item => {
+    if (item.status === 'pending' || item.status === 'processing') {
+      return {
+        ...item,
+        status: 'failed',
+        stage: WORKER_STAGE.FAILED,
+        errorMsg: '사용자에 의해 수집이 강제로 중단되었습니다.'
+      };
+    }
+    return item;
+  });
+  saveRawQueue(updatedQueue);
+
+  // 3. 일시 정지 해제
+  setQueuePaused(false);
+};
+
+let isSchedulerRunning = false;
+
+// 인간 행동 모방 랜덤 지연시간(Jitter Delay) 유틸리티
+const sleepJitter = (minMs, maxMs) => {
+  const delay = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
+  return new Promise(resolve => setTimeout(resolve, delay));
+};
+
+/**
+ * 1회성 스케줄링 기동 검사 (세마포어 알고리즘)
+ */
+const runSchedulerOnce = async () => {
+  if (getQueuePaused()) {
+    isSchedulerRunning = false;
+    return;
+  }
+  if (isSchedulerRunning) return;
+  isSchedulerRunning = true;
+
+  try {
+    const queue = getRawQueue();
+    
+    // Liveness Check: 실제 열려있는 팝업 중 닫힌 팝업이 있는지 감지하여 failed 전이
+    for (const [id, popupRef] of activeWorkers.entries()) {
+      if (popupRef && popupRef.closed) {
+        // 일시적인 closed 레이스 컨디션 방지를 위한 유예 카운트 (연속 3회 감지 시 강제 폐쇄 확정)
+        const closedCount = (closedCounts.get(id) || 0) + 1;
+        closedCounts.set(id, closedCount);
+
+        if (closedCount >= 3) {
+          console.warn(`[Queue Scheduler] ⚠️ 자식 팝업 비정상 종료 확정 (연속 3회 감지): ${id}`);
+          activeWorkers.delete(id);
+          closedCounts.delete(id);
+          const item = queue.find(i => i.id === id);
+          if (item && item.status === 'processing') {
+            const nextRetry = item.retryCount + 1;
+            updateQueueItem(id, { 
+              status: nextRetry >= 3 ? 'failed' : 'pending', 
+              retryCount: nextRetry,
+              errorMsg: '자식 팝업 창이 비정상적으로 강제 종료되었습니다.' 
+            });
+          }
+        } else {
+          console.log(`[Queue Scheduler] 🛡️ 자식 팝업 일시적 closed 감지 유예 중 (${closedCount}/3): ${id}`);
+        }
+      } else {
+        // 정상 기동 확인 시 유예 카운터 즉시 리셋
+        closedCounts.set(id, 0);
+      }
+    }
+
+    // 1. 현재 processing(작업 중) 상태인 큐 아이템의 개수를 산출
+    const currentProcessing = queue.filter(item => item.status === 'processing');
+
+    // 2. 동시성 임계값(MAX_CONCURRENCY = 2) 도달 시 즉시 대기 차단
+    if (currentProcessing.length >= MAX_CONCURRENCY) {
+      isSchedulerRunning = false;
+      return;
+    }
+
+    // 3. pending(대기 중) 상태인 첫 번째 에피소드 추출
+    const nextItem = queue.find(item => item.status === 'pending');
+    if (!nextItem) {
+      isSchedulerRunning = false;
+      return;
+    }
+
+    // [v1.21.4] 안전 장치: 이미 activeWorkers가 점유하고 있는 아이템이라면 중복 기동 방지 스킵
+    if (activeWorkers.has(nextItem.id)) {
+      console.log(`[Queue Scheduler] 🛡️ 중복 기동 우회: activeWorkers에 이미 점유된 에피소드 스킵: ${nextItem.episodeTitle}`);
+      isSchedulerRunning = false;
+      return;
+    }
+
+    // 4. 인간 행동 모사를 위한 1.5초~3초 랜덤 지연 완충
+    console.log(`[Queue Scheduler] 🛡️ 안전 지연 대기 시작 (Target: ${nextItem.episodeTitle})`);
+    await sleepJitter(1500, 3000);
+
+    // 5. 팝업 실행 및 상태 갱신
+    console.log(`[Queue Scheduler] 🚀 팝업 기동: ${nextItem.episodeTitle} (${nextItem.episodeUrl})`);
+    updateQueueItem(nextItem.id, { status: 'processing' });
+    
+    // 실제 팝업 기동 가교 함수 호출
+    const popupRef = openEpisodePopup(nextItem.episodeUrl, nextItem.id);
+    if (popupRef) {
+      activeWorkers.set(nextItem.id, popupRef);
+    } else {
+      // 팝업 차단 등으로 창 생성 실패 시 즉시 failed 처리
+      updateQueueItem(nextItem.id, { 
+        status: 'failed', 
+        errorMsg: '브라우저 팝업 차단막에 의해 창 생성에 실패했습니다.' 
+      });
+    }
+
+  } catch (err) {
+    console.error('[Queue Scheduler] Error in scheduling loop:', err);
+  } finally {
+    isSchedulerRunning = false;
+  }
+};
+
+// 팝업 기동 가교 (window.open 래퍼)
+const openEpisodePopup = (url, id) => {
+  try {
+    // Node.js 테스트 환경 등 윈도우 객체가 실존하지 않는 환경에서의 안전 예외처리
+    if (typeof window === 'undefined' || typeof window.open === 'undefined') {
+      // 가상 Mocking 반환
+      return { closed: false };
+    }
+    
+    // 봇 감지 회피 절충안 규격 (400x600, right-aligned)
+    const width = 400;
+    const height = 600;
+    const left = window.screen.width - width - 50;
+    const top = 100;
+    
+    const popupRef = window.open(
+      url, 
+      `tokisync_novel_worker_${id}`.replace(/[^a-zA-Z0-9_]/g, ''), 
+      `width=${width},height=${height},left=${left},top=${top},noopener=false,scrollbars=yes,resizable=yes`
+    );
+    return popupRef;
+  } catch (e) {
+    console.error('[Queue Scheduler] Popup launch failed:', e);
+    return null;
+  }
+};
+
+/**
+ * 이벤트 기반 백그라운드 세마포어 스케줄러 등록
+ */
+const initQueueScheduler = () => {
+  // 1. Tampermonkey 네이티브 비동기 스토리지 리스너 감시 활성화
+  if (typeof GM_addValueChangeListener !== 'undefined') {
+    GM_addValueChangeListener(STORAGE_KEY, (key, oldValue, newValue, remote) => {
+      // 대기열 변동 이벤트가 오면 1회성 스케줄러 즉시 발동
+      runSchedulerOnce();
+    });
+    console.log('[TokiSync Queue] 🚦 이벤트 기반(Event-Driven) 고성능 스케줄러가 활성화되었습니다.');
+  } else {
+    // Fallback: GM API가 없는 가상 유닛 테스트/샌드박스 환경에서는 2초 주기 폴링 작동
+    setInterval(() => {
+      runSchedulerOnce();
+    }, 2000);
+    console.warn('[TokiSync Queue] ⚠️ GM_addValueChangeListener 미지원 환경. 2초 폴링 스케줄러로 기동합니다.');
+  }
+
+  // 초기 기동 시에도 즉시 1회 검사
+  runSchedulerOnce();
+};
 
 
 /***/ }),
@@ -147,6 +559,7 @@ function isAudioRunning() {
 /* harmony export */   GA: function() { return /* binding */ fetchHistoryDirect; },
 /* harmony export */   OS: function() { return /* binding */ checkSingleHistoryDirect; },
 /* harmony export */   Py: function() { return /* binding */ getOAuthToken; },
+/* harmony export */   aj: function() { return /* binding */ getOrCreateFolder; },
 /* harmony export */   r9: function() { return /* binding */ uploadDirect; }
 /* harmony export */ });
 /* harmony import */ var _config_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(899);
@@ -538,8 +951,8 @@ async function uploadDirect(blob, folderName, fileName, metadata = {}) {
         // Determine category
         const category = metadata.category || (fileName.endsWith('.epub') ? 'Novel' : 'Webtoon');
         
-        // 1. Get Series Folder ID
-        const seriesFolderId = await getOrCreateFolder(folderName, config.folderId, token, category);
+        // 1. Get Series Folder ID (큐에 선제 저장된 폴더 ID가 있다면 그대로 사용하고, 없으면 생성)
+        const seriesFolderId = metadata.folderId || await getOrCreateFolder(folderName, config.folderId, token, category);
         
         let targetFolderId = seriesFolderId;
         let finalFileName = fileName;
@@ -1807,50 +2220,43 @@ class RuleManager {
     static async getRules() {
         let rules = [...this.#builtInRules];
 
-        // 1. Fetch Remote Rules (Background cache update & retrieval)
-        let remoteRules = [];
-        const cacheStr = typeof GM_getValue !== 'undefined' ? GM_getValue("TOKI_REMOTE_RULES_CACHE", "") : "";
-        let hasCache = false;
-
-        if (cacheStr) {
-            try {
-                remoteRules = JSON.parse(cacheStr);
-                hasCache = true;
-            } catch (e) {}
-        }
-
-        const configUrl = typeof GM_getValue !== 'undefined' ? GM_getValue(_config_js__WEBPACK_IMPORTED_MODULE_0__/* .CFG_REMOTE_RULE_URL */ .rn, "") : "";
-        const targetUrl = configUrl.trim() || "https://pray4skylark.github.io/tokiSync/rules.json";
-
-        const updatePromise = this.fetchRemoteRules(targetUrl).then(fetched => {
-            if (fetched) return fetched;
-            return null;
-        });
-
-        if (!hasCache) {
-            const fetched = await updatePromise;
-            if (fetched) remoteRules = fetched;
-        } else {
-            // Background update
-            updatePromise.catch(() => {});
-        }
-
-        if (remoteRules.length > 0) {
-            rules = [...remoteRules, ...rules];
-        }
-
-        // 2. Load Custom Rules from GM storage
+        // 1. GM storage에서 Custom Rules(유일한 룰 저장소) 불러오기
+        let customRules = [];
+        let hasCustom = false;
+        
         if (typeof GM_getValue !== 'undefined') {
-            const customStr = GM_getValue(_config_js__WEBPACK_IMPORTED_MODULE_0__/* .CFG_CUSTOM_RULES */ .PT, '[]');
-            try {
-                const customRules = JSON.parse(customStr);
-                if (Array.isArray(customRules) && customRules.length > 0) {
-                    // Custom rules at the beginning to take precedence during matching
-                    rules = [...customRules, ...rules];
+            const customStr = GM_getValue(_config_js__WEBPACK_IMPORTED_MODULE_0__/* .CFG_CUSTOM_RULES */ .PT, "");
+            if (customStr && customStr.trim() !== "" && customStr !== "[]") {
+                try {
+                    customRules = JSON.parse(customStr);
+                    hasCustom = true;
+                } catch (e) {
+                    console.error('[RuleManager] Failed to parse custom rules:', e);
                 }
-            } catch (e) {
-                console.error('[RuleManager] Failed to parse custom rules:', e);
             }
+        }
+
+        // 2. 만약 Custom Rules가 아예 없거나 빈 배열인 경우 (최초 구동 시) 원격에서 Seed 규칙 다운로드 및 이식
+        if (!hasCustom || customRules.length === 0) {
+            console.log("[RuleManager] 🚀 초기 구동 감지 -> 원격 기본 룰 파일로부터 Seed 규칙을 다운로드합니다.");
+            const configUrl = typeof GM_getValue !== 'undefined' ? GM_getValue(_config_js__WEBPACK_IMPORTED_MODULE_0__/* .CFG_REMOTE_RULE_URL */ .rn, "") : "";
+            const targetUrl = configUrl.trim() || "https://pray4skylark.github.io/tokiSync/rules.json";
+
+            try {
+                const fetched = await this.fetchRemoteRules(targetUrl);
+                if (fetched && Array.isArray(fetched) && fetched.length > 0) {
+                    customRules = fetched;
+                    this.saveCustomRules(customRules);
+                    console.log(`[RuleManager] ✅ 원격 기본 룰(${customRules.length}개)을 TOKI_CUSTOM_RULES에 초기 이식(Seed) 완료했습니다.`);
+                }
+            } catch (err) {
+                console.error("[RuleManager] 원격 기본 룰 가져오기 실패:", err);
+            }
+        }
+
+        // 3. 커스텀 룰을 병합하여 최종 반환 (Custom > Built-in 순)
+        if (customRules.length > 0) {
+            rules = [...customRules, ...rules];
         }
 
         return rules;
@@ -1974,9 +2380,6 @@ class RuleManager {
                         const data = JSON.parse(res.responseText);
                         let rules = data.rules || data;
                         if (Array.isArray(rules)) {
-                            if (typeof GM_setValue !== 'undefined') {
-                                GM_setValue("TOKI_REMOTE_RULES_CACHE", JSON.stringify(rules));
-                            }
                             resolve(rules);
                         } else {
                             resolve(null);
@@ -1996,24 +2399,486 @@ class RuleManager {
 
 /***/ }),
 
-/***/ 602:
+/***/ 572:
 /***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
 
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
 /* harmony export */   UT: function() { return /* binding */ fetchNovelText; },
-/* harmony export */   dI: function() { return /* binding */ closeActivePopup; },
-/* harmony export */   gq: function() { return /* binding */ fetchComicImages; }
+/* harmony export */   gq: function() { return /* binding */ fetchComicImages; },
+/* harmony export */   hh: function() { return /* binding */ initBatchWorkerController; },
+/* harmony export */   hr: function() { return /* binding */ closeActiveWorker; }
 /* harmony export */ });
+/* harmony import */ var _novel_decryptor_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(602);
+/* harmony import */ var _ipc_broker_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(941);
+/* harmony import */ var _queue_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(302);
+/* harmony import */ var _ui_js__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(989);
 /**
- * [하이브리드 멀티 엔진] 소설 렌더링 기반 동적 수집 모듈 (Popup Controller & API Decryptor)
- * - 플랜 B (기본): 팝업 통신 및 Shadow DOM Piercing 수집 (액티브)
- * - 플랜 C (폴백): JWT 토큰 디코딩 + 동적 Nonce 추출 API 직접 복호화 (페이퍼 플랜 대기)
+ * tokiSync - Unified Worker Controller
+ * Manages single popup lifecycle and IPC routing for sequential download mode.
  */
 
-let activePopupRef = null;
+
+
+
+
+
+// Reference for the single worker popup (used in sequential mode)
+let activeWorkerRef = null;
+
+/**
+ * Close active single worker popup window
+ */
+function closeActiveWorker() {
+    if (activeWorkerRef && !activeWorkerRef.closed) {
+        console.log('[WorkerController] 단일 워커 팝업 세션 수동 폐쇄');
+        activeWorkerRef.close();
+    }
+    activeWorkerRef = null;
+}
+
+/**
+ * Run a single collection attempt via the Worker Popup
+ */
+async function fetchMediaViaWorkerSingleAttempt(episodeUrl, targetType = 'novel', config = {}) {
+    const timeoutDuration = config.timeout || 45000;
+    const logger = _ui_js__WEBPACK_IMPORTED_MODULE_3__.LogBox.getInstance();
+
+    return new Promise((resolve) => {
+        let timeoutId = null;
+        let handshakeTimeoutId = null;
+        let cleanupIpc = null;
+        let livenessInterval = null;
+
+        const cleanup = () => {
+            if (cleanupIpc) { cleanupIpc(); cleanupIpc = null; }
+            if (timeoutId) { clearTimeout(timeoutId); timeoutId = null; }
+            if (handshakeTimeoutId) { clearTimeout(handshakeTimeoutId); handshakeTimeoutId = null; }
+            if (livenessInterval) { clearInterval(livenessInterval); livenessInterval = null; }
+        };
+
+        // Register consolidated IPC Listener
+        cleanupIpc = (0,_ipc_broker_js__WEBPACK_IMPORTED_MODULE_1__/* .registerIpcListener */ .Q_)(async (msg) => {
+            const { type, payload } = msg;
+
+            // 1. Handshake Ready Received ➡️ Inject Action Instructions
+            if (type === 'WORKER_READY') {
+                if (handshakeTimeoutId) {
+                    console.log('[WorkerController] 🎉 단일 워커 핸드셰이킹 성공 (30초 세이프티 해제)');
+                    clearTimeout(handshakeTimeoutId);
+                    handshakeTimeoutId = null;
+                }
+
+                if (activeWorkerRef && !activeWorkerRef.closed) {
+                    console.log(`[WorkerController] 📢 READY 수신 ➡️ 지시 주입 (유형: ${targetType})`);
+                    
+                    // Inject metadata bundle for local self-contained execution
+                    (0,_ipc_broker_js__WEBPACK_IMPORTED_MODULE_1__/* .sendToWorker */ .eu)(activeWorkerRef, 'START_EXTRACTION', {
+                        queueId: config.queueId || `${location.pathname.split('/')[2] || '0'}_${location.pathname.split('/')[3] || '0'}`,
+                        targetType: targetType,
+                        seriesTitle: config.seriesTitle || 'UnknownSeries',
+                        rootFolder: config.rootFolder || config.seriesTitle || 'UnknownSeries', // Explicit normalized drive root folder name
+                        episodeTitle: config.episodeTitle || 'UnknownEpisode',
+                        episodeNum: config.episodeNum || '0000',
+                        folderId: config.folderId || '',
+                        destination: config.destination || 'local',
+                        novelFormat: config.novelFormat || 'epub',
+                        matchedRule: config.matchedRule || {},
+                        protocolDomain: config.protocolDomain || window.location.origin
+                    });
+                }
+            }
+
+            // 2. CAPTCHA detected ➡️ Extend timeout to 5 minutes
+            if (type === 'CAPTCHA_DETECTED') {
+                console.warn('[WorkerController] ⚠️ 캡차/CF 감지 ➡️ 타임아웃 5분으로 확장');
+                if (timeoutId) {
+                    clearTimeout(timeoutId);
+                    timeoutId = setTimeout(() => {
+                        cleanup();
+                        console.error('[WorkerController] 캡차 타임아웃 (5분)');
+                        closeActiveWorker();
+                        resolve(false);
+                    }, 300000);
+                }
+            }
+
+            // 3. Child Progress reporting ➡️ Forward to logger
+            if (type === 'WORKER_PROGRESS') {
+                const { percent, stage } = payload;
+                
+                let stageText = '대기 중';
+                if (stage === _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.DOM_READY) stageText = '페이지 로딩';
+                else if (stage === _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.SCROLLING) stageText = '스크롤 스캔';
+                else if (stage === _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.PARSING) stageText = '미디어 파싱';
+                else if (stage === _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.DOWNLOADING) stageText = '다운로드';
+                else if (stage === _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.UPLOADING) stageText = '드라이브 저장';
+                else if (stage === _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.COMPLETED) stageText = '완료';
+
+                logger.log(`[수집 진행] [${config.episodeTitle || '에피소드'}] -> ${stageText} (${Math.round(percent)}%)`, 'Downloader');
+            }
+
+            // 4. Task completed successfully
+            if (type === 'TASK_COMPLETED') {
+                cleanup();
+                
+                // Add WAF jitter delay (3~5s) to stay stealthy
+                const jitterDelay = 3000 + Math.random() * 2000;
+                console.log(`[WorkerController] WAF 지터 대기 (${(jitterDelay / 1000).toFixed(2)}초)...`);
+                await new Promise(r => setTimeout(r, jitterDelay));
+                
+                resolve(true); // Success
+            }
+
+            // 5. Task failed with error
+            if (type === 'TASK_FAILED') {
+                cleanup();
+                console.error(`[WorkerController] 자식 워커가 에러를 보고함: ${payload.errorMsg}`);
+                resolve(false); // Fail
+            }
+        });
+
+        // 팝업 수동 종료 실시간 감시 타이머 (Liveness Guard)
+        livenessInterval = setInterval(() => {
+            if (activeWorkerRef && activeWorkerRef.closed) {
+                console.warn('[WorkerController] ⚠️ 단일 워커 팝업 수동 종료 감지 (즉시 예외 복구)');
+                cleanup();
+                closeActiveWorker();
+                resolve(false);
+            }
+        }, 1000);
+
+        // 30s Handshake Safety (Fast-fail if redirect blocked or popup frozen)
+        handshakeTimeoutId = setTimeout(() => {
+            cleanup();
+            console.error('[WorkerController] ⚠️ 30초 핸드셰이킹 타임아웃 (리다이렉션 차단 의심)');
+            closeActiveWorker();
+            resolve(false);
+        }, 30000);
+
+        // General Timeout
+        timeoutId = setTimeout(() => {
+            cleanup();
+            console.error(`[WorkerController] 수집 타임아웃 (${timeoutDuration / 1000}초)`);
+            closeActiveWorker();
+            resolve(false);
+        }, timeoutDuration);
+
+        // Start or Recycle Popup window
+        try {
+            if (activeWorkerRef && !activeWorkerRef.closed) {
+                console.log('[WorkerController] 기존 워커 팝업 재사용 (location.replace):', episodeUrl);
+                try {
+                    activeWorkerRef.location.replace(episodeUrl);
+                    activeWorkerRef.name = 'tokisync-novel-worker';
+                } catch (replaceErr) {
+                    console.warn('[WorkerController] location.replace 차단 ➡️ href 폴백:', replaceErr);
+                    activeWorkerRef.location.href = episodeUrl;
+                    activeWorkerRef.name = 'tokisync-novel-worker';
+                }
+            } else {
+                console.log('[WorkerController] 신규 단일 워커 팝업 기동:', episodeUrl);
+                activeWorkerRef = window.open(
+                    episodeUrl,
+                    'tokisync-novel-worker',
+                    'width=400,height=600,left=0,top=0,noopener=false,scrollbars=yes,resizable=yes'
+                );
+                if (!activeWorkerRef) {
+                    throw new Error('브라우저 팝업 차단이 감지되었습니다.');
+                }
+            }
+        } catch (err) {
+            cleanup();
+            console.error('[WorkerController] 워커 팝업 기동 실패:', err);
+            closeActiveWorker();
+            alert(`[TokiSync 팝업 차단 알림]\n\n브라우저 주소창 우측에서 [팝업 및 리다이렉트 항상 허용]으로 설정해 주셔야 합니다.\n(오류: ${err.message})`);
+            resolve(false);
+        }
+    });
+}
+
+/**
+ * Manage retries for worker popup collection
+ */
+async function fetchMediaViaWorker(episodeUrl, targetType = 'novel', config = {}) {
+    const MAX_RETRIES = 3;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        console.log(`[WorkerController] 🚀 수집 시도 (${attempt}/${MAX_RETRIES}) — URL: ${episodeUrl}`);
+
+        if (attempt > 1) {
+            console.warn('[WorkerController] ⚠️ 이전 시도 실패 — 워커 세션 재설정');
+            closeActiveWorker();
+            await new Promise(r => setTimeout(r, 1500));
+        }
+
+        try {
+            const success = await fetchMediaViaWorkerSingleAttempt(episodeUrl, targetType, config);
+            if (success) {
+                console.log(`[WorkerController] 🎉 수집 성공 (${attempt}/${MAX_RETRIES})`);
+                return true; // Return success status
+            }
+            console.warn(`[WorkerController] ⚠️ 수집 실패 (${attempt}/${MAX_RETRIES}) — 작업 불완성`);
+        } catch (err) {
+            console.error(`[WorkerController] ❌ 수집 예외 (${attempt}/${MAX_RETRIES}):`, err);
+        }
+    }
+
+    console.error(`[WorkerController] 🛑 총 ${MAX_RETRIES}회 전부 실패 — URL: ${episodeUrl}`);
+    return false;
+}
 
 // =============================================================
-// 🛠️ 공통 유틸리티 & Base64 / 암호학 헬퍼 함수
+// 공개 진입점 (Gateway) — downloader.js 전용
+// =============================================================
+
+/**
+ * 소설 본문 수집 (Plan B: 자립형 팝업 ➡️ Plan C: API 복호화 폴백)
+ */
+async function fetchNovelText(episodeUrl, config = {}) {
+    console.log('[WorkerController] 소설 수집 개시 (Plan B — 자립형 팝업)');
+    const success = await fetchMediaViaWorker(episodeUrl, 'novel', config);
+
+    if (success) return true; // Success (Worker already saved it!)
+
+    // Plan C Fallback: Local API Decryption (if decryptApi configuration exists)
+    if (config.decryptApi || config.endpoint) {
+        console.warn('[WorkerController] Plan B 실패 ➡️ Plan C(API 복호화) 로컬 폴백 시도');
+        const content = await (0,_novel_decryptor_js__WEBPACK_IMPORTED_MODULE_0__/* .fetchNovelTextViaApi */ .i)(episodeUrl, config.decryptApi || config);
+        if (content) {
+            // Since API fallback runs in parent, parent must write it
+            return content; // Return raw text so downloader.js can package and save
+        }
+    }
+
+    return null;
+}
+
+/**
+ * 만화/웹툰 이미지 수집 (Plan B: 자립형 팝업)
+ */
+async function fetchComicImages(episodeUrl, config = {}) {
+    console.log('[WorkerController] 만화 이미지 수집 개시 (Plan B — 자립형 팝업)');
+    return await fetchMediaViaWorker(episodeUrl, 'comic', config);
+}
+
+/**
+ * 🚦 배치/드라이브 전용 자율 분산형 멀티 워커 제어 엔진 (v1.21.0)
+ * 여러 개의 자식 팝업 창으로부터 오는 IPC 이벤트를 독립적으로 라우팅하여 멀티태스킹 수행
+ */
+function initBatchWorkerController() {
+    const logger = _ui_js__WEBPACK_IMPORTED_MODULE_3__.LogBox.getInstance();
+    
+    if (window.tokisync_batch_controller_initialized) return;
+    window.tokisync_batch_controller_initialized = true;
+
+    console.log('[WorkerController] 🚦 [배치 모드] 백그라운드 영속성 IPC 라우터 활성화 완료');
+
+    // 정기적인 자식 팝업 닫힘 실시간 감시 (Batch Liveness Guard)
+    const batchClosedCounts = new Map();
+    setInterval(() => {
+        const queue = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getQueue */ .IS)();
+        for (const [id, popupRef] of _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.entries()) {
+            const actualRef = popupRef && (popupRef.ref || popupRef);
+            if (actualRef && actualRef.closed) {
+                const closedCount = (batchClosedCounts.get(id) || 0) + 1;
+                batchClosedCounts.set(id, closedCount);
+
+                if (closedCount >= 3) {
+                    console.warn(`[WorkerController] ⚠️ [배치] 자식 팝업 수동 종료 확정: ${id}`);
+                    _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.delete(id);
+                    batchClosedCounts.delete(id);
+
+                    const item = queue.find(i => i.id === id);
+                    if (item && item.status === 'processing') {
+                        const nextRetry = (item.retryCount || 0) + 1;
+                        (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .updateQueueItem */ .Gg)(id, {
+                            status: nextRetry >= 3 ? 'failed' : 'pending',
+                            retryCount: nextRetry,
+                            errorMsg: '자식 팝업 창이 비정상적으로 강제 종료되었습니다.'
+                        });
+                        logger.error(`❌ [배치 수동종료] [${item.episodeTitle}] 자식 팝업이 종료되어 복구를 단행합니다.`, 'Queue');
+                        (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .runSchedulerOnce */ .gi)();
+                    }
+                }
+            } else {
+                batchClosedCounts.set(id, 0);
+            }
+        }
+    }, 2000);
+
+    (0,_ipc_broker_js__WEBPACK_IMPORTED_MODULE_1__/* .registerIpcListener */ .Q_)(async (msg) => {
+        const { type, payload, sourceEvent } = msg;
+        if (!sourceEvent || !sourceEvent.source) return;
+
+        // 1. WORKER_READY: 자식 워커 핸드셰이킹 수신
+        if (type === 'WORKER_READY') {
+            let matchedId = null;
+            for (const [id, popupRef] of _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.entries()) {
+                if (popupRef === sourceEvent.source) {
+                    matchedId = id;
+                    break;
+                }
+            }
+
+            if (matchedId) {
+                const queue = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getQueue */ .IS)();
+                const item = queue.find(i => i.id === matchedId);
+                
+                if (item) {
+                    console.log(`[WorkerController] 📢 [배치] READY 수신 (ID: ${matchedId}) ➡️ START_EXTRACTION 주입`);
+                    
+                    (0,_ipc_broker_js__WEBPACK_IMPORTED_MODULE_1__/* .sendToWorker */ .eu)(sourceEvent.source, 'START_EXTRACTION', {
+                        queueId: item.id,
+                        targetType: (item.category === 'Novel' || item.category === 'novel') ? 'novel' : 'comic',
+                        seriesTitle: item.title,
+                        rootFolder: item.rootFolder || item.title || 'UnknownSeries',
+                        episodeTitle: item.episodeTitle,
+                        episodeNum: item.episodeNum,
+                        folderId: item.folderId || '',
+                        destination: item.destination || 'local',
+                        novelFormat: item.novelFormat || 'epub',
+                        matchedRule: item.matchedRule || {},
+                        protocolDomain: item.protocolDomain || window.location.origin
+                    });
+                }
+            } else {
+                console.warn('[WorkerController] [배치] WORKER_READY 수신했으나 매칭되는 activeWorkers 항목을 찾지 못했습니다.');
+            }
+        }
+
+        // 2. CAPTCHA_DETECTED: WAF/보안 방어막 대기 상태
+        if (type === 'CAPTCHA_DETECTED') {
+            let matchedId = null;
+            for (const [id, popupRef] of _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.entries()) {
+                if (popupRef === sourceEvent.source) {
+                    matchedId = id;
+                    break;
+                }
+            }
+            if (matchedId) {
+                console.warn(`[WorkerController] ⚠️ [배치] WAF 캡차 차단막 감지 (ID: ${matchedId})`);
+                const queue = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getQueue */ .IS)();
+                const item = queue.find(i => i.id === matchedId);
+                if (item) {
+                    logger.log(`⚠️ [캡차 대기] [${item.episodeTitle}] 브라우저 창에서 보안 해제를 수행해 주세요.`, 'Downloader');
+                }
+            }
+        }
+
+        // 3. WORKER_PROGRESS: 자식 워커 실시간 진행률 UI 반영
+        if (type === 'WORKER_PROGRESS') {
+            const { percent, stage } = payload;
+            let matchedId = null;
+            for (const [id, popupRef] of _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.entries()) {
+                if (popupRef === sourceEvent.source) {
+                    matchedId = id;
+                    break;
+                }
+            }
+
+            if (matchedId) {
+                const queue = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getQueue */ .IS)();
+                const item = queue.find(i => i.id === matchedId);
+                if (item) {
+                    (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .updateQueueItem */ .Gg)(matchedId, { progressPercent: percent, stage: stage });
+                    
+                    let stageText = '대기 중';
+                    if (stage === _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.DOM_READY) stageText = '페이지 로딩';
+                    else if (stage === _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.SCROLLING) stageText = '스크롤 스캔';
+                    else if (stage === _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.PARSING) stageText = '미디어 파싱';
+                    else if (stage === _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.DOWNLOADING) stageText = '다운로드';
+                    else if (stage === _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.UPLOADING) stageText = '드라이브 저장';
+                    else if (stage === _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.COMPLETED) stageText = '완료';
+
+                    logger.log(`[수집 진행] [${item.episodeTitle}] -> ${stageText} (${Math.round(percent)}%)`, 'Downloader');
+                }
+            }
+        }
+
+        // 4. TASK_COMPLETED: 자식 워커 수집 및 드라이브 저장 정상 완료
+        if (type === 'TASK_COMPLETED') {
+            let matchedId = null;
+            for (const [id, popupRef] of _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.entries()) {
+                if (popupRef === sourceEvent.source) {
+                    matchedId = id;
+                    break;
+                }
+            }
+
+            if (matchedId) {
+                console.log(`[WorkerController] 🎉 [배치] 수집 완료 (ID: ${matchedId})`);
+                
+                const popupRef = _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.get(matchedId);
+                if (popupRef && !popupRef.closed) {
+                    popupRef.close();
+                }
+                _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.delete(matchedId);
+                
+                (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .updateQueueItem */ .Gg)(matchedId, { status: 'completed', progressPercent: 100, stage: _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.COMPLETED });
+
+                // 다음 대기 항목 릴레이 스케줄링
+                (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .runSchedulerOnce */ .gi)();
+            }
+        }
+
+        // 5. TASK_FAILED: 예외 및 복구 불능 실패 보고
+        if (type === 'TASK_FAILED') {
+            const { errorMsg } = payload;
+            let matchedId = null;
+            for (const [id, popupRef] of _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.entries()) {
+                if (popupRef === sourceEvent.source) {
+                    matchedId = id;
+                    break;
+                }
+            }
+
+            if (matchedId) {
+                console.error(`[WorkerController] ❌ [배치] 수집 실패 (ID: ${matchedId}): ${errorMsg}`);
+                
+                const popupRef = _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.get(matchedId);
+                if (popupRef && !popupRef.closed) {
+                    popupRef.close();
+                }
+                _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.delete(matchedId);
+
+                const queue = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getQueue */ .IS)();
+                const item = queue.find(i => i.id === matchedId);
+                if (item) {
+                    const nextRetry = (item.retryCount || 0) + 1;
+                    (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .updateQueueItem */ .Gg)(matchedId, {
+                        status: nextRetry >= 3 ? 'failed' : 'pending',
+                        retryCount: nextRetry,
+                        errorMsg: errorMsg || '자식 워커가 에러를 보고함'
+                    });
+                }
+
+                // 다음 대기 항목 릴레이 스케줄링
+                (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .runSchedulerOnce */ .gi)();
+            }
+        }
+    });
+}
+
+
+/***/ }),
+
+/***/ 602:
+/***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
+
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   i: function() { return /* binding */ fetchNovelTextViaApi; }
+/* harmony export */ });
+/**
+ * tokiSync - Novel API Decryptor (Plan C Engine)
+ *
+ * JWT 토큰 디코딩 + 동적 Nonce 추출 + XOR 복호화 기반 API 직접 수집.
+ * 팝업 IPC(Plan B)가 실패한 경우의 긴급 폴백 전용 모듈.
+ *
+ * 팝업 워커 IPC(Plan B)는 worker-controller.js 참조.
+ */
+
+// =============================================================
+// 🛠️ 암호학 유틸리티 (내부 전용)
 // =============================================================
 
 function b64urlDecode(str) {
@@ -2078,17 +2943,15 @@ function getValidNonce(token) {
         for (let i = 0; i < binStr.length; i++) {
             bytes[i] = binStr.charCodeAt(i);
         }
-        const decodedString = new TextDecoder('utf-8').decode(bytes);
-        const tokenData = JSON.parse(decodedString);
+        const tokenData = JSON.parse(new TextDecoder('utf-8').decode(bytes));
 
         if (tokenData && tokenData.nonce) {
-            console.log("[Decryptor] 신형 토큰 감지 - 내장된 Nonce 추출 완료:", tokenData.nonce);
+            console.log('[Decryptor] 신형 토큰 — 내장 Nonce 추출:', tokenData.nonce);
             return tokenData.nonce;
         }
     } catch (e) {
-        console.warn("[Decryptor] 토큰 디코딩 중 오류 발생, 기존 폴백 적용:", e);
+        console.warn('[Decryptor] 토큰 디코딩 오류 — 랜덤 Nonce 생성:', e);
     }
-    console.log("[Decryptor] 구형 토큰 감지 - 랜덤 Nonce를 생성합니다.");
     return b64urlEncode(crypto.getRandomValues(new Uint8Array(24)));
 }
 
@@ -2096,198 +2959,16 @@ function getValidNonce(token) {
 const RE_TOKEN = /\\?"token\\?":\\?"(eyJ[A-Za-z0-9_-]+[A-Za-z0-9_=.-]*)\\?"/;
 
 // =============================================================
-// 팝업 수집 창 리소스 관리 헬퍼
+// 🏛️ Plan C Engine: API 직접 복호화
 // =============================================================
 
-function closeActivePopup() {
-    if (activePopupRef && !activePopupRef.closed) {
-        console.log('[Controller] 액티브 팝업 세션 수동 폐쇄');
-        activePopupRef.close();
-    }
-    activePopupRef = null;
-}
-
-// =============================================================
-// 🏛️ 플랜 B Engine: 팝업 렌더링 IPC 수집 엔진 (액티브)
-// =============================================================
-
-async function fetchMediaViaPopupSingleAttempt(episodeUrl, targetType = 'novel', config = {}) {
-    const timeoutDuration = config.timeout || 45000;
-
-    return new Promise((resolve) => {
-        let timeoutId = null;
-        let pushInterval = null;
-
-        const cleanup = () => {
-            window.removeEventListener('message', messageHandler);
-            if (timeoutId) {
-                clearTimeout(timeoutId);
-                timeoutId = null;
-            }
-            if (pushInterval) {
-                clearInterval(pushInterval);
-                pushInterval = null;
-            }
-        };
-
-        const startPushHeartbeat = () => {
-            if (pushInterval) clearInterval(pushInterval);
-
-            const sendInstruction = () => {
-                if (activePopupRef && !activePopupRef.closed) {
-                    let popupUrl = 'unknown';
-                    try { popupUrl = activePopupRef.location.href; } catch(e) { popupUrl = 'CORS/Blocked'; }
-                    activePopupRef.postMessage({
-                        type: 'TOKI_START_EXTRACTION',
-                        targetType: targetType,
-                        viewerCfg: config.viewerCfg || {}
-                    }, '*');
-                }
-            };
-
-            // Immediate execution, then interval every 1.5 seconds
-            sendInstruction();
-            pushInterval = setInterval(sendInstruction, 1500);
-        };
-
-        const messageHandler = async (event) => {
-            if (!event.data) return;
-
-            // 1. Handshake Backup (if window.opener is still alive, fallback gracefully)
-            if (event.data.type === 'TOKI_WORKER_READY') {
-                if (activePopupRef && !activePopupRef.closed) {
-                    console.log(`[Controller] 📢 자식 팝업 READY 수신. 동작 지시문 즉시 주입 -> 유형: ${targetType}`);
-                    activePopupRef.postMessage({
-                        type: 'TOKI_START_EXTRACTION',
-                        targetType: targetType,
-                        viewerCfg: config.viewerCfg || {}
-                    }, '*');
-                }
-                return;
-            }
-
-            // 2. 캡차/클라우드플레어 대기 상태 수신
-            if (event.data.type === 'TOKI_CAPTCHA_DETECTED') {
-                console.warn(`[Controller] ⚠️ 팝업에서 클라우드플레어/캡차 통과 화면이 감지되었습니다. 타임아웃을 5분으로 연장합니다.`);
-                if (timeoutId) {
-                    clearTimeout(timeoutId);
-                    timeoutId = setTimeout(() => {
-                        cleanup();
-                        console.error(`[Controller] 캡차/클라우드플레어 통과 시간 초과 (5분) - 유형: ${targetType}`);
-                        closeActivePopup();
-                        resolve(null);
-                    }, 300000); // 5분 연장
-                }
-                return;
-            }
-
-            // 3. Data collection complete
-            if (event.data.type === 'TOKI_MEDIA_DATA') {
-                const { contentType, content, images, novelId, episodeId } = event.data.data;
-                
-                // [보안/무결성] 이전 팝업 페이지(잔류 워커)가 보낸 고스트 데이터 필터링
-                const expectedIds = getIdsFromUrl(episodeUrl);
-                if (expectedIds && episodeId && episodeId !== '0') {
-                    if (expectedIds.episodeId !== episodeId) {
-                        console.warn(`[Controller] ⚠️ 이전 페이지의 지연된 고스트 데이터를 차단했습니다. (요청: ${expectedIds.episodeId} != 수신: ${episodeId})`);
-                        return;
-                    }
-                }
-                
-                if (contentType === targetType) {
-                    cleanup();
-
-                    // WAF mitigation delay (Jitter 3s - 5s)
-                    const jitterDelay = 3000 + Math.random() * 2000;
-                    console.log(`[Controller] WAF 행동 패턴 탐지 방어: 랜덤 지터 대기 시작... (${(jitterDelay / 1000).toFixed(2)}초)`);
-                    
-                    await new Promise(r => setTimeout(r, jitterDelay));
-                    console.log(`[Controller] 지터 대기 완료. 다운로드 큐로 데이터 전달.`);
-                    
-                    if (targetType === 'novel') {
-                        console.log(`[Controller] 팝업으로부터 소설 본문 수집 성공 - 길이: ${content.length}자`);
-                        resolve(content);
-                    } else {
-                        console.log(`[Controller] 팝업으로부터 만화 이미지 수집 성공 - 개수: ${images.length}개`);
-                        resolve(images);
-                    }
-                }
-            }
-        };
-
-        window.addEventListener('message', messageHandler);
-
-        timeoutId = setTimeout(() => {
-            cleanup();
-            console.error(`[Controller] 팝업 미디어 수집 타임아웃 발생 (45초) - 유형: ${targetType}`);
-            closeActivePopup();
-            resolve(null);
-        }, timeoutDuration);
-
-        try {
-            if (activePopupRef && !activePopupRef.closed) {
-                console.log('[Controller] 기존 팝업 재활용 (location.replace 우회):', episodeUrl);
-                try {
-                    activePopupRef.location.replace(episodeUrl);
-                    // Force-bind name to prevent browser security cleanups
-                    activePopupRef.name = 'tokisync-novel-worker';
-                } catch (replaceErr) {
-                    console.warn('[Controller] location.replace 보안 차단 발생, href 폴백 전환:', replaceErr);
-                    activePopupRef.location.href = episodeUrl;
-                    activePopupRef.name = 'tokisync-novel-worker';
-                }
-            } else {
-                console.log('[Controller] 신규 수집용 팝업 생성:', episodeUrl);
-                activePopupRef = window.open(episodeUrl, 'tokisync-novel-worker', 'width=50,height=400,left=0,top=0,noopener=false');
-                if (!activePopupRef) {
-                    throw new Error('브라우저에 의해 팝업 차단이 감지되었습니다.');
-                }
-            }
-
-            // Immediately start pushing active extraction commands downwards
-            startPushHeartbeat();
-
-        } catch (err) {
-            cleanup();
-            console.error('[Controller] 팝업 수집 세션 기동 실패:', err);
-            closeActivePopup();
-            alert(`[TokiSync 팝업 차단 알림]\n\n브라우저 주소창 우측에서 [팝업 및 리다이렉트 항상 허용]으로 설정해 주셔야 정상 수집이 가능합니다.\n\n허용 후 다시 시도해 주세요.\n(오류: ${err.message})`);
-            resolve(null);
-        }
-    });
-}
-
-async function fetchMediaViaPopup(episodeUrl, targetType = 'novel', config = {}) {
-    const MAX_RETRIES = 3;
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        console.log(`[Controller] 🚀 팝업 미디어 수집 시도 시작 (${attempt}/${MAX_RETRIES}) - URL: ${episodeUrl}`);
-        
-        // 2회차 재시도부터는 기존 팝업 세션을 강력 종료하고 1.5초 여유 딜레이 확보하여 찌꺼기 완벽 클린업
-        if (attempt > 1) {
-            console.warn(`[Controller] ⚠️ 이전 시도 실패 감지. 팝업 세션을 강제 파괴하고 재설정합니다.`);
-            closeActivePopup();
-            await new Promise(r => setTimeout(r, 1500));
-        }
-        
-        try {
-            const result = await fetchMediaViaPopupSingleAttempt(episodeUrl, targetType, config);
-            if (result && result.length > 0) {
-                console.log(`[Controller] 🎉 팝업 미디어 수집 시도 (${attempt}/${MAX_RETRIES}) 최종 성공!`);
-                return result;
-            }
-            console.warn(`[Controller] ⚠️ 팝업 미디어 수집 시도 (${attempt}/${MAX_RETRIES}) 실패 (획득 패키지 부재)`);
-        } catch (err) {
-            console.error(`[Controller] ❌ 팝업 미디어 수집 중 예외 발생 (시도 ${attempt}/${MAX_RETRIES}):`, err);
-        }
-    }
-    console.error(`[Controller] 🛑 총 ${MAX_RETRIES}회의 모든 팝업 수집 시도가 실패했습니다. - URL: ${episodeUrl}`);
-    return null;
-}
-
-// =============================================================
-// 🏛️ 플랜 C Engine: API 직접 복호화 엔진 (페이퍼 플랜 대기 상태)
-// =============================================================
-
+/**
+ * JWT + HMAC Proof 기반 소설 API 직접 복호화 수집.
+ * Plan B(팝업 IPC) 실패 시 긴급 폴백으로만 사용.
+ * @param {string} episodeUrl
+ * @param {Object} config - { endpoint, cookieName, clientHeader }
+ * @param {boolean} _isRetry
+ */
 async function fetchNovelTextViaApi(episodeUrl, config = {}, _isRetry = false) {
     const endpoint = config.endpoint || '/api/novel-content';
     const cookieName = config.cookieName || 'nv';
@@ -2297,25 +2978,25 @@ async function fetchNovelTextViaApi(episodeUrl, config = {}, _isRetry = false) {
         const ids = getIdsFromUrl(episodeUrl);
         if (!ids) return null;
 
-        // 1. Fresh Token 추출
+        // 1. 페이지에서 Fresh Token 추출
         const html = await fetch(episodeUrl, { credentials: 'same-origin' }).then(r => r.text());
         const tokenMatch = html.match(RE_TOKEN);
         if (!tokenMatch) {
-            console.warn('[Decryptor-API] 토큰 추출 실패 (API 호출 중단)');
+            console.warn('[Decryptor] 토큰 추출 실패 — API 호출 중단');
             return null;
         }
         const token = tokenMatch[1];
 
-        // 2. 쿠키 확인
+        // 2. 세션 쿠키 확인 및 발급
         let cookie = getCookie(cookieName);
         if (!cookie) {
-            console.log('[Decryptor-API] 쿠키 없음 - nv-issue 시도');
+            console.log('[Decryptor] 쿠키 없음 — nv-issue 시도');
             await fetch('/api/nv-issue', { method: 'POST', credentials: 'same-origin' });
             cookie = getCookie(cookieName);
         }
         if (!cookie) return null;
 
-        // 3. Proof 생성 (동적 Nonce 추출 연동)
+        // 3. Proof 생성 (동적 Nonce 연동)
         const nonce = getValidNonce(token);
         const proof = await hmacSign(cookie, `${token}.${nonce}.${navigator.userAgent}`);
 
@@ -2327,28 +3008,24 @@ async function fetchNovelTextViaApi(episodeUrl, config = {}, _isRetry = false) {
                 'content-type': 'application/json',
                 'x-novel-client': clientHeader
             },
-            body: JSON.stringify({
-                novelId: ids.novelId,
-                episodeId: ids.episodeId,
-                token, nonce, proof
-            })
+            body: JSON.stringify({ novelId: ids.novelId, episodeId: ids.episodeId, token, nonce, proof })
         });
 
-        // 5. API 실패 시 — 세션 차단 감지 → 쿠키 리셋 후 1회 재시도
+        // 5. 실패 시 쿠키 리셋 후 1회 재시도
         if (!resp.ok) {
             if (!_isRetry) {
-                console.warn(`[Decryptor-API] API 실패 (${resp.status}) → 세션 차단 의심, 쿠키 리셋 후 재시도`);
+                console.warn(`[Decryptor] API 실패 (${resp.status}) — 세션 차단 의심, 쿠키 리셋 후 재시도`);
                 await resetNvCookie(cookieName);
                 return fetchNovelTextViaApi(episodeUrl, config, true);
             }
-            console.error(`[Decryptor-API] 재시도 후에도 실패 (${resp.status})`);
+            console.error(`[Decryptor] 재시도 후에도 실패 (${resp.status})`);
             return null;
         }
 
         const data = await resp.json();
         if (!data.ok || !data.payload) return null;
 
-        // 6. XOR 복호화 및 URI 디코딩 정제 (신형 스펙 보정 적용)
+        // 6. XOR 복호화 및 URI 디코딩 정제
         let resultString = xorDecrypt(data.payload, token);
         if (!resultString) return null;
 
@@ -2359,42 +3036,9 @@ async function fetchNovelTextViaApi(episodeUrl, config = {}, _isRetry = false) {
         return resultString;
 
     } catch (e) {
-        console.error('[Decryptor-API] 복호화 과정 중 예외 발생:', e);
+        console.error('[Decryptor] 복호화 예외 발생:', e);
         return null;
     }
-}
-
-// =============================================================
-// 🏛️ 통합 게이트웨이 진입점 (Gateway)
-// =============================================================
-
-async function fetchNovelText(episodeUrl, config = {}) {
-    console.log('[Controller] 소설 본문 수집 개시 - 플랜 B (팝업 IPC) 가동');
-    
-    // 1순위: 플랜 B (팝업 IPC) 실행
-    const content = await fetchMediaViaPopup(episodeUrl, 'novel', config);
-    
-    if (content) {
-        return content;
-    }
-    
-    console.warn('[Controller] 플랜 B (팝업 IPC) 수집 실패 또는 차단 감지');
-    
-    // 2순위: 플랜 C (API 직접 복호화) - 페이퍼 플랜 대기 상태
-    // ⚠️ 긴급 상황 시 아래 조건을 true로 변경하여 즉시 런타임에 투입 가능합니다.
-    const EMERGENCY_API_FALLBACK = false;
-    
-    if (EMERGENCY_API_FALLBACK) {
-        console.log('[Controller] 🚨 긴급 폴백 가동: 플랜 C (API 직접 복호화) 실행');
-        return await fetchNovelTextViaApi(episodeUrl, config);
-    }
-    
-    return null;
-}
-
-async function fetchComicImages(episodeUrl, config = {}) {
-    console.log('[Controller] 만화 이미지 수집 개시 - 팝업 IPC 가동');
-    return await fetchMediaViaPopup(episodeUrl, 'comic', config);
 }
 
 
@@ -2480,15 +3124,16 @@ function setConfig(key, value) {
 /**
  * Show Configuration Modal
  */
-function showConfigModal() {
+function showConfigModal(popupDoc = document) {
+    const doc = popupDoc;
     // Remove existing modal if any
-    const existing = document.getElementById('toki-config-modal');
+    const existing = doc.getElementById('toki-config-modal');
     if (existing) existing.remove();
 
     const config = getConfig();
 
     // -- HTML Structure (v1.9.1 Glassmorphism) --
-    const overlay = document.createElement('div');
+    const overlay = doc.createElement('div');
     overlay.id = 'toki-config-modal';
     overlay.className = 'toki-modal-overlay';
     
@@ -2582,37 +3227,37 @@ function showConfigModal() {
         </div>
     `;
 
-    document.body.appendChild(overlay);
+    doc.body.appendChild(overlay);
 
     // -- Logic --
-    const policySelect = document.getElementById('toki-cfg-policy');
+    const policySelect = doc.getElementById('toki-cfg-policy');
     if(policySelect) policySelect.value = config.policy;
     
-    const sleepModeSelect = document.getElementById('toki-cfg-sleepmode');
+    const sleepModeSelect = doc.getElementById('toki-cfg-sleepmode');
     if(sleepModeSelect) sleepModeSelect.value = config.sleepMode;
 
-    const smartSkipSelect = document.getElementById('toki-cfg-smartskip');
+    const smartSkipSelect = doc.getElementById('toki-cfg-smartskip');
     if(smartSkipSelect) smartSkipSelect.value = config.smartSkipRatio;
 
-    const novelModeSelect = document.getElementById('toki-cfg-novel-mode');
+    const novelModeSelect = doc.getElementById('toki-cfg-novel-mode');
     if(novelModeSelect) novelModeSelect.value = config.novelMode;
 
-    const novelFormatSelect = document.getElementById('toki-cfg-novel-format');
+    const novelFormatSelect = doc.getElementById('toki-cfg-novel-format');
     if(novelFormatSelect) novelFormatSelect.value = config.novelFormat;
 
-    document.getElementById('toki-btn-cancel').onclick = () => overlay.remove();
+    doc.getElementById('toki-btn-cancel').onclick = () => overlay.remove();
     
-    document.getElementById('toki-btn-save').onclick = () => {
-        const newGasId = document.getElementById('toki-cfg-gas-id').value.trim();
-        const newFolder = document.getElementById('toki-cfg-folder').value.trim();
-        const newApiKey = document.getElementById('toki-cfg-apikey').value.trim();
-        const newPolicy = document.getElementById('toki-cfg-policy').value;
-        const newSleepMode = document.getElementById('toki-cfg-sleepmode').value;
-        const newSmartSkip = document.getElementById('toki-cfg-smartskip').value;
-        const newNovelMode = document.getElementById('toki-cfg-novel-mode').value;
-        const newNovelFormat = document.getElementById('toki-cfg-novel-format').value;
-        const newRemoteRule = document.getElementById('toki-cfg-remote-rule').value.trim();
-        const newCustomRule = document.getElementById('toki-cfg-custom-rule').value.trim() || '[]';
+    doc.getElementById('toki-btn-save').onclick = () => {
+        const newGasId = doc.getElementById('toki-cfg-gas-id').value.trim();
+        const newFolder = doc.getElementById('toki-cfg-folder').value.trim();
+        const newApiKey = doc.getElementById('toki-cfg-apikey').value.trim();
+        const newPolicy = doc.getElementById('toki-cfg-policy').value;
+        const newSleepMode = doc.getElementById('toki-cfg-sleepmode').value;
+        const newSmartSkip = doc.getElementById('toki-cfg-smartskip').value;
+        const newNovelMode = doc.getElementById('toki-cfg-novel-mode').value;
+        const newNovelFormat = doc.getElementById('toki-cfg-novel-format').value;
+        const newRemoteRule = doc.getElementById('toki-cfg-remote-rule').value.trim();
+        const newCustomRule = doc.getElementById('toki-cfg-custom-rule').value.trim() || '[]';
 
         // Validate Custom Rules JSON
         let validCustomRule = '[]';
@@ -2684,11 +3329,10 @@ function isConfigValid() {
 /* harmony export */   UF: function() { return /* binding */ waitForContent; },
 /* harmony export */   Vs: function() { return /* binding */ scrollToLoad; },
 /* harmony export */   _L: function() { return /* binding */ blobToArrayBuffer; },
-/* harmony export */   getImageDimensions: function() { return /* binding */ getImageDimensions; },
 /* harmony export */   iL: function() { return /* binding */ getCommonPrefix; },
 /* harmony export */   yy: function() { return /* binding */ sleep; }
 /* harmony export */ });
-/* unused harmony export waitIframeLoad */
+/* unused harmony exports waitIframeLoad, pauseForCaptcha, getImageDimensions */
 /* harmony import */ var _gas_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(488);
 /* harmony import */ var _ui_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(989);
 
@@ -2844,260 +3488,263 @@ async function waitForContent(targetWindow, maxWaitMs = 8000, viewerCfg = {}) {
             }
             const novelSelector = viewerCfg.novelContent || '#novel_content';
             
-            const hasImages = targetDoc.querySelector(imgSelector) !== null;
+            // [개선] 룰의 exclude/remove 셀렉터를 활용한 정밀한 유효 이미지 판정
+            const allImgs = Array.from(targetDoc.querySelectorAll(imgSelector));
+            const excludeRule = viewerCfg.exclude || viewerCfg.remove;
+            const excludeSelectors = excludeRule 
+                ? (Array.isArray(excludeRule) ? excludeRule : [excludeRule]) 
+                : [];
+
+            const validImages = allImgs.filter(img => {
+                const src = img.src || img.getAttribute('data-src') || img.getAttribute('data-lazy') || img.getAttribute('data-original') || '';
+                if (!src || src.startsWith('data:image')) return false;
+                const lower = src.toLowerCase();
+                if (lower.includes('blank.gif') || lower.includes('loading.gif') || lower.includes('loading-image.gif')) return false;
+                if (excludeSelectors.some(sel => img.matches(sel) || img.closest(sel))) return false;
+                return true;
+            });
+
+            const hasImages = validImages.length >= 3;
             const novelEl = targetDoc.querySelector(novelSelector);
             const hasNovel = novelEl && novelEl.innerText.trim().length > 50;
             
             if (hasImages || hasNovel) {
                 const type = hasImages ? 'Webtoon' : 'Novel';
-                _ui_js__WEBPACK_IMPORTED_MODULE_1__.LogBox.getInstance().log(`[DOM Poll] ${type} 콘텐츠 감지 (${(i + 1) * POLL_INTERVAL}ms)`, 'DOM:Poll');
-                return targetDoc; // 콘텐츠 발견 → 즉시 반환
+                _ui_js__WEBPACK_IMPORTED_MODULE_1__.LogBox.getInstance().log(`[DOM Poll] ${type} 콘텐츠 감지 (유효 이미지: ${validImages.length}개, ${(i + 1) * POLL_INTERVAL}ms)`, 'DOM:Poll');
+                return targetDoc;
             }
         } catch (e) {
             if (e.name === 'SecurityError' || e.message.includes('Blocked a frame')) {
-                // CORS로 완전히 막힌 경우 호출자에게 알림
                 throw e;
             }
         }
         await sleep(POLL_INTERVAL);
     }
-    // 타임아웃 — 콘텐츠 없이 진행 (후속 로직에서 빈 결과 처리)
     console.warn(`[DOM Poll] ${maxWaitMs}ms 내 콘텐츠 미감지 — 갈무리 시도`);
     _ui_js__WEBPACK_IMPORTED_MODULE_1__.LogBox.getInstance().warn(`DOM 폴링 타임아웃 ${maxWaitMs}ms — 콘텐츠 미감지, 멈춰서 물 평가`, 'DOM:Poll');
 }
 
-/**
- * iframe 내부를 끝까지 스크롤하여 레이지 로딩 이미지가 실제 URL을 불러오도록 강제하는 함수
- * [v1.7.4] 시간 기반 → 진행도 기반으로 개편
- *   Phase 1: 페이지 최하단까지 스크롤 (횟수 제한 없음, 위치 기반 종료)
- *   Phase 2: 모든 lazy 이미지가 실제 URL로 전환될 때까지 폴링
- *            - 개수가 줄어드는 한 계속 대기 (진행 중)
- *            - stallTimeoutMs 동안 변화 없으면 포기 (스톨)
- * @param {HTMLDocument} iframeDoc
- * @param {number} stallTimeoutMs 진행 없을 때 포기하는 시간 (ms), 기본 20000
- * @param {object} viewerCfg 동적 파서 뷰어 설정
- */
 async function scrollToLoad(iframeDoc, stallTimeoutMs = 20000, viewerCfg = {}) {
-    const POLL_INTERVAL = 300;
-
     const win = iframeDoc.defaultView || iframeDoc.parentWindow;
     if (!win) return;
 
     const isHidden = document.visibilityState === 'hidden';
     const behavior = isHidden ? 'auto' : 'smooth';
-    const scrollInterval = isHidden ? 200 : 100;
-
     const logger = _ui_js__WEBPACK_IMPORTED_MODULE_1__.LogBox.getInstance();
 
-    // ── Phase 1: 요소 추적 하이브리드 점프 (EBHJ) ────────────────
-    logger.log(`[ScrollToLoad] Phase 1: 고속 점프 시작 (${behavior} 모드)`, 'DOM:Scroll');
+    logger.log('⏳ [ScrollEngine] 동적 가상화(div ➔ img) 둔갑 대기 스크롤 모드를 작동합니다.', 'DOM:Scroll');
 
-    // 범용적인 이미지 컨테이너 탐지 (마나토끼 등 다양한 사이트 구조 대응)
-    let targetSelectors;
+    // 1. 부모 이미지 컨테이너 탐지
+    let container = null;
     if (viewerCfg.imageContainer) {
-        const itemSel = viewerCfg.imageItem || 'img';
-        targetSelectors = viewerCfg.imageContainer.split(',')
-            .map(c => `${c.trim()} ${itemSel}`)
-            .join(', ');
-    } else {
-        targetSelectors = '.view-padding div img, .viewer-main img, #v_content img, .img-tag';
-    }
-    
-    const allImages = Array.from(iframeDoc.querySelectorAll(targetSelectors));
-    
-    if (allImages.length > 0) {
-        // 4개 단위로 샘플링하여 징검다리 점프 수행 (IntersectionObserver rootMargin 활용)
-        const SAMPLE_STEP = 4;
-        const jumpTargets = allImages.filter((_, idx) => idx % SAMPLE_STEP === 0);
-        
-        // 마지막 이미지는 무조건 포함
-        if (allImages.length % SAMPLE_STEP !== 1) {
-            jumpTargets.push(allImages[allImages.length - 1]);
-        }
-
-        for (let i = 0; i < jumpTargets.length; i++) {
-            const target = jumpTargets[i];
-            target.scrollIntoView({ behavior, block: 'center' });
-            
-            // 전역 스크롤 이벤트 발화 (일부 사이트용)
-            if (isHidden) win.dispatchEvent(new Event('scroll'));
-            
-            logger.log(`[EBHJ] 점프 중... (${i + 1}/${jumpTargets.length})`, 'DOM:Jump');
-            await sleep(scrollInterval);
-        }
-    } else {
-        logger.warn('[EBHJ] 화면 내 이미지 요소를 찾을 수 없어 물리 스크롤 모드로 전환합니다.', 'DOM:Scroll');
-    }
-
-    // Hybrid Fallback: 마지막에 문서를 바닥으로 내려꽂아 무한 스크롤 및 지연 로직 강제 기상
-    win.scrollTo({ top: iframeDoc.documentElement.scrollHeight, behavior });
-    if (isHidden) win.dispatchEvent(new Event('scroll'));
-    await sleep(scrollInterval * 2);
-
-    logger.log('[ScrollToLoad] Phase 1 완료 (요소 점프 및 바닥 도달). Phase 2: 이미지 활성화 대기...', 'DOM:Scroll');
-
-    // ── Phase 2: lazy 이미지가 모두 실제 URL로 바뀔 때까지 폴링 ────
-    const isDummySrc = (src) => {
-        if (!src || src.trim() === '') return true;
-        if (src.startsWith('data:image')) return true;
-        const lower = src.toLowerCase();
-        
-        // 알려진 더미 파일명 패턴
-        const dummyFilenames = [
-            'blank.gif', 'loading.gif', 'loading-image.gif',
-            'pixel.gif', 'spacer.gif', 'transparent.gif',
-            '1x1.gif', 'dot.gif',
-        ];
-        if (dummyFilenames.some(p => lower.includes(p))) return true;
-
-        // 경로 기반 패턴
-        if (/\/img\/loading/.test(lower)) return true;
-        if (/\/img\/placeholder/.test(lower)) return true;
-
-        return false;
-    };
-
-    let lastCount = -1;
-    let stallElapsed = 0;
-
-    while (true) {
-        const images = Array.from(iframeDoc.querySelectorAll(targetSelectors));
-        const remaining = images.filter(img => {
-            const src = img.src || '';
-            // 1. 알려진 플레이스홀더 URL → 대기
-            if (isDummySrc(src)) return true;
-            // 2. 이미지가 아직 로딩 중 → 대기
-            if (!img.complete) return true;
-            // 3. complete=true → 성공이든 실패든 확정 상태, 더 기다려도 바뀌지 않음
-            //    (naturalWidth=0 + complete=true = HTML 페이지 URL이거나 CORS/404 실패)
-            return false;
-        });
-
-        if (remaining.length === 0) {
-            logger.log('[ScrollToLoad] Phase 2 완료: 모든 이미지 URL 활성화!', 'DOM:Scroll');
-            break;
-        }
-
-        if (remaining.length < lastCount || lastCount === -1) {
-            // 진행 중 → 스톨 타이머 리셋
-            stallElapsed = 0;
-            logger.log(`[ScrollToLoad] 진행 중... 잔여 lazy: ${remaining.length}개`, 'DOM:Scroll');
-        } else {
-            // 변화 없음 → 스톨 누적
-            stallElapsed += POLL_INTERVAL;
-
-            // 5초마다 스톨 대상 이미지 상세 정보 출력
-            if (stallElapsed % 5000 < POLL_INTERVAL) {
-                logger.warn(`[ScrollToLoad] 스톨 중 (${stallElapsed / 1000}s 경과) — 미해결 이미지 목록:`, 'DOM:Scroll');
-                remaining.forEach((img, i) => {
-                    const src = img.src || '(empty)';
-                    const shortSrc = src.length > 80 ? '...' + src.slice(-77) : src;
-                    const reason = isDummySrc(img.src || '')
-                        ? ((!img.src || img.src.trim() === '') ? 'src 없음' : img.src.startsWith('data:image') ? 'data:image' : '더미 URL 패턴')
-                        : `naturalWidth=${img.naturalWidth} (complete=${img.complete})`;
-                    logger.warn(`  [${i + 1}] ${reason} | ${shortSrc}`, 'DOM:Stall');
-                });
-            }
-
-            if (stallElapsed >= stallTimeoutMs) {
-                logger.warn(`[ScrollToLoad] 스톨 감지: ${remaining.length}개 미활성화 상태로 ${stallTimeoutMs / 1000}초 경과. 갈무리 진행.`, 'DOM:Scroll');
-                // 최종 스톨 목록 출력
-                remaining.forEach((img, i) => {
-                    const src = img.src || '(empty)';
-                    const shortSrc = src.length > 80 ? '...' + src.slice(-77) : src;
-                    logger.warn(`  [최종 스톨 ${i + 1}] src="${shortSrc}" | naturalWidth=${img.naturalWidth} | complete=${img.complete}`, 'DOM:Stall');
-                });
+        const containers = viewerCfg.imageContainer.split(',');
+        for (const sel of containers) {
+            const el = iframeDoc.querySelector(sel.trim());
+            if (el) {
+                container = el;
                 break;
             }
         }
-
-        lastCount = remaining.length;
-        await sleep(POLL_INTERVAL);
     }
+
+    // 폴백용 이미지 셀렉터 정의 (부모 컨테이너가 없거나 감지 실패 시를 대비)
+    let fallbackSelectors = '.view-padding div img, .viewer-main img, #v_content img, .img-tag';
+    if (viewerCfg.imageContainer) {
+        const itemSel = viewerCfg.imageItem || 'img';
+        fallbackSelectors = viewerCfg.imageContainer.split(',').map(c => `${c.trim()} ${itemSel}`).join(', ');
+    }
+
+    // ── [케이스 1: 부모 컨테이너가 존재하고 내부 자식 노드들이 확인되는 경우 (가상화 뷰어 직격)] ──
+    if (container && container.children && container.children.length > 0) {
+        const pageElements = Array.from(container.children);
+        logger.log(`🎯 [ScrollEngine] 컨테이너 내 직계 자식 노드 ${pageElements.length}개 발견. 둔갑 추적을 기동합니다.`, 'DOM:Scroll');
+
+        for (let idx = 0; idx < pageElements.length; idx++) {
+            const displayIdx = idx + 1;
+            
+            // 해당 순번의 노드를 부드럽게 화면 중앙에 고정 (Intersection Observer 트리거)
+            const initialEl = container.children[idx];
+            if (initialEl) {
+                initialEl.scrollIntoView({ behavior, block: 'center' });
+                if (isHidden) win.dispatchEvent(new Event('scroll'));
+            }
+
+            // 둔갑 및 이미지 실시간 완착 대기 루프 (최대 4초)
+            const SINGLE_PAGE_TIMEOUT = 4000;
+            const POLL_INTERVAL = 200;
+            let elapsed = 0;
+
+            while (elapsed < SINGLE_PAGE_TIMEOUT) {
+                // 매 주기마다 해당 인덱스의 최신 DOM 노드를 재조회 (div에서 img로 치환되는 동적 상황 대응)
+                const currentEl = container.children[idx];
+                if (!currentEl) break;
+
+                // 해당 자리가 진짜 img 태그로 바뀌었거나, 자식으로 img 요소를 채웠는지 실시간 판별
+                let targetImg = null;
+                if (currentEl.tagName === 'IMG') {
+                    targetImg = currentEl;
+                } else {
+                    targetImg = currentEl.querySelector('img');
+                }
+
+                // 둔갑 성공 확인 시, 해당 진짜 이미지의 바이너리 로드 완료(complete && naturalWidth > 0)까지 대기
+                if (targetImg) {
+                    const isLoaded = targetImg.complete && targetImg.naturalWidth > 0;
+                    if (isLoaded) {
+                        break;
+                    }
+                }
+
+                logger.log(`⏳ [Scroll] 페이지 [${displayIdx} / ${pageElements.length}] 이미지 둔갑 대기 중... (${elapsed}ms)`, 'DOM:Scroll');
+                await sleep(POLL_INTERVAL);
+                elapsed += POLL_INTERVAL;
+            }
+
+            if (elapsed >= SINGLE_PAGE_TIMEOUT) {
+                logger.warn(`⚠️ [Scroll] 페이지 [${displayIdx} / ${pageElements.length}] 둔갑 대기 시간 초과! (다음으로 전진)`, 'DOM:Stall');
+            } else {
+                logger.log(`✅ [Scroll] 페이지 [${displayIdx} / ${pageElements.length}] 이미지 완착 성공!`, 'DOM:Scroll');
+            }
+
+            await sleep(100); // 지연 로딩 방어용 완충 딜레이
+        }
+    } 
+    // ── [케이스 2: 부모 컨테이너가 없거나 자식이 없는 경우 (구형/일반 뷰어 안전 폴백)] ──
+    else {
+        logger.warn('⚠️ [ScrollEngine] 자식 둔갑 추적 대상 없음. 기존 이미지 탐색 폴백 모드를 가동합니다.', 'DOM:Scroll');
+        
+        const allImages = Array.from(iframeDoc.querySelectorAll(fallbackSelectors));
+        const excludeRule = viewerCfg.exclude || viewerCfg.remove;
+        const excludeSelectors = excludeRule 
+            ? (Array.isArray(excludeRule) ? excludeRule : [excludeRule]) 
+            : [];
+
+        const isDummySrc = (src) => {
+            if (!src || src.trim() === '') return true;
+            if (src.startsWith('data:image')) return true;
+            const lower = src.toLowerCase();
+            const dummyFilenames = ['blank.gif', 'loading.gif', 'loading-image.gif', 'pixel.gif', 'spacer.gif', 'transparent.gif', '1x1.gif', 'dot.gif'];
+            return dummyFilenames.some(p => lower.includes(p));
+        };
+
+        const validImages = allImages.filter(img => {
+            const src = img.src || img.getAttribute('data-src') || img.getAttribute('data-lazy') || img.getAttribute('data-original') || '';
+            if (isDummySrc(src)) return false;
+            if (excludeSelectors.some(sel => img.matches(sel) || img.closest(sel))) return false;
+            return true;
+        });
+
+        if (validImages.length === 0) {
+            logger.warn('⚠️ [ScrollEngine] 유효한 폴백 이미지를 찾지 못했습니다. 물리적 하향 스크롤을 감행합니다.', 'DOM:Scroll');
+            win.scrollTo({ top: iframeDoc.documentElement.scrollHeight, behavior });
+            if (isHidden) win.dispatchEvent(new Event('scroll'));
+            await sleep(1500);
+            return;
+        }
+
+        logger.log(`🎯 [ScrollEngine] 폴백 이미지 ${validImages.length}개 발견. 순차 로드 스캔 개시.`, 'DOM:Scroll');
+
+        for (let idx = 0; idx < validImages.length; idx++) {
+            const img = validImages[idx];
+            const displayIdx = idx + 1;
+
+            img.scrollIntoView({ behavior, block: 'center' });
+            if (isHidden) win.dispatchEvent(new Event('scroll'));
+
+            const SINGLE_IMAGE_TIMEOUT = 4000;
+            const POLL_INTERVAL = 200;
+            let elapsed = 0;
+
+            while (elapsed < SINGLE_IMAGE_TIMEOUT) {
+                if (img.complete && img.naturalWidth > 0) break;
+                logger.log(`⏳ [Scroll] 폴백 이미지 [${displayIdx} / ${validImages.length}] 로딩 대기 중... (${elapsed}ms)`, 'DOM:Scroll');
+                await sleep(POLL_INTERVAL);
+                elapsed += POLL_INTERVAL;
+            }
+            await sleep(100);
+        }
+    }
+
+    // 공통 마무리: 최하단으로 최종 스크롤 꽂아넣기
+    win.scrollTo({ top: iframeDoc.documentElement.scrollHeight, behavior });
+    if (isHidden) win.dispatchEvent(new Event('scroll'));
+    logger.log('🎉 [ScrollEngine] 모든 지연 이미지 수집 및 둔갑 대기 프로세스가 대성공으로 완료되었습니다!', 'DOM:Scroll');
+    await sleep(500);
 }
 
 // Pause execution until user resolves captcha
 function pauseForCaptcha(targetUrl) {
     return new Promise((resumeCallback) => {
-        // Create full-screen overlay
-        const overlay = document.createElement('div');
-        overlay.id = 'toki-captcha-overlay';
-        overlay.className = 'toki-captcha-overlay';
+        const logger = LogBox.instance;
         
-        overlay.innerHTML = `
-            <h1 class="toki-text-lg toki-captcha-title">⚠️ 캡차 감지</h1>
-            <p class="toki-text-base toki-captcha-desc">아래 프레임에서 캡차를 해결해주세요. (전용 프레임 모드)</p>
-            <div class="toki-captcha-frame" id="toki-captcha-frame-container"></div>
-            <button id="toki-resume-btn" class="toki-btn-action toki-btn-gradient-green toki-btn-resume">
-                해결 후 재개하기
-            </button>
-        `;
-        
-        document.body.appendChild(overlay);
-        
-        // 캡차 조작 전용 신규 프레임 띄우기 (다운로드용 프레임의 간섭 방지)
-        const captchaIframe = document.createElement('iframe');
-        captchaIframe.classList.add('toki-visible-block', 'toki-captcha-iframe');
-        captchaIframe.src = targetUrl;
-        
-        const container = document.getElementById('toki-captcha-frame-container');
-        if (container) {
-            container.appendChild(captchaIframe);
+        // 1. 대시보드 팝업 열기 및 캡차 배너 표시
+        if (logger) {
+            logger.openDashboard();
+            logger.log(`[Captcha] ⚠️ 캡차 감지! 현재 탭에서 캡차를 해결한 후 자동으로 재개됩니다.`, 'error');
         }
 
-        captchaIframe.onload = () => {
-            try {
-                const iframeDoc = captchaIframe.contentWindow.document;
-                const captchaField = iframeDoc.querySelector('fieldset#captcha, fieldset.captcha, .captcha_box');
-                if (captchaField) {
-                    captchaField.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                }
-                const captchaInput = iframeDoc.querySelector('#captcha_key, input.captcha_box');
-                if (captchaInput) {
-                    setTimeout(() => captchaInput.focus(), 300);
-                }
-            } catch (e) {
-                console.warn('[Captcha] Auto-scroll/focus failed (May be CORS):', e.message);
-            }
+        // 대시보드 팝업에 캡차 배너 주입
+        const showCaptchaBanner = () => {
+            if (!logger) return;
+            const doc = logger.popupWindow?.document;
+            if (!doc) return;
+            const existing = doc.getElementById('toki-captcha-banner');
+            if (existing) return;
+            const banner = doc.createElement('div');
+            banner.id = 'toki-captcha-banner';
+            banner.style.cssText = `
+                position: sticky; top: 0; z-index: 9999;
+                background: #c0392b; color: #fff;
+                padding: 12px 16px; font-size: 14px; font-weight: bold;
+                display: flex; justify-content: space-between; align-items: center;
+            `;
+            banner.innerHTML = `
+                <span>⚠️ 캡차 감지 — 원본 탭에서 캡차를 해결해 주세요</span>
+                <button id="toki-captcha-manual-resume" style="background:#fff;color:#c0392b;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:bold;">✅ 수동 재개</button>
+            `;
+            doc.body.prepend(banner);
+            doc.getElementById('toki-captcha-manual-resume').onclick = () => {
+                clearInterval(checkInterval);
+                banner.remove();
+                resumeCallback();
+            };
         };
-        
-        // Periodic check for captcha resolution (auto-resume)
+
+        setTimeout(showCaptchaBanner, 300);
+
+        // 2. 현재 탭 포커스 (사용자 안내)
+        window.focus();
+
+        // 3. 백그라운드 폴링 — 대상 페이지 document를 직접 감시
         const checkInterval = setInterval(() => {
             try {
-                const iframeDoc = captchaIframe.contentWindow.document;
-                
-                // Check if captcha fields still exist
-                const captchaFieldset = iframeDoc.querySelector('fieldset#captcha, fieldset.captcha');
-                const captchaImg = iframeDoc.querySelector('img.captcha_img, img[src*="kcaptcha_image.php"]');
-                const captchaForm = iframeDoc.querySelector('form[action*="captcha_check.php"]');
-                
-                const hcaptcha = iframeDoc.querySelector('iframe[src*="hcaptcha"]');
-                const recaptcha = iframeDoc.querySelector('.g-recaptcha');
-                const cloudflare = iframeDoc.querySelector('.cf-browser-verification');
-                
+                const captchaFieldset = document.querySelector('fieldset#captcha, fieldset.captcha');
+                const captchaImg = document.querySelector('img.captcha_img, img[src*="kcaptcha_image.php"]');
+                const captchaForm = document.querySelector('form[action*="captcha_check.php"]');
+                const hcaptcha = document.querySelector('iframe[src*="hcaptcha"]');
+                const recaptcha = document.querySelector('.g-recaptcha');
+                const cloudflare = document.querySelector('.cf-browser-verification');
                 const hasCaptcha = !!(captchaFieldset || captchaImg || captchaForm || hcaptcha || recaptcha || cloudflare);
-                
+
                 if (!hasCaptcha) {
-                    console.log('[Captcha] 자동 감지: 캡차 해결됨!');
                     clearInterval(checkInterval);
-                    overlay.remove();
+                    if (logger) {
+                        const doc = logger.popupWindow?.document;
+                        doc?.getElementById('toki-captcha-banner')?.remove();
+                        logger.log('[Captcha] ✅ 해결 감지! 수집을 재개합니다.', 'success');
+                    }
                     resumeCallback();
                 }
-            } catch (e) {
-                // CORS error or iframe changed - likely resolved
-                console.log('[Captcha] 자동 감지: 상위 프레임 권한 막힘 또는 리다이렉트 발생 (해결됨으로 추정)');
+            } catch(e) {
+                // 페이지 전환 등 — 해결된 것으로 간주
                 clearInterval(checkInterval);
-                overlay.remove();
+                if (logger) {
+                    const doc = logger.popupWindow?.document;
+                    doc?.getElementById('toki-captcha-banner')?.remove();
+                }
                 resumeCallback();
             }
-        }, 1000); // Check every 1 second
-        
-        // Resume button (manual override)
-        document.getElementById('toki-resume-btn').onclick = () => {
-            clearInterval(checkInterval);
-            overlay.remove();
-            resumeCallback();
-        };
+        }, 1000);
     });
 }
 
@@ -3212,27 +3859,88 @@ async function getImageDimensions(blob) {
  * @returns {Promise<Blob>}
  */
 async function fetchBlobWithXHR(url) {
-    return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-            method: 'GET',
-            url: url,
-            headers: {
-                "Referer": window.location.origin,
-                "User-Agent": navigator.userAgent
-            },
-            responseType: 'blob',
-            timeout: 30000,
-            onload: (res) => {
-                if (res.status >= 200 && res.status < 300) {
-                    resolve(res.response);
-                } else {
-                    reject(new Error(`HTTP ${res.status}: ${url}`));
-                }
-            },
-            onerror: (err) => reject(new Error(`Network Error: ${url}`)),
-            ontimeout: () => reject(new Error(`Timeout: ${url}`))
-        });
+    // 35초 절대 강제 타임아웃 프로미스 정의 (CORS/샌드박스 먹통 상황 방어용 극약 처방)
+    let timeoutTimer = null;
+    const forceTimeoutPromise = new Promise((_, reject) => {
+        timeoutTimer = setTimeout(() => {
+            reject(new Error(`절대 타임아웃 한계(35초) 초과로 다운로드를 강제 건너뛰었습니다.`));
+        }, 35000);
     });
+
+    const downloadPromise = (async () => {
+        // 1. GM_xmlhttpRequest API 유효성 검사 및 표준 fetch 1차 폴백 우회
+        if (typeof GM_xmlhttpRequest === 'undefined') {
+            console.warn('[TokiSync Utils] GM_xmlhttpRequest가 팝업 환경에서 유효하지 않습니다. 표준 fetch API로 즉시 대체합니다:', url);
+            try {
+                const resp = await fetch(url, {
+                    mode: 'cors',
+                    credentials: 'omit'
+                });
+                if (!resp.ok) throw new Error(`HTTP status ${resp.status}`);
+                return await resp.blob();
+            } catch (fetchErr) {
+                throw new Error(`Standard Fetch 실패 (CORS 또는 네트워크 장애): ${fetchErr.message} -> ${url}`);
+            }
+        }
+
+        return new Promise((resolve, reject) => {
+            try {
+                GM_xmlhttpRequest({
+                    method: 'GET',
+                    url: url,
+                    headers: {
+                        "Referer": window.location.origin,
+                        "User-Agent": navigator.userAgent
+                    },
+                    responseType: 'blob',
+                    timeout: 25000, // 25초 네트워크 타임아웃으로 조정
+                    onload: (res) => {
+                        if (res.status >= 200 && res.status < 300) {
+                            resolve(res.response);
+                        } else {
+                            reject(new Error(`HTTP ${res.status}: ${url}`));
+                        }
+                    },
+                    onerror: (err) => {
+                        console.warn('[TokiSync Utils] GM_xmlhttpRequest 오류 감지. fetch 폴백을 발동합니다:', url);
+                        fetch(url, { mode: 'cors', credentials: 'omit' })
+                            .then(r => {
+                                if (!r.ok) throw new Error(`HTTP status ${r.status}`);
+                                return r.blob();
+                            })
+                            .then(resolve)
+                            .catch(e => reject(new Error(`GM_xmlhttpRequest 에러 및 fetch 폴백 실패: ${e.message}`)));
+                    },
+                    ontimeout: () => {
+                        console.warn('[TokiSync Utils] GM_xmlhttpRequest 25초 타임아웃. fetch 폴백 시도:', url);
+                        fetch(url, { mode: 'cors', credentials: 'omit' })
+                            .then(r => {
+                                if (!r.ok) throw new Error(`HTTP status ${r.status}`);
+                                return r.blob();
+                            })
+                            .then(resolve)
+                            .catch(reject);
+                    }
+                });
+            } catch (e) {
+                console.error('[TokiSync Utils] GM_xmlhttpRequest 호출 중 예외 발생, 일반 fetch로 긴급 우회:', e);
+                fetch(url, { mode: 'cors', credentials: 'omit' })
+                    .then(r => {
+                        if (!r.ok) throw new Error(`HTTP status ${r.status}`);
+                        return r.blob();
+                    })
+                    .then(resolve)
+                    .catch(reject);
+            }
+        });
+    })();
+
+    try {
+        const result = await Promise.race([downloadPromise, forceTimeoutPromise]);
+        return result;
+    } finally {
+        if (timeoutTimer) clearTimeout(timeoutTimer);
+    }
 }
 
 
@@ -3246,7 +3954,7 @@ async function fetchBlobWithXHR(url) {
 /* harmony export */ });
 /* harmony import */ var _utils_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(924);
 /* harmony import */ var _ui_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(989);
-/* harmony import */ var _novel_decryptor_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(602);
+/* harmony import */ var _worker_controller_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(572);
 
 
 
@@ -3281,7 +3989,7 @@ async function extractEpisodeData(targetDoc, parser, siteInfo, isStaticDoc = fal
         // [전략 B] DOM 추출 실패 + API 복호화 설정이 있는 경우 폴백 시도
         if (!extractedData.content && viewerCfg.decryptApi && episodeUrl) {
             logger.log('[Extractor] DOM 추출 실패 - API 복호화 폴백 시도...', 'Extractor');
-            extractedData.content = await (0,_novel_decryptor_js__WEBPACK_IMPORTED_MODULE_2__/* .fetchNovelText */ .UT)(episodeUrl, viewerCfg.decryptApi);
+            extractedData.content = await (0,_worker_controller_js__WEBPACK_IMPORTED_MODULE_2__/* .fetchNovelText */ .UT)(episodeUrl, viewerCfg.decryptApi);
             if (extractedData.content) {
                 logger.log('✅ API 복호화 폴백 성공', 'Extractor');
             }
@@ -3340,6 +4048,100 @@ async function extractEpisodeData(targetDoc, parser, siteInfo, isStaticDoc = fal
     }
 
     return extractedData;
+}
+
+
+/***/ }),
+
+/***/ 941:
+/***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
+
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   Ac: function() { return /* binding */ sendToParent; },
+/* harmony export */   Q_: function() { return /* binding */ registerIpcListener; },
+/* harmony export */   eu: function() { return /* binding */ sendToWorker; }
+/* harmony export */ });
+/**
+ * tokiSync - Unified IPC Broker
+ * Handles clean postMessage communication between Parent (Controller) and Child (Worker).
+ */
+
+const MSG_PREFIX = 'TOKI_';
+
+/**
+ * Send message from Parent to Worker popup
+ * @param {Window} workerRef Reference to the worker popup window
+ * @param {string} type Message type (without prefix, e.g. 'START_EXTRACTION')
+ * @param {Object} payload Metadata and payload
+ */
+function sendToWorker(workerRef, type, payload = {}) {
+    if (!workerRef || workerRef.closed) {
+        console.warn(`[IPC:Broker] Cannot send to worker: Popup window is closed or invalid.`);
+        return false;
+    }
+    const message = {
+        type: type.startsWith(MSG_PREFIX) ? type : `${MSG_PREFIX}${type}`,
+        payload: payload,
+        timestamp: Date.now()
+    };
+    try {
+        workerRef.postMessage(message, '*');
+        return true;
+    } catch (err) {
+        console.error(`[IPC:Broker] postMessage to worker failed:`, err);
+        return false;
+    }
+}
+
+/**
+ * Send message from Child Worker to Parent window
+ * @param {string} type Message type (without prefix, e.g. 'WORKER_READY')
+ * @param {Object} payload Metadata and payload
+ */
+function sendToParent(type, payload = {}) {
+    if (!window.opener || window.opener.closed) {
+        console.warn(`[IPC:Broker] Cannot send to parent: Opener window is closed or unavailable.`);
+        return false;
+    }
+    const message = {
+        type: type.startsWith(MSG_PREFIX) ? type : `${MSG_PREFIX}${type}`,
+        payload: payload,
+        timestamp: Date.now()
+    };
+    try {
+        window.opener.postMessage(message, '*');
+        return true;
+    } catch (err) {
+        console.error(`[IPC:Broker] postMessage to parent failed:`, err);
+        return false;
+    }
+}
+
+/**
+ * Register postMessage Listener with validation
+ * @param {Function} callback Handler function (eventData) => {}
+ * @returns {Function} Cleanup function to remove event listener
+ */
+function registerIpcListener(callback) {
+    const handler = (event) => {
+        if (!event.data || typeof event.data !== 'object') return;
+        
+        const { type, payload, timestamp } = event.data;
+        if (!type || !type.startsWith(MSG_PREFIX)) return;
+
+        // Strip prefix for uniform routing inside callback
+        const normalizedType = type.substring(MSG_PREFIX.length);
+        
+        callback({
+            type: normalizedType,
+            payload: payload || {},
+            timestamp: timestamp,
+            sourceEvent: event
+        });
+    };
+
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
 }
 
 
@@ -3405,10 +4207,8 @@ __webpack_require__.d(__webpack_exports__, {
   hV: function() { return /* binding */ markDownloadedItems; }
 });
 
-// EXTERNAL MODULE: ./src/core/anti_sleep.js
-var anti_sleep = __webpack_require__(209);
-// EXTERNAL MODULE: ./src/core/config.js
-var core_config = __webpack_require__(899);
+// UNUSED EXPORTS: FormRuleEditor
+
 // EXTERNAL MODULE: ./src/core/parsers/ParserFactory.js
 var ParserFactory = __webpack_require__(969);
 // EXTERNAL MODULE: ./src/core/parsers/RuleManager.js
@@ -3418,7 +4218,7 @@ var GenericParser = __webpack_require__(443);
 // EXTERNAL MODULE: ./src/core/extractor.js
 var extractor = __webpack_require__(929);
 ;// ./src/core/ui.css
-var ui_namespaceObject = "@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');\n\n:root {\n    --toki-primary: #2563eb;\n    --toki-primary-dark: #1d4ed8;\n    --toki-accent: #facc15;\n    --toki-bg: rgba(248, 250, 252, 0.9);\n    --toki-text: #1e293b;\n    --toki-text-muted: #64748b;\n    --toki-border: rgba(255, 255, 255, 0.6);\n    --toki-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);\n    --toki-font: 'Inter', -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif;\n}\n\n/* LogBox Styles */\n#toki-logbox {\n    position: fixed;\n    bottom: 100px;\n    right: 30px;\n    width: 480px;\n    height: 350px;\n    background: var(--toki-bg);\n    color: var(--toki-text);\n    font-family: 'Cascadia Code', Consolas, monospace;\n    font-size: 12px;\n    border: 1px solid var(--toki-border);\n    border-radius: 16px;\n    z-index: 9999;\n    display: none;\n    flex-direction: column;\n    box-shadow: var(--toki-shadow);\n    backdrop-filter: blur(20px);\n    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);\n}\n\n#toki-logbox-header {\n    padding: 12px 16px;\n    background: rgba(255, 255, 255, 0.4);\n    border-bottom: 1px solid rgba(0, 0, 0, 0.05);\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    border-top-left-radius: 16px;\n    border-top-right-radius: 16px;\n    cursor: move;\n}\n\n#toki-logbox-title {\n    font-weight: 700;\n    font-size: 13px;\n    letter-spacing: -0.01em;\n}\n\n#toki-logbox-controls span {\n    cursor: pointer;\n    margin-left: 12px;\n    color: var(--toki-text-muted);\n    font-size: 14px;\n    transition: transform 0.2s, color 0.2s;\n    display: inline-block;\n}\n\n#toki-logbox-controls span:hover {\n    color: var(--toki-primary);\n    transform: scale(1.15);\n}\n\n#toki-logbox-content {\n    flex: 1;\n    overflow-y: auto;\n    padding: 12px;\n    margin: 0;\n    list-style: none;\n}\n\n#toki-logbox-content li {\n    margin-bottom: 4px;\n    word-break: break-all;\n    padding: 4px 8px;\n    border-radius: 6px;\n    line-height: 1.4;\n}\n\n#toki-logbox-content li.critical {\n    color: #be123c;\n    font-weight: 700;\n    background: rgba(225, 29, 72, 0.1);\n    border-left: 3px solid #e11d48;\n}\n\n#toki-logbox-content li.error { color: #e11d48; }\n#toki-logbox-content li.warn { color: #d97706; }\n#toki-logbox-content li.success { color: #059669; font-weight: 600; }\n\n/* Modal Styles */\n.toki-modal-overlay {\n    position: fixed;\n    top: 0;\n    left: 0;\n    width: 100%;\n    height: 100%;\n    background: rgba(15, 23, 42, 0.2);\n    backdrop-filter: blur(12px);\n    z-index: 9999;\n    display: flex;\n    justify-content: center;\n    align-items: center;\n    opacity: 0;\n    animation: tokiFadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;\n}\n\n.toki-modal {\n    width: 520px;\n    max-width: 95%;\n    background: var(--toki-bg);\n    border: 1px solid var(--toki-border);\n    border-radius: 28px;\n    box-shadow: var(--toki-shadow);\n    overflow: hidden;\n    display: flex;\n    flex-direction: column;\n    transform: translateY(30px) scale(0.95);\n    animation: tokiSlideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;\n    backdrop-filter: blur(30px);\n    color: var(--toki-text);\n    font-family: var(--toki-font);\n}\n\n.toki-modal-header {\n    padding: 24px 32px;\n    background: rgba(255, 255, 255, 0.4);\n    border-bottom: 1px solid rgba(0, 0, 0, 0.05);\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n}\n\n.toki-modal-title {\n    font-size: 24px;\n    font-weight: 800;\n    color: #0f172a;\n    display: flex;\n    align-items: center;\n    gap: 12px;\n    letter-spacing: -0.03em;\n}\n\n.toki-modal-close {\n    background: rgba(0, 0, 0, 0.05);\n    border: none;\n    color: var(--toki-text-muted);\n    width: 36px;\n    height: 36px;\n    border-radius: 50%;\n    cursor: pointer;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);\n    font-size: 20px;\n}\n\n.toki-modal-close:hover {\n    background: #ef4444;\n    color: #fff;\n    transform: rotate(90deg);\n}\n\n.toki-btn-ghost {\n    background: rgba(0, 0, 0, 0.05);\n    border: none;\n    color: var(--toki-text-muted);\n    padding: 6px 14px;\n    border-radius: 12px;\n    cursor: pointer;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    transition: all 0.2s;\n    font-size: 13px;\n    font-weight: 600;\n    gap: 6px;\n}\n\n.toki-btn-ghost:hover {\n    background: rgba(0, 0, 0, 0.08);\n    color: var(--toki-text);\n}\n\n/* Tabs */\n.toki-tabs {\n    display: flex;\n    background: rgba(255, 255, 255, 0.3);\n    padding: 8px;\n    gap: 6px;\n    border-bottom: 1px solid rgba(0, 0, 0, 0.05);\n}\n\n.toki-tab-btn {\n    flex: 1;\n    padding: 12px;\n    background: none;\n    border: none;\n    color: var(--toki-text-muted);\n    font-size: 14px;\n    font-weight: 700;\n    cursor: pointer;\n    transition: all 0.3s;\n    border-radius: 14px;\n    display: flex;\n    justify-content: center;\n    align-items: center;\n    gap: 8px;\n}\n\n.toki-tab-btn:hover {\n    color: var(--toki-text);\n    background: rgba(255, 255, 255, 0.6);\n}\n\n.toki-tab-btn.active {\n    background: #fff;\n    color: var(--toki-primary);\n    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);\n}\n\n.toki-tab-content {\n    display: none;\n    padding: 32px;\n    animation: tokiTabFadeIn 0.4s ease-out;\n}\n\n.toki-tab-content.active { display: block; }\n\n/* Components */\n.toki-section-title {\n    font-size: 11px;\n    font-weight: 800;\n    color: var(--toki-primary);\n    text-transform: uppercase;\n    letter-spacing: 0.1em;\n    margin: 24px 0 12px 4px;\n    opacity: 0.8;\n}\n\n.toki-control-group {\n    margin-bottom: 20px;\n    position: relative;\n}\n\n.toki-label {\n    display: block;\n    font-size: 13px;\n    font-weight: 700;\n    color: var(--toki-text-muted);\n    margin-bottom: 8px;\n    margin-left: 4px;\n}\n\n.toki-input, .toki-select, .toki-textarea {\n    width: 100%;\n    padding: 14px 18px;\n    background: rgba(255, 255, 255, 0.8);\n    border: 1px solid rgba(0, 0, 0, 0.08);\n    border-radius: 16px;\n    color: var(--toki-text) !important;\n    font-size: 15px;\n    font-weight: 600;\n    appearance: none;\n    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);\n    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);\n}\n\n.toki-input:hover, .toki-select:hover, .toki-textarea:hover {\n    border-color: var(--toki-primary);\n    background-color: #fff;\n    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.08);\n}\n\n.toki-input:focus, .toki-select:focus, .toki-textarea:focus {\n    outline: none;\n    border-color: var(--toki-primary);\n    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);\n    background-color: #fff;\n}\n\n.toki-textarea {\n    resize: vertical;\n    line-height: 1.5;\n}\n\n.toki-select {\n    cursor: pointer;\n    background-image: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2364748b'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E\");\n    background-repeat: no-repeat;\n    background-position: right 16px center;\n    background-size: 16px;\n}\n\n.toki-btn-action {\n    width: 100%;\n    height: 56px;\n    background: var(--toki-primary);\n    color: #fff !important;\n    border: none;\n    border-radius: 18px;\n    font-size: 16px;\n    font-weight: 700;\n    cursor: pointer;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    gap: 12px;\n    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);\n    box-shadow: 0 8px 15px rgba(37, 99, 235, 0.2);\n}\n\n.toki-btn-action:hover {\n    transform: translateY(-3px);\n    box-shadow: 0 12px 20px rgba(37, 99, 235, 0.35);\n    filter: brightness(1.05);\n}\n\n.toki-btn-secondary {\n    background: rgba(255, 255, 255, 0.8);\n    color: #475569 !important;\n    border: 1px solid rgba(0, 0, 0, 0.05);\n    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);\n}\n\n.toki-btn-secondary:hover {\n    background: #fff;\n    color: var(--toki-text) !important;\n}\n\n/* Status & Indicators */\n.toki-status-dot {\n    width: 8px;\n    height: 8px;\n    border-radius: 50%;\n    display: inline-block;\n    margin-right: 6px;\n}\n\n.toki-status-online {\n    background: #10b981;\n    box-shadow: 0 0 8px #10b981;\n}\n\n.toki-downloaded {\n    background: rgba(16, 185, 129, 0.08) !important;\n    border-left: 4px solid #10b981 !important;\n    opacity: 0.75;\n    transition: all 0.3s ease;\n}\n\n.toki-downloaded:hover {\n    opacity: 1;\n    background: rgba(16, 185, 129, 0.15) !important;\n}\n\n/* FAB */\n.toki-fab {\n    position: fixed;\n    bottom: 30px;\n    right: 30px;\n    width: 64px;\n    height: 64px;\n    background: linear-gradient(135deg, #2563eb, #0ea5e9);\n    border-radius: 20px;\n    box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.4);\n    display: flex;\n    justify-content: center;\n    align-items: center;\n    cursor: pointer;\n    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);\n    z-index: 9998;\n}\n\n.toki-fab:hover {\n    transform: translateY(-5px) rotate(5deg);\n    box-shadow: 0 20px 25px -5px rgba(37, 99, 235, 0.5);\n}\n\n.toki-fab svg {\n    width: 28px;\n    height: 28px;\n    fill: #fff;\n}\n\n/* Tree Editor */\n.toki-tree-modal {\n    width: 1100px !important;\n    height: 85vh !important;\n}\n\n.toki-tree-container {\n    display: flex;\n    flex: 1;\n    overflow: hidden;\n    gap: 24px;\n    padding: 24px;\n    background: rgba(255, 255, 255, 0.2);\n}\n\n.toki-tree-view {\n    flex: 1.5;\n    overflow-y: auto;\n    background: rgba(255, 255, 255, 0.5);\n    border-radius: 16px;\n    padding: 20px;\n    border: 1px solid rgba(0, 0, 0, 0.05);\n    font-family: monospace;\n    font-size: 13px;\n}\n\n.toki-tree-node {\n    margin-left: 20px;\n    position: relative;\n    border-left: 1px dashed rgba(0, 0, 0, 0.1);\n    padding-left: 12px;\n}\n\n.toki-tree-item {\n    display: flex;\n    align-items: center;\n    gap: 8px;\n    padding: 6px 10px;\n    border-radius: 8px;\n    transition: all 0.2s;\n}\n\n.toki-tree-item:hover {\n    background: rgba(37, 99, 235, 0.05);\n}\n\n.toki-tree-key {\n    color: #2563eb;\n    font-weight: 700;\n    cursor: pointer;\n    min-width: 90px;\n}\n\n.toki-tree-val {\n    color: #1e293b;\n    background: transparent;\n    border: none;\n    border-bottom: 1px solid transparent;\n    width: 100%;\n}\n\n.toki-tree-val:focus {\n    border-bottom-color: #2563eb;\n    outline: none;\n    background: rgba(37, 99, 235, 0.05);\n}\n\n.toki-tree-toggle {\n    cursor: pointer;\n    user-select: none;\n    width: 18px;\n    text-align: center;\n    color: #94a3b8;\n    font-weight: 700;\n}\n\n.toki-tree-toggle:hover {\n    color: var(--toki-primary);\n}\n\n.toki-tree-right-panel {\n    flex: 1;\n    display: flex;\n    flex-direction: column;\n    gap: 20px;\n    background: rgba(255, 255, 255, 0.4);\n    padding: 20px;\n    border-radius: 16px;\n}\n\n.toki-tree-json-preview {\n    flex: 1;\n    background: #0f172a;\n    color: #e2e8f0;\n    padding: 20px;\n    border-radius: 16px;\n    font-size: 12px;\n    font-family: monospace;\n    border: 1px solid rgba(255, 255, 255, 0.1);\n    resize: none;\n}\n\n.toki-btn-rule {\n    background: transparent;\n    border: 1px solid #ddd;\n    padding: 6px 12px;\n    border-radius: 8px;\n    font-size: 12px;\n    cursor: pointer;\n    transition: all 0.2s;\n}\n\n.toki-btn-rule:hover {\n    background: #f8fafc;\n    border-color: #94a3b8;\n}\n\n/* Animations */\n@keyframes tokiFadeIn {\n    from { opacity: 0; }\n    to { opacity: 1; }\n}\n\n@keyframes tokiTabFadeIn {\n    from { opacity: 0; transform: translateX(10px); }\n    to { opacity: 1; transform: translateX(0); }\n}\n\n@keyframes tokiSlideUp {\n    from { opacity: 0; transform: translateY(30px) scale(0.95); }\n    to { opacity: 1; transform: translateY(0) scale(1); }\n}\n\n/* --- Structural Layouts for Inline Replacement --- */\n\n/* Horizontal Button Row (e.g., Download buttons) */\n.toki-btn-group-row {\n    display: flex;\n    gap: 12px;\n    align-items: center;\n}\n.toki-btn-group-row .toki-btn-action {\n    height: 52px;\n    flex: 1;\n}\n.toki-btn-group-row .toki-flex-1-4 {\n    flex: 1.4;\n}\n\n/* Vertical Button Stack (e.g., Tool buttons) */\n.toki-btn-group-stack {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n}\n.toki-btn-group-stack .toki-btn-action {\n    height: 44px;\n    justify-content: flex-start;\n    padding-left: 20px;\n}\n\n/* 2-Column Form Grid */\n.toki-form-grid {\n    display: grid;\n    grid-template-columns: 1fr 1fr;\n    gap: 16px;\n}\n\n/* Utility Shortcuts */\n.toki-flex-between { display: flex; justify-content: space-between; align-items: center; }\n.toki-divider { border: 0; border-top: 1px solid rgba(0,0,0,0.05); margin: 24px 0; }\n.toki-mt-0 { margin-top: 0 !important; }\n.toki-mt-8 { margin-top: 8px !important; }\n.toki-mt-32 { margin-top: 32px !important; }\n.toki-ml-4 { margin-left: 4px !important; }\n.toki-mb-5 { margin-bottom: 5px !important; }\n.toki-mb-10 { margin-bottom: 10px !important; }\n.toki-mb-24 { margin-bottom: 24px !important; }\n.toki-flex-1 { flex: 1; }\n.toki-flex-row { display: flex; gap: 4px; align-items: center; }\n.toki-flex-row-8 { display: flex; gap: 8px; align-items: center; }\n.toki-flex-row-10 { display: flex; gap: 10px; align-items: center; }\n\n/* Text Utilities */\n.toki-text-xs { font-size: 11px; color: #94a3b8; }\n.toki-text-sm { font-size: 12px; }\n.toki-text-base { font-size: 14px; }\n.toki-text-lg { font-size: 20px; font-weight: 700; }\n.toki-text-success { color: #4ade80 !important; }\n.toki-text-danger { color: #ff5555 !important; }\n.toki-text-primary { color: var(--toki-primary) !important; }\n.toki-text-center { text-align: center; }\n.toki-line-16 { line-height: 1.6; }\n\n/* Specialized Components */\n.toki-modal-main { padding: 32px; width: 520px; max-height: 85vh; overflow-y: auto; }\n.toki-btn-gradient-green { \n    background: linear-gradient(135deg, #10b981, #059669) !important; \n    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2) !important;\n}\n.toki-btn-indigo { background: #6366f1 !important; }\n.toki-btn-lavender { background: #6a5acd !important; font-weight: bold !important; }\n.toki-btn-slate { background: rgba(0,0,0,0.02) !important; border-style: dashed !important; border-radius: 20px !important; }\n.toki-hidden { display: none !important; }\n\n/* Helper Boxes */\n.toki-helper-box-blue {\n    margin: -10px 0 20px 0; padding: 14px; \n    background: rgba(37, 99, 235, 0.05); border: 1px solid rgba(37, 99, 235, 0.1); \n    border-radius: 18px;\n}\n\n/* Captcha Overlay */\n.toki-captcha-overlay {\n    position: fixed; top: 0; left: 0; width: 100%; height: 100%;\n    background: rgba(0,0,0,0.8); z-index: 10001;\n    display: flex; flex-direction: column; align-items: center; justify-content: center;\n    color: white; font-family: var(--toki-font);\n}\n.toki-captcha-frame {\n    width: 80%; height: 60%; background: white; \n    border-radius: 20px; overflow: hidden; \n    margin-bottom: 20px; box-shadow: 0 20px 50px rgba(0,0,0,0.5);\n}\n\n/* Component: Helper Description Text */\n.toki-helper-desc { line-height: 1.5; font-weight: 500; }\n\n/* Component: Small Button (e.g., Test Native) */\n.toki-btn-sm { height: 36px !important; font-size: 12px !important; border-radius: 12px !important; }\n\n/* Component: Sync Button (height 48px) */\n.toki-btn-sync { height: 48px !important; }\n\n/* Component: Modal Header without border */\n.toki-modal-header-borderless { border: none !important; }\n\n/* Component: Code Textarea */\n.toki-textarea-code { min-height: 120px; font-family: monospace; }\n\n/* Visibility Toggles */\n.toki-visible-flex { display: flex !important; }\n.toki-visible-block { display: block !important; }\n.toki-hidden { display: none !important; }\n\n/* Status Badges & Indicators */\n.toki-badge {\n    margin-left: 5px;\n    font-size: 12px;\n    vertical-align: middle;\n}\n\n.toki-downloaded {\n    opacity: 0.6;\n    background-color: rgba(74, 222, 128, 0.05) !important;\n    transition: opacity 0.3s ease;\n}\n.toki-downloaded:hover {\n    opacity: 1;\n}\n\n.toki-tree-modal {\n    z-index: 10002 !important;\n}\n\n/* Iframe Elements */\n.toki-downloader-iframe {\n    width: 100%;\n    height: 600px;\n    opacity: 0.1;\n    pointer-events: none;\n    border: none;\n    margin-top: 40px;\n}\n\n.toki-captcha-iframe {\n    width: 100%;\n    height: 100%;\n    border: none;\n}\n\n/* Info Card & History Styles */\n.toki-info-card {\n    background: rgba(255, 255, 255, 0.4);\n    border: 1px solid rgba(0, 0, 0, 0.05);\n    border-radius: 12px;\n    padding: 12px 16px;\n    margin-bottom: 20px;\n}\n\n.toki-info-row {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    padding: 6px 0;\n}\n\n.toki-info-row:not(:last-child) {\n    border-bottom: 1px dashed rgba(0, 0, 0, 0.05);\n}\n\n.toki-info-label {\n    font-size: 13px;\n    color: var(--toki-text-muted);\n    font-weight: 500;\n}\n\n.toki-info-val {\n    font-size: 13px;\n    color: var(--toki-text);\n    font-weight: 700;\n    display: flex;\n    align-items: center;\n    gap: 6px;\n}\n\n\n";
+var ui_namespaceObject = "@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');\n\n:root {\n    --toki-primary: #2563eb;\n    --toki-primary-dark: #1d4ed8;\n    --toki-accent: #facc15;\n    --toki-bg: rgba(248, 250, 252, 0.9);\n    --toki-text: #1e293b;\n    --toki-text-muted: #64748b;\n    --toki-border: rgba(255, 255, 255, 0.6);\n    --toki-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);\n    --toki-font: 'Inter', -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif;\n}\n\n/* LogBox Styles */\n#toki-logbox {\n    position: fixed;\n    bottom: 100px;\n    right: 30px;\n    width: 480px;\n    height: auto;\n    min-height: 250px;\n    max-height: 500px;\n    background: var(--toki-bg);\n    color: var(--toki-text);\n    font-family: 'Cascadia Code', Consolas, monospace;\n    font-size: 12px;\n    border: 1px solid var(--toki-border);\n    border-radius: 16px;\n    z-index: 9999;\n    display: none;\n    flex-direction: column;\n    box-shadow: var(--toki-shadow);\n    backdrop-filter: blur(20px);\n    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);\n}\n\n#toki-logbox-header {\n    padding: 12px 16px;\n    background: rgba(255, 255, 255, 0.4);\n    border-bottom: 1px solid rgba(0, 0, 0, 0.05);\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    border-top-left-radius: 16px;\n    border-top-right-radius: 16px;\n    cursor: move;\n}\n\n#toki-logbox-title {\n    font-weight: 700;\n    font-size: 13px;\n    letter-spacing: -0.01em;\n}\n\n#toki-logbox-controls span {\n    cursor: pointer;\n    margin-left: 12px;\n    color: var(--toki-text-muted);\n    font-size: 14px;\n    transition: transform 0.2s, color 0.2s;\n    display: inline-block;\n}\n\n#toki-logbox-controls span:hover {\n    color: var(--toki-primary);\n    transform: scale(1.15);\n}\n\n#toki-logbox-content {\n    flex: 1;\n    overflow-y: auto;\n    padding: 12px;\n    margin: 0;\n    list-style: none;\n}\n\n#toki-logbox-content li {\n    margin-bottom: 4px;\n    word-break: break-all;\n    padding: 4px 8px;\n    border-radius: 6px;\n    line-height: 1.4;\n    color: #f1f5f9; /* 밝은 회백색 지정으로 가독성 극대화 */\n}\n\n#toki-logbox-content li.critical {\n    color: #be123c;\n    font-weight: 700;\n    background: rgba(225, 29, 72, 0.1);\n    border-left: 3px solid #e11d48;\n}\n\n#toki-logbox-content li.error { color: #e11d48; }\n#toki-logbox-content li.warn { color: #d97706; }\n#toki-logbox-content li.success { color: #059669; font-weight: 600; }\n#toki-logbox-content li.info { color: #38bdf8; font-weight: 500; }\n\n/* Modal Styles */\n.toki-modal-overlay {\n    position: fixed;\n    top: 0;\n    left: 0;\n    width: 100%;\n    height: 100%;\n    background: rgba(15, 23, 42, 0.2);\n    backdrop-filter: blur(12px);\n    z-index: 9999;\n    display: flex;\n    justify-content: center;\n    align-items: center;\n    opacity: 0;\n    animation: tokiFadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;\n}\n\n.toki-modal {\n    width: 520px;\n    max-width: 95%;\n    background: var(--toki-bg);\n    border: 1px solid var(--toki-border);\n    border-radius: 28px;\n    box-shadow: var(--toki-shadow);\n    overflow: hidden;\n    display: flex;\n    flex-direction: column;\n    transform: translateY(30px) scale(0.95);\n    animation: tokiSlideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;\n    backdrop-filter: blur(30px);\n    color: var(--toki-text);\n    font-family: var(--toki-font);\n}\n\n.toki-modal-header {\n    padding: 24px 32px;\n    background: rgba(255, 255, 255, 0.4);\n    border-bottom: 1px solid rgba(0, 0, 0, 0.05);\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n}\n\n.toki-modal-title {\n    font-size: 24px;\n    font-weight: 800;\n    color: #0f172a;\n    display: flex;\n    align-items: center;\n    gap: 12px;\n    letter-spacing: -0.03em;\n}\n\n.toki-modal-close {\n    background: rgba(0, 0, 0, 0.05);\n    border: none;\n    color: var(--toki-text-muted);\n    width: 36px;\n    height: 36px;\n    border-radius: 50%;\n    cursor: pointer;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);\n    font-size: 20px;\n}\n\n.toki-modal-close:hover {\n    background: #ef4444;\n    color: #fff;\n    transform: rotate(90deg);\n}\n\n.toki-btn-ghost {\n    background: rgba(0, 0, 0, 0.05);\n    border: none;\n    color: var(--toki-text-muted);\n    padding: 6px 14px;\n    border-radius: 12px;\n    cursor: pointer;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    transition: all 0.2s;\n    font-size: 13px;\n    font-weight: 600;\n    gap: 6px;\n}\n\n.toki-btn-ghost:hover {\n    background: rgba(0, 0, 0, 0.08);\n    color: var(--toki-text);\n}\n\n/* Tabs */\n.toki-tabs {\n    display: flex;\n    background: rgba(255, 255, 255, 0.3);\n    padding: 8px;\n    gap: 6px;\n    border-bottom: 1px solid rgba(0, 0, 0, 0.05);\n}\n\n.toki-tab-btn {\n    flex: 1;\n    padding: 12px;\n    background: none;\n    border: none;\n    color: var(--toki-text-muted);\n    font-size: 14px;\n    font-weight: 700;\n    cursor: pointer;\n    transition: all 0.3s;\n    border-radius: 14px;\n    display: flex;\n    justify-content: center;\n    align-items: center;\n    gap: 8px;\n}\n\n.toki-tab-btn:hover {\n    color: var(--toki-text);\n    background: rgba(255, 255, 255, 0.6);\n}\n\n.toki-tab-btn.active {\n    background: #fff;\n    color: var(--toki-primary);\n    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);\n}\n\n.toki-tab-content {\n    display: none;\n    padding: 32px;\n    animation: tokiTabFadeIn 0.4s ease-out;\n}\n\n.toki-tab-content.active { display: block; }\n\n/* Components */\n.toki-section-title {\n    font-size: 11px;\n    font-weight: 800;\n    color: var(--toki-primary);\n    text-transform: uppercase;\n    letter-spacing: 0.1em;\n    margin: 24px 0 12px 4px;\n    opacity: 0.8;\n}\n\n.toki-control-group {\n    margin-bottom: 20px;\n    position: relative;\n}\n\n.toki-label {\n    display: block;\n    font-size: 13px;\n    font-weight: 700;\n    color: var(--toki-text-muted);\n    margin-bottom: 8px;\n    margin-left: 4px;\n}\n\n.toki-input, .toki-select, .toki-textarea {\n    width: 100%;\n    padding: 14px 18px;\n    background: rgba(255, 255, 255, 0.8);\n    border: 1px solid rgba(0, 0, 0, 0.08);\n    border-radius: 16px;\n    color: var(--toki-text) !important;\n    font-size: 15px;\n    font-weight: 600;\n    appearance: none;\n    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);\n    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);\n}\n\n.toki-input:hover, .toki-select:hover, .toki-textarea:hover {\n    border-color: var(--toki-primary);\n    background-color: #fff;\n    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.08);\n}\n\n.toki-input:focus, .toki-select:focus, .toki-textarea:focus {\n    outline: none;\n    border-color: var(--toki-primary);\n    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);\n    background-color: #fff;\n}\n\n.toki-textarea {\n    resize: vertical;\n    line-height: 1.5;\n}\n\n.toki-select {\n    cursor: pointer;\n    background-image: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2364748b'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E\");\n    background-repeat: no-repeat;\n    background-position: right 16px center;\n    background-size: 16px;\n}\n\n.toki-btn-action {\n    width: 100%;\n    height: 56px;\n    background: var(--toki-primary);\n    color: #fff !important;\n    border: none;\n    border-radius: 18px;\n    font-size: 16px;\n    font-weight: 700;\n    cursor: pointer;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    gap: 12px;\n    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);\n    box-shadow: 0 8px 15px rgba(37, 99, 235, 0.2);\n}\n\n.toki-btn-action:hover {\n    transform: translateY(-3px);\n    box-shadow: 0 12px 20px rgba(37, 99, 235, 0.35);\n    filter: brightness(1.05);\n}\n\n.toki-btn-secondary {\n    background: rgba(255, 255, 255, 0.8);\n    color: #475569 !important;\n    border: 1px solid rgba(0, 0, 0, 0.05);\n    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);\n}\n\n.toki-btn-secondary:hover {\n    background: #fff;\n    color: var(--toki-text) !important;\n}\n\n/* Status & Indicators */\n.toki-status-dot {\n    width: 8px;\n    height: 8px;\n    border-radius: 50%;\n    display: inline-block;\n    margin-right: 6px;\n}\n\n.toki-status-online {\n    background: #10b981;\n    box-shadow: 0 0 8px #10b981;\n}\n\n.toki-downloaded {\n    background: rgba(16, 185, 129, 0.08) !important;\n    border-left: 4px solid #10b981 !important;\n    opacity: 0.75;\n    transition: all 0.3s ease;\n}\n\n.toki-downloaded:hover {\n    opacity: 1;\n    background: rgba(16, 185, 129, 0.15) !important;\n}\n\n/* FAB */\n.toki-fab {\n    position: fixed;\n    bottom: 30px;\n    right: 30px;\n    width: 64px;\n    height: 64px;\n    background: linear-gradient(135deg, #2563eb, #0ea5e9);\n    border-radius: 20px;\n    box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.4);\n    display: flex;\n    justify-content: center;\n    align-items: center;\n    cursor: pointer;\n    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);\n    z-index: 9998;\n}\n\n.toki-fab:hover {\n    transform: translateY(-5px) rotate(5deg);\n    box-shadow: 0 20px 25px -5px rgba(37, 99, 235, 0.5);\n}\n\n.toki-fab svg {\n    width: 28px;\n    height: 28px;\n    fill: #fff;\n}\n\n/* Tree Editor */\n.toki-tree-modal {\n    width: 1100px !important;\n    height: 85vh !important;\n}\n\n.toki-tree-container {\n    display: flex;\n    flex: 1;\n    overflow: hidden;\n    gap: 24px;\n    padding: 24px;\n    background: rgba(255, 255, 255, 0.2);\n}\n\n.toki-tree-view {\n    flex: 1.5;\n    overflow-y: auto;\n    background: rgba(255, 255, 255, 0.5);\n    border-radius: 16px;\n    padding: 20px;\n    border: 1px solid rgba(0, 0, 0, 0.05);\n    font-family: monospace;\n    font-size: 13px;\n}\n\n.toki-tree-node {\n    margin-left: 20px;\n    position: relative;\n    border-left: 1px dashed rgba(0, 0, 0, 0.1);\n    padding-left: 12px;\n}\n\n.toki-tree-item {\n    display: flex;\n    align-items: center;\n    gap: 8px;\n    padding: 6px 10px;\n    border-radius: 8px;\n    transition: all 0.2s;\n}\n\n.toki-tree-item:hover {\n    background: rgba(37, 99, 235, 0.05);\n}\n\n.toki-tree-key {\n    color: #2563eb;\n    font-weight: 700;\n    cursor: pointer;\n    min-width: 90px;\n}\n\n.toki-tree-val {\n    color: #1e293b;\n    background: transparent;\n    border: none;\n    border-bottom: 1px solid transparent;\n    width: 100%;\n}\n\n.toki-tree-val:focus {\n    border-bottom-color: #2563eb;\n    outline: none;\n    background: rgba(37, 99, 235, 0.05);\n}\n\n.toki-tree-toggle {\n    cursor: pointer;\n    user-select: none;\n    width: 18px;\n    text-align: center;\n    color: #94a3b8;\n    font-weight: 700;\n}\n\n.toki-tree-toggle:hover {\n    color: var(--toki-primary);\n}\n\n.toki-tree-right-panel {\n    flex: 1;\n    display: flex;\n    flex-direction: column;\n    gap: 20px;\n    background: rgba(255, 255, 255, 0.4);\n    padding: 20px;\n    border-radius: 16px;\n}\n\n.toki-tree-json-preview {\n    flex: 1;\n    background: #0f172a;\n    color: #e2e8f0;\n    padding: 20px;\n    border-radius: 16px;\n    font-size: 12px;\n    font-family: monospace;\n    border: 1px solid rgba(255, 255, 255, 0.1);\n    resize: none;\n}\n\n.toki-btn-rule {\n    background: transparent;\n    border: 1px solid #ddd;\n    padding: 6px 12px;\n    border-radius: 8px;\n    font-size: 12px;\n    cursor: pointer;\n    transition: all 0.2s;\n}\n\n.toki-btn-rule:hover {\n    background: #f8fafc;\n    border-color: #94a3b8;\n}\n\n/* Animations */\n@keyframes tokiFadeIn {\n    from { opacity: 0; }\n    to { opacity: 1; }\n}\n\n@keyframes tokiTabFadeIn {\n    from { opacity: 0; transform: translateX(10px); }\n    to { opacity: 1; transform: translateX(0); }\n}\n\n@keyframes tokiSlideUp {\n    from { opacity: 0; transform: translateY(30px) scale(0.95); }\n    to { opacity: 1; transform: translateY(0) scale(1); }\n}\n\n/* --- Structural Layouts for Inline Replacement --- */\n\n/* Horizontal Button Row (e.g., Download buttons) */\n.toki-btn-group-row {\n    display: flex;\n    gap: 12px;\n    align-items: center;\n}\n.toki-btn-group-row .toki-btn-action {\n    height: 52px;\n    flex: 1;\n}\n.toki-btn-group-row .toki-flex-1-4 {\n    flex: 1.4;\n}\n\n/* Vertical Button Stack (e.g., Tool buttons) */\n.toki-btn-group-stack {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n}\n.toki-btn-group-stack .toki-btn-action {\n    height: 44px;\n    justify-content: flex-start;\n    padding-left: 20px;\n}\n\n/* 2-Column Form Grid */\n.toki-form-grid {\n    display: grid;\n    grid-template-columns: 1fr 1fr;\n    gap: 16px;\n}\n\n/* Utility Shortcuts */\n.toki-flex-between { display: flex; justify-content: space-between; align-items: center; }\n.toki-divider { border: 0; border-top: 1px solid rgba(0,0,0,0.05); margin: 24px 0; }\n.toki-mt-0 { margin-top: 0 !important; }\n.toki-mt-8 { margin-top: 8px !important; }\n.toki-mt-32 { margin-top: 32px !important; }\n.toki-ml-4 { margin-left: 4px !important; }\n.toki-mb-5 { margin-bottom: 5px !important; }\n.toki-mb-10 { margin-bottom: 10px !important; }\n.toki-mb-24 { margin-bottom: 24px !important; }\n.toki-flex-1 { flex: 1; }\n.toki-flex-row { display: flex; gap: 4px; align-items: center; }\n.toki-flex-row-8 { display: flex; gap: 8px; align-items: center; }\n.toki-flex-row-10 { display: flex; gap: 10px; align-items: center; }\n\n/* Text Utilities */\n.toki-text-xs { font-size: 11px; color: #94a3b8; }\n.toki-text-sm { font-size: 12px; }\n.toki-text-base { font-size: 14px; }\n.toki-text-lg { font-size: 20px; font-weight: 700; }\n.toki-text-success { color: #4ade80 !important; }\n.toki-text-danger { color: #ff5555 !important; }\n.toki-text-primary { color: var(--toki-primary) !important; }\n.toki-text-center { text-align: center; }\n.toki-line-16 { line-height: 1.6; }\n\n/* Specialized Components */\n.toki-modal-main { padding: 32px; width: 520px; max-height: 85vh; overflow-y: auto; }\n.toki-btn-gradient-green { \n    background: linear-gradient(135deg, #10b981, #059669) !important; \n    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2) !important;\n}\n.toki-btn-indigo { background: #6366f1 !important; }\n.toki-btn-lavender { background: #6a5acd !important; font-weight: bold !important; }\n.toki-btn-slate { background: rgba(0,0,0,0.02) !important; border-style: dashed !important; border-radius: 20px !important; }\n.toki-hidden { display: none !important; }\n\n/* Helper Boxes */\n.toki-helper-box-blue {\n    margin: -10px 0 20px 0; padding: 14px; \n    background: rgba(37, 99, 235, 0.05); border: 1px solid rgba(37, 99, 235, 0.1); \n    border-radius: 18px;\n}\n\n/* Captcha Overlay */\n.toki-captcha-overlay {\n    position: fixed; top: 0; left: 0; width: 100%; height: 100%;\n    background: rgba(0,0,0,0.8); z-index: 10001;\n    display: flex; flex-direction: column; align-items: center; justify-content: center;\n    color: white; font-family: var(--toki-font);\n}\n.toki-captcha-frame {\n    width: 80%; height: 60%; background: white; \n    border-radius: 20px; overflow: hidden; \n    margin-bottom: 20px; box-shadow: 0 20px 50px rgba(0,0,0,0.5);\n}\n\n/* Component: Helper Description Text */\n.toki-helper-desc { line-height: 1.5; font-weight: 500; }\n\n/* Component: Small Button (e.g., Test Native) */\n.toki-btn-sm { height: 36px !important; font-size: 12px !important; border-radius: 12px !important; }\n\n/* Component: Sync Button (height 48px) */\n.toki-btn-sync { height: 48px !important; }\n\n/* Component: Modal Header without border */\n.toki-modal-header-borderless { border: none !important; }\n\n/* Component: Code Textarea */\n.toki-textarea-code { min-height: 120px; font-family: monospace; }\n\n/* Visibility Toggles */\n.toki-visible-flex { display: flex !important; }\n.toki-visible-block { display: block !important; }\n.toki-hidden { display: none !important; }\n\n/* Status Badges & Indicators */\n.toki-badge {\n    margin-left: 5px;\n    font-size: 12px;\n    vertical-align: middle;\n}\n\n.toki-downloaded {\n    opacity: 0.6;\n    background-color: rgba(74, 222, 128, 0.05) !important;\n    transition: opacity 0.3s ease;\n}\n.toki-downloaded:hover {\n    opacity: 1;\n}\n\n.toki-tree-modal {\n    z-index: 10002 !important;\n}\n\n/* Iframe Elements */\n.toki-downloader-iframe {\n    width: 100%;\n    height: 600px;\n    opacity: 0.1;\n    pointer-events: none;\n    border: none;\n    margin-top: 40px;\n}\n\n.toki-captcha-iframe {\n    width: 100%;\n    height: 100%;\n    border: none;\n}\n\n/* Info Card & History Styles */\n.toki-info-card {\n    background: rgba(255, 255, 255, 0.4);\n    border: 1px solid rgba(0, 0, 0, 0.05);\n    border-radius: 12px;\n    padding: 12px 16px;\n    margin-bottom: 20px;\n}\n\n.toki-info-row {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    padding: 6px 0;\n}\n\n.toki-info-row:not(:last-child) {\n    border-bottom: 1px dashed rgba(0, 0, 0, 0.05);\n}\n\n.toki-info-label {\n    font-size: 13px;\n    color: var(--toki-text-muted);\n    font-weight: 500;\n}\n\n.toki-info-val {\n    font-size: 13px;\n    color: var(--toki-text);\n    font-weight: 700;\n    display: flex;\n    align-items: center;\n    gap: 6px;\n}\n\n/* --- Multi-Queue Progress Monitor Panel (v1.21.0) --- */\n#toki-logbox-progress {\n    padding: 14px 18px;\n    background: rgba(255, 255, 255, 0.25);\n    border-bottom: 1px solid rgba(0, 0, 0, 0.05);\n    backdrop-filter: blur(10px);\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n}\n\n#toki-progress-header {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n}\n\n#toki-progress-overall-text {\n    font-size: 12px;\n    font-weight: 800;\n    color: var(--toki-primary);\n    letter-spacing: -0.02em;\n    background: linear-gradient(135deg, #4f46e5, #06b6d4);\n    -webkit-background-clip: text;\n    -webkit-text-fill-color: transparent;\n}\n\n}\n\n#toki-progress-overall-controls {\n    display: flex;\n    gap: 8px;\n    align-items: center;\n}\n\n.toki-progress-btn {\n    font-size: 13px;\n    cursor: pointer;\n    transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), filter 0.2s ease, opacity 0.2s ease;\n    user-select: none;\n    opacity: 0.85;\n}\n\n.toki-progress-btn:hover {\n    transform: scale(1.25);\n    opacity: 1;\n    filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.6));\n}\n\n#toki-btn-queue-stop:hover {\n    filter: drop-shadow(0 0 6px #ef4444);\n}\n\n.toki-progress-bar-paused {\n    background: linear-gradient(90deg, #9ca3af 0%, #6b7280 50%, #4b5563 100%) !important;\n    box-shadow: 0 1px 3px rgba(107, 114, 128, 0.4) !important;\n    animation: tokiPulsePaused 2s infinite ease-in-out;\n}\n\n@keyframes tokiPulsePaused {\n    0%, 100% { opacity: 1; }\n    50% { opacity: 0.65; }\n}\n\n.toki-empty-queue-msg {\n    display: flex;\n    flex-direction: column;\n    align-items: center;\n    justify-content: center;\n    padding: 24px 16px;\n    background: rgba(255, 255, 255, 0.04);\n    border: 1px dashed rgba(0, 0, 0, 0.08);\n    border-radius: 12px;\n    text-align: center;\n    gap: 6px;\n    margin: 8px 0;\n    backdrop-filter: blur(5px);\n}\n\n.toki-empty-queue-msg span {\n    font-size: 13px;\n    font-weight: 700;\n    color: var(--toki-primary, #6366f1);\n    opacity: 0.85;\n}\n\n.toki-empty-queue-msg p {\n    font-size: 11px;\n    color: #4b5563;\n    opacity: 0.75;\n    margin: 0;\n    line-height: 1.4;\n}\n\n.toki-progress-bar-container {\n    width: 100%;\n    height: 8px;\n    background: rgba(0, 0, 0, 0.06);\n    border-radius: 999px;\n    overflow: hidden;\n    position: relative;\n    border: 1px solid rgba(255, 255, 255, 0.5);\n    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);\n}\n\n.toki-progress-bar-fill {\n    height: 100%;\n    width: 0%;\n    background: linear-gradient(90deg, #6366f1 0%, #3b82f6 50%, #06b6d4 100%);\n    border-radius: 999px;\n    transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);\n    box-shadow: 0 1px 3px rgba(99, 102, 241, 0.4);\n}\n\n#toki-progress-workers-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n    margin-top: 6px;\n    max-height: 160px;\n    overflow-y: auto;\n    padding-right: 4px;\n}\n\n/* Custom Scrollbar for Workers List */\n#toki-progress-workers-list::-webkit-scrollbar {\n    width: 4px;\n}\n#toki-progress-workers-list::-webkit-scrollbar-track {\n    background: transparent;\n}\n#toki-progress-workers-list::-webkit-scrollbar-thumb {\n    background: rgba(0, 0, 0, 0.1);\n    border-radius: 999px;\n}\n\n.toki-worker-progress-item {\n    background: rgba(255, 255, 255, 0.35);\n    border: 1px solid rgba(255, 255, 255, 0.5);\n    border-radius: 10px;\n    padding: 8px 12px;\n    display: flex;\n    flex-direction: column;\n    gap: 6px;\n    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);\n    transition: all 0.2s ease;\n}\n\n.toki-worker-progress-item:hover {\n    background: rgba(255, 255, 255, 0.55);\n    border-color: rgba(37, 99, 235, 0.15);\n    transform: translateY(-1px);\n    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.04);\n}\n\n.toki-worker-stage {\n    font-size: 11px;\n    font-weight: 700;\n    color: var(--toki-text-muted);\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n}\n\n.toki-worker-bar-container {\n    width: 100%;\n    height: 5px;\n    background: rgba(0, 0, 0, 0.04);\n    border-radius: 999px;\n    overflow: hidden;\n}\n\n.toki-worker-bar-fill {\n    height: 100%;\n    background: linear-gradient(90deg, #10b981 0%, #34d399 100%);\n    border-radius: 999px;\n    transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1);\n}\n\n/* --- 📋 Realtime Queue List & Badges (v1.21.0) --- */\n#toki-progress-queue-section {\n    margin-top: 10px;\n    border-top: 1px solid rgba(0, 0, 0, 0.06);\n    padding-top: 8px;\n    display: flex;\n    flex-direction: column;\n    gap: 6px;\n}\n\n#toki-queue-section-header {\n    font-size: 11px;\n    font-weight: 700;\n    color: var(--toki-text-muted);\n    opacity: 0.85;\n}\n\n#toki-progress-queue-list {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n    max-height: 120px;\n    overflow-y: auto;\n    padding-right: 2px;\n}\n\n#toki-progress-queue-list::-webkit-scrollbar {\n    width: 4px;\n}\n#toki-progress-queue-list::-webkit-scrollbar-track {\n    background: transparent;\n}\n#toki-progress-queue-list::-webkit-scrollbar-thumb {\n    background: rgba(0, 0, 0, 0.08);\n    border-radius: 999px;\n}\n\n.toki-queue-list-item {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    padding: 5px 8px;\n    background: rgba(255, 255, 255, 0.25);\n    border: 1px solid rgba(255, 255, 255, 0.4);\n    border-radius: 6px;\n    font-size: 11px;\n    transition: all 0.2s ease;\n}\n\n.toki-queue-list-item:hover {\n    background: rgba(255, 255, 255, 0.45);\n    transform: translateX(1px);\n}\n\n.toki-queue-item-meta {\n    display: flex;\n    align-items: center;\n    gap: 8px;\n    flex: 1;\n    min-width: 0;\n}\n\n.toki-queue-item-title {\n    color: var(--toki-text);\n    font-weight: 500;\n    white-space: nowrap;\n    overflow: hidden;\n    text-overflow: ellipsis;\n}\n\n.toki-queue-item-delete {\n    font-size: 10px;\n    cursor: pointer;\n    opacity: 0.6;\n    transition: all 0.15s ease;\n    padding: 2px;\n}\n\n.toki-queue-item-delete:hover {\n    opacity: 1;\n    transform: scale(1.2);\n}\n\n/* 세련된 HSL 상태 배지 */\n.toki-badge {\n    padding: 2px 6px;\n    border-radius: 4px;\n    font-size: 9px;\n    font-weight: 700;\n    white-space: nowrap;\n    text-transform: uppercase;\n}\n\n/* 대기 (🟡 HSL Tailored Yellow) */\n.toki-badge-pending {\n    background: hsl(45, 93%, 94%);\n    color: hsl(45, 90%, 35%);\n    border: 1px solid hsl(45, 93%, 85%);\n}\n\n/* 진행 (🟢 HSL Tailored Emerald) */\n.toki-badge-processing {\n    background: hsl(150, 84%, 93%);\n    color: hsl(150, 84%, 25%);\n    border: 1px solid hsl(150, 84%, 82%);\n}\n\n/* 완료 (🔵 HSL Tailored Sapphire) */\n.toki-badge-completed {\n    background: hsl(220, 95%, 94%);\n    color: hsl(220, 90%, 40%);\n    border: 1px solid hsl(220, 95%, 86%);\n}\n\n/* 실패 (🔴 HSL Tailored Ruby) */\n.toki-badge-failed {\n    background: hsl(0, 93%, 94%);\n    color: hsl(0, 90%, 45%);\n    border: 1px solid hsl(0, 93%, 86%);\n}\n\n/* --- FormRuleEditor: Hybrid Two-Track Parser GUI (v1.21.0) --- */\n.toki-form-editor-modal {\n    width: 1200px !important;\n    height: 90vh !important;\n    max-height: 90vh !important;\n    border-radius: 24px !important;\n}\n\n.toki-form-editor-container {\n    display: flex;\n    flex: 1;\n    overflow: hidden;\n    gap: 20px;\n    padding: 20px;\n    background: rgba(255, 255, 255, 0.15);\n}\n\n.toki-form-editor-left {\n    flex: 1.2;\n    overflow-y: auto;\n    display: flex;\n    flex-direction: column;\n    gap: 16px;\n    padding-right: 8px;\n}\n\n.toki-form-editor-left::-webkit-scrollbar {\n    width: 6px;\n}\n.toki-form-editor-left::-webkit-scrollbar-track {\n    background: transparent;\n}\n.toki-form-editor-left::-webkit-scrollbar-thumb {\n    background: rgba(0, 0, 0, 0.08);\n    border-radius: 999px;\n}\n\n.toki-form-editor-right {\n    flex: 1;\n    display: flex;\n    flex-direction: column;\n    gap: 16px;\n    background: rgba(255, 255, 255, 0.4);\n    padding: 20px;\n    border-radius: 18px;\n    border: 1px solid rgba(255, 255, 255, 0.5);\n    overflow: hidden;\n}\n\n.toki-form-card {\n    background: rgba(255, 255, 255, 0.45);\n    border: 1px solid rgba(0, 0, 0, 0.04);\n    border-radius: 16px;\n    padding: 16px 20px;\n    display: flex;\n    flex-direction: column;\n    gap: 12px;\n    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.01);\n    transition: all 0.2s ease;\n}\n\n.toki-form-card:hover {\n    background: rgba(255, 255, 255, 0.65);\n    border-color: rgba(37, 99, 235, 0.1);\n    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.02);\n}\n\n.toki-form-card-title {\n    font-size: 13px;\n    font-weight: 800;\n    color: var(--toki-primary);\n    text-transform: uppercase;\n    letter-spacing: 0.02em;\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    border-bottom: 1px solid rgba(0, 0, 0, 0.03);\n    padding-bottom: 8px;\n}\n\n.toki-form-row {\n    display: flex;\n    flex-direction: column;\n    gap: 6px;\n}\n\n.toki-form-row-header {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n}\n\n.toki-form-row-label {\n    font-size: 12px;\n    font-weight: 700;\n    color: var(--toki-text-muted);\n}\n\n.toki-input-compact {\n    padding: 10px 14px;\n    background: rgba(255, 255, 255, 0.7);\n    border: 1px solid rgba(0, 0, 0, 0.06);\n    border-radius: 10px;\n    font-size: 13px;\n    font-family: inherit;\n    transition: all 0.2s ease;\n}\n\n.toki-input-compact:focus {\n    outline: none;\n    border-color: var(--toki-primary);\n    background: #fff;\n    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);\n}\n\n.toki-badge-match {\n    font-size: 10px;\n    font-weight: 800;\n    padding: 2px 6px;\n    border-radius: 6px;\n    transition: all 0.2s ease;\n}\n\n.toki-badge-match.ok {\n    background: rgba(16, 185, 129, 0.1);\n    color: #10b981;\n}\n\n.toki-badge-match.zero {\n    background: rgba(245, 158, 11, 0.1);\n    color: #f59e0b;\n}\n\n.toki-badge-match.error {\n    background: rgba(239, 68, 68, 0.1);\n    color: #ef4444;\n}\n\n.toki-form-dropper-btn {\n    cursor: pointer;\n    font-size: 14px;\n    transition: transform 0.2s;\n    user-select: none;\n}\n.toki-form-dropper-btn:hover {\n    transform: scale(1.2);\n}\n\n/* --- 📱 Compact Responsive LogBox for Popups & Small Screens (v1.21.0 추가) --- */\n@media (max-width: 500px) {\n    #toki-logbox {\n        width: 100% !important;\n        height: 100% !important;\n        max-height: 100% !important;\n        bottom: 0 !important;\n        right: 0 !important;\n        left: 0 !important;\n        top: 0 !important;\n        border-radius: 0 !important;\n        border: none !important;\n        box-shadow: none !important;\n    }\n    /* 팝업에서는 전체 화면을 채우므로 드래그 헤더 무효화 및 모바일 친화형 축소 */\n    #toki-logbox-header {\n        cursor: default !important;\n        padding: 8px 12px !important;\n        border-top-left-radius: 0 !important;\n        border-top-right-radius: 0 !important;\n    }\n    #toki-logbox-content {\n        padding: 8px !important;\n        display: block !important; /* 팝업 상세로그 강제 개방 */\n        height: calc(100% - 35px) !important; /* 헤더를 제외한 영역 100% 점유 */\n        max-height: calc(100% - 35px) !important;\n    }\n    /* 팝업 내 불필요한 컨트롤 및 큐 진행률 카드 영역 강제 은닉 (사용자 피드백 반영) */\n    #toki-btn-audio, #toki-btn-report, #toki-logbox-progress {\n        display: none !important;\n    }\n}\n\n\n\n\n/* --- Dashboard Popup Specific Layout --- */\n#toki-dashboard-popup {\n    display: flex;\n    flex-direction: column;\n    width: 100vw;\n    height: 100vh;\n    margin: 0;\n    background: var(--toki-bg);\n    border: none;\n    border-radius: 0;\n    box-shadow: none;\n    overflow: hidden;\n}\n\n#toki-dashboard-header {\n    padding: 24px 32px;\n    background: rgba(255, 255, 255, 0.4);\n    border-bottom: 1px solid rgba(0, 0, 0, 0.05);\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n}\n\n#toki-dashboard-title {\n    font-size: 24px;\n    font-weight: 800;\n    color: #0f172a;\n    display: flex;\n    align-items: center;\n    gap: 12px;\n    letter-spacing: -0.03em;\n}\n\n#toki-dashboard-header-controls {\n    display: flex;\n    gap: 12px;\n    align-items: center;\n}\n\n#toki-dashboard-log-section {\n    padding: 16px 20px;\n    background: rgba(0, 0, 0, 0.05);\n    border-radius: 12px;\n    margin: 0 20px 20px 20px;\n    display: flex;\n    flex-direction: column;\n    height: 250px; /* 실시간 로그창 영역 높이 명시 */\n    overflow: hidden;\n}\n\n#toki-dashboard-log-section #toki-logbox-content {\n    flex: 1;\n    overflow-y: auto; /* 내부 스크롤 강제 */\n    padding: 12px;\n    margin: 0;\n    list-style: none;\n    background: rgba(0, 0, 0, 0.2); /* 로그 시인성 제고를 위한 세련된 다크 패널 */\n    border-radius: 8px;\n    border: 1px solid rgba(255, 255, 255, 0.03);\n}\n\n#toki-log-header {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    font-weight: 700;\n    margin-bottom: 12px;\n    color: var(--toki-text-muted);\n}\n";
 ;// ./src/core/ui.js
 /**
  * UI Module for TokiSync
@@ -3440,87 +4240,301 @@ class LogBox {
         if (LogBox.instance) return LogBox.instance;
         this.logs = [];
         this.MAX_LOGS = 500;
+        this.popupWindow = null;
         this.init();
         LogBox.instance = this;
     }
 
     init() {
-        if (document.getElementById('toki-logbox')) return;
-
-        // -- Styles --
-        const styleId = 'toki-logbox-style';
-        if (!document.getElementById(styleId)) {
-            const style = document.createElement('style');
-            style.id = styleId;
-            style.innerHTML = ui_namespaceObject;
-            document.head.appendChild(style);
-        }
-
-        // -- HTML --
-        this.container = document.createElement('div');
-        this.container.id = 'toki-logbox';
-        this.container.innerHTML = `
-            <div id="toki-logbox-header">
-                <span id="toki-logbox-title">TokiSync Log</span>
-                <div id="toki-logbox-controls">
-                    <span id="toki-btn-report" title="버그 리포트 복사" class="toki-cursor-pointer toki-text-warning">📋</span>
-                    <span id="toki-btn-audio" title="백그라운드 모드" class="toki-cursor-pointer">🔊</span>
-                    <span id="toki-btn-clear" title="Clear">🚫</span>
-                    <span id="toki-btn-close" title="Hide">❌</span>
-                </div>
-            </div>
-            <ul id="toki-logbox-content"></ul>
-        `;
-        document.body.appendChild(this.container);
-
-        // -- Events --
-        this.list = this.container.querySelector('#toki-logbox-content');
-        
-        document.getElementById('toki-btn-report').onclick = () => this.exportReport();
-        document.getElementById('toki-btn-clear').onclick = () => this.clear();
-        document.getElementById('toki-btn-close').onclick = () => this.hide();
-
-        // ESC Key Support for LogBox
-        window.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && this.container.classList.contains('toki-visible-flex')) {
-                this.hide();
+        // -- Register Tampermonkey User Menu Commands --
+        if (typeof GM_registerMenuCommand !== 'undefined') {
+            try {
+                GM_registerMenuCommand("🧩 파싱 규칙 편집기 (Tree Editor)", () => {
+                    this.openDashboard();
+                    setTimeout(() => {
+                        const doc = this.popupWindow?.document;
+                        if (doc) new TreeRuleEditor().show(doc);
+                    }, 300);
+                });
+                GM_registerMenuCommand("📝 간편 규칙 편집기 (Form Editor)", () => {
+                    this.openDashboard();
+                    setTimeout(() => {
+                        const doc = this.popupWindow?.document;
+                        if (doc) new FormRuleEditor().show(doc);
+                    }, 300);
+                });
+                GM_registerMenuCommand("⚡ TokiSync 통합 대시보드 열기", () => {
+                    this.openDashboard();
+                });
+            } catch (e) {
+                console.warn('[UI] 템퍼몽키 메뉴 등록 실패:', e.message);
             }
-        });
-        
-        // Anti-Sleep Button
-        const audioBtn = document.getElementById('toki-btn-audio');
-        if (audioBtn) {
-            audioBtn.onclick = () => {
-                try {
-                    if ((0,anti_sleep/* isAudioRunning */.S2)()) {
-                        (0,anti_sleep/* stopSilentAudio */.Cv)();
-                        audioBtn.textContent = '🔊';
-                        audioBtn.title = '백그라운드 모드 (꺼짐)';
-                        this.log('[Anti-Sleep] 백그라운드 모드 비활성화');
-                    } else {
-                        (0,anti_sleep/* startSilentAudio */.yS)();
-                        audioBtn.textContent = '🔇';
-                        audioBtn.title = '백그라운드 모드 (켜짐)';
-                        this.log('[Anti-Sleep] 백그라운드 모드 활성화', 'success');
-                    }
-                } catch (e) {
-                    this.error(`[Anti-Sleep] 실패: ${e.message}`);
-                }
-            };
-
-            // Sync UI with initial state (if auto-started by downloader)
-            setInterval(() => {
-                const running = (0,anti_sleep/* isAudioRunning */.S2)();
-                if (running && audioBtn.textContent === '🔊') {
-                    audioBtn.textContent = '🔇';
-                    audioBtn.title = '백그라운드 모드 (켜짐)';
-                } else if (!running && audioBtn.textContent === '🔇') {
-                    audioBtn.textContent = '🔊';
-                    audioBtn.title = '백그라운드 모드 (꺼짐)';
-                }
-            }, 1000);
         }
 
+        // 📊 [멀티큐] 팝업이 켜져 있을 때 주기적인 1초 동기화
+        setInterval(() => {
+            this.updateProgressUI();
+        }, 1000);
+    }
+
+    openDashboard() {
+        if (this.popupWindow && !this.popupWindow.closed) {
+            this.popupWindow.focus();
+            return;
+        }
+
+        console.log('[TokiSync UI] 🛡️ 가상 팝업 대시보드 기동 (DOM 오염 차단)');
+        
+        const width = 750;
+        const height = 850;
+        const left = (window.screen.width - width) / 2;
+        const top = (window.screen.height - height) / 2;
+        
+        this.popupWindow = window.open(
+            "", 
+            "TokiSync_Dashboard", 
+            `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
+        );
+
+        if (!this.popupWindow) {
+            alert("⚠️ 팝업창을 띄우지 못했습니다. 브라우저의 팝업 차단 설정을 해제해 주세요!");
+            return;
+        }
+
+        const doc = this.popupWindow.document;
+        doc.title = "⚡ TokiSync Dashboard";
+
+        // Inject Stylesheet
+        const style = doc.createElement('style');
+        style.innerHTML = ui_namespaceObject;
+        doc.head.appendChild(style);
+
+        // Body reset — 대시보드 독립 페이지 레이아웃 고정
+        const bodyReset = doc.createElement('style');
+        bodyReset.innerHTML = `
+            *, *::before, *::after { box-sizing: border-box; }
+            html, body {
+                margin: 0; padding: 0;
+                width: 100vw; height: 100vh;
+                background: #1a1a2e;
+                color: #e0e0e0;
+                font-family: 'Segoe UI', system-ui, sans-serif;
+                font-size: 14px;
+                overflow: hidden;
+            }
+            #toki-dashboard-popup {
+                padding: 0;
+                height: 100vh;
+            }
+        `;
+        doc.head.appendChild(bodyReset);
+
+        // Anti-Sleep — 팝업 window에서 AudioContext 자동 기동 (대상 사이트 DOM 오염 없음)
+        const antiSleepScript = doc.createElement('script');
+        antiSleepScript.textContent = `
+            (function() {
+                try {
+                    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                    const dest = ctx.createMediaStreamDestination();
+                    const gain = ctx.createGain();
+                    const osc = ctx.createOscillator();
+                    osc.frequency.value = 1;
+                    osc.type = 'sine';
+                    gain.gain.value = 0.001;
+                    osc.connect(gain);
+                    gain.connect(dest);
+                    osc.start();
+                    const audio = document.createElement('audio');
+                    audio.srcObject = dest.stream;
+                    audio.play().catch(() => {});
+                    console.log('[Anti-Sleep] 대시보드 팝업에서 절전 방지 기동');
+                } catch(e) {
+                    console.warn('[Anti-Sleep] 팝업 기동 실패:', e.message);
+                }
+            })();
+        `;
+        doc.body.appendChild(antiSleepScript);
+
+        // Inject Body Structure
+        const menuHTML = MenuModal.getInstance() ? MenuModal.getInstance().getHTML() : '';
+        doc.body.innerHTML = menuHTML;
+
+        // Bind UI Events
+        if (MenuModal.getInstance()) {
+            MenuModal.getInstance().bindEventsToPopup(this.popupWindow);
+        }
+
+        // Bind Dashboard Specific Events
+        const clearLogsBtn = doc.getElementById('toki-btn-log-clear');
+        if (clearLogsBtn) {
+            clearLogsBtn.onclick = () => this.clear();
+        }
+
+        // Flush Cached Logs
+        const logContentEl = doc.getElementById('toki-logbox-content');
+        if (logContentEl) {
+            logContentEl.innerHTML = '';
+            this.logs.forEach(l => {
+                const li = doc.createElement('li');
+                li.textContent = `[${l.time}] ${l.context ? `[${l.context}] ` : ''}${l.msg}`;
+                if (l.type === 'error' || l.type === 'critical') li.className = 'error';
+                if (l.type === 'success') li.className = 'success';
+                logContentEl.appendChild(li);
+            });
+            logContentEl.scrollTop = logContentEl.scrollHeight;
+        }
+
+        this.updateProgressUI();
+    }
+
+    updateProgressUI() {
+        if (!this.popupWindow || this.popupWindow.closed) return;
+
+        const doc = this.popupWindow.document;
+        const progressContainer = doc.getElementById('toki-logbox-progress');
+        if (!progressContainer) return;
+
+        if (typeof window.tokiQueue === 'undefined') {
+            progressContainer.style.display = 'none';
+            return;
+        }
+
+        const queue = window.tokiQueue.getQueue();
+        const listEl = doc.getElementById('toki-progress-workers-list');
+        const queueListEl = doc.getElementById('toki-progress-queue-list');
+        const queueSection = doc.getElementById('toki-progress-queue-section');
+
+        if (queue.length === 0) {
+            const textEl = doc.getElementById('toki-progress-overall-text');
+            const barEl = doc.getElementById('toki-progress-overall-bar');
+            
+            if (textEl) textEl.textContent = `진행률: 0% (0 / 0)`;
+            if (barEl) barEl.style.width = `0%`;
+            
+            if (listEl) {
+                listEl.innerHTML = `
+                    <div class="toki-empty-queue-msg">
+                        <span>💡 수집 대기열이 비어 있습니다.</span>
+                        <p>작품 목록에서 다운로드할 화를 체크하고 다운로드 정책에 따라 다운로드를 클릭해 주세요.</p>
+                    </div>
+                `;
+            }
+            if (queueSection) queueSection.style.display = 'none';
+            return;
+        }
+
+        progressContainer.style.display = 'block';
+        if (queueSection) queueSection.style.display = 'block';
+
+        const stats = window.tokiQueue.getQueueStats();
+        const overallPercent = stats.total > 0 ? Math.round(((stats.completed + stats.failed) / stats.total) * 100) : 0;
+
+        // 전체 진행도 갱신
+        const textEl = doc.getElementById('toki-progress-overall-text');
+        const barEl = doc.getElementById('toki-progress-overall-bar');
+        const pauseBtn = doc.getElementById('toki-btn-queue-pause');
+        const isPaused = window.tokiQueue.getQueuePaused();
+        
+        if (textEl) {
+            const pauseText = isPaused ? ' ⏸️ [일시 정지됨]' : '';
+            textEl.textContent = `진행률: ${overallPercent}% (${stats.completed + stats.failed} / ${stats.total})${pauseText}`;
+        }
+        
+        if (barEl) {
+            barEl.style.width = `${overallPercent}%`;
+            if (isPaused) {
+                barEl.classList.add('toki-progress-bar-paused');
+            } else {
+                barEl.classList.remove('toki-progress-bar-paused');
+            }
+        }
+
+        if (pauseBtn) {
+            pauseBtn.textContent = isPaused ? '▶️ 재개' : '⏸️ 일시 정지';
+            pauseBtn.title = isPaused ? '재개하기 (Resume)' : '일시 정지 (Pause)';
+        }
+
+        // 개별 활성 팝업(Worker) 진행 상황 렌더링
+        if (listEl) {
+            const activeWorkers = queue.filter(item => item.status === 'processing');
+            listEl.innerHTML = activeWorkers.map(item => {
+                let stageName = '다운로드 중';
+                if (item.stage === 'STAGE_INIT') stageName = '초기화';
+                else if (item.stage === 'STAGE_DOM_READY') stageName = '대기';
+                else if (item.stage === 'STAGE_SCROLLING') stageName = '스크롤';
+                else if (item.stage === 'STAGE_PARSING') stageName = '파싱';
+                else if (item.stage === 'STAGE_DOWNLOADING') stageName = '다운로드';
+                else if (item.stage === 'STAGE_UPLOADING') stageName = '업로드';
+
+                return `
+                    <div class="toki-worker-progress-item">
+                        <div class="toki-worker-info">
+                            <span class="toki-worker-title">${item.episodeTitle}</span>
+                            <span class="toki-worker-stage">${stageName} (${item.progressPercent}%)</span>
+                        </div>
+                        <div class="toki-worker-bar-bg">
+                            <div class="toki-worker-bar-fill" style="width: ${item.progressPercent}%"></div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // 대기열 목록 렌더링
+        if (queueListEl) {
+            queueListEl.innerHTML = queue.map(item => {
+                let badgeClass = 'toki-badge-pending';
+                let statusText = '대기';
+                if (item.status === 'processing') {
+                    badgeClass = 'toki-badge-processing';
+                    statusText = '진행';
+                } else if (item.status === 'completed') {
+                    badgeClass = 'toki-badge-completed';
+                    statusText = '완료';
+                } else if (item.status === 'failed') {
+                    badgeClass = 'toki-badge-failed';
+                    statusText = '실패';
+                }
+
+                let stageText = '';
+                if (item.status === 'processing') {
+                    if (item.stage === 'STAGE_INIT') stageText = '초기화';
+                    else if (item.stage === 'STAGE_DOM_READY') stageText = '로딩중';
+                    else if (item.stage === 'STAGE_SCROLLING') stageText = '스크롤';
+                    else if (item.stage === 'STAGE_PARSING') stageText = '파싱중';
+                    else if (item.stage === 'STAGE_DOWNLOADING') stageText = '받는중';
+                    else if (item.stage === 'STAGE_UPLOADING') stageText = '업로드';
+                    stageText = ` [${stageText}]`;
+                }
+
+                const errorTitle = item.errorMsg ? ` title="${item.errorMsg}" style="cursor: help;"` : '';
+
+                return `
+                    <div class="toki-queue-list-item" data-id="${item.id}">
+                        <div class="toki-queue-item-meta">
+                            <span class="toki-badge ${badgeClass}"${errorTitle}>${statusText}${stageText}</span>
+                            <span class="toki-queue-item-title" title="${item.episodeTitle}">${item.episodeTitle}</span>
+                        </div>
+                        <span class="toki-queue-item-delete" title="수집 대기열에서 제거" data-id="${item.id}">❌</span>
+                    </div>
+                `;
+            }).join('');
+
+            // 이벤트 바인딩 (한 번만 적용)
+            if (!queueListEl.dataset.hasListener) {
+                queueListEl.dataset.hasListener = 'true';
+                queueListEl.addEventListener('click', (e) => {
+                    const deleteBtn = e.target.closest('.toki-queue-item-delete');
+                    if (deleteBtn) {
+                        const itemId = deleteBtn.getAttribute('data-id');
+                        if (confirm('선택한 에피소드를 대기열에서 제거하시겠습니까?')) {
+                            window.tokiQueue.removeQueueItem(itemId);
+                            this.updateProgressUI();
+                        }
+                    }
+                });
+            }
+        }
     }
 
     static getInstance() {
@@ -3531,33 +4545,62 @@ class LogBox {
     }
 
     log(msg, type = 'normal', context = '') {
-        if (!this.list) return;
-
         const time = new Date().toLocaleTimeString('ko-KR', { hour12: false });
         const prefix = context ? `[${context}] ` : '';
         const fullMsg = `[${time}] ${prefix}${msg}`;
         
-        // Save to memory
+        // 1. 내부 메모리 및 브라우저 콘솔에는 모든 로그 누적 출력
         this.logs.push({ time, type, context, msg: typeof msg === 'string' ? msg : JSON.stringify(msg) });
         if (this.logs.length > this.MAX_LOGS) this.logs.shift();
 
-        const li = document.createElement('li');
-        li.textContent = fullMsg;
-        
-        if (type === 'error') li.classList.add('error');
-        if (type === 'success') li.classList.add('success');
+        if (type === 'error' || type === 'critical') {
+            console.error(`[TokiSync] ${prefix}${msg}`);
+        } else if (type === 'warn') {
+            console.warn(`[TokiSync] ${prefix}${msg}`);
+        } else {
+            console.log(`[TokiSync] ${prefix}${msg}`);
+        }
 
-        this.list.appendChild(li);
-        this.list.scrollTop = this.list.scrollHeight;
+        // 2. 사소한 자잘한 일반 로그는 대시보드 화면에 뿌리지 않음 (핵심 요약 필터링)
+        if (type === 'normal') {
+            return;
+        }
+
+        // 팝업이 활성화되어 있으면 실시간 렌더링
+        if (this.popupWindow && !this.popupWindow.closed) {
+            const doc = this.popupWindow.document;
+            const logContentEl = doc.getElementById('toki-logbox-content');
+            if (logContentEl) {
+                const li = doc.createElement('li');
+                li.textContent = fullMsg;
+                
+                // 클래스 매핑
+                if (type === 'error' || type === 'critical') li.className = 'error';
+                else if (type === 'success') li.className = 'success';
+                else if (type === 'warn') li.className = 'warn';
+                else if (type === 'info') li.className = 'info';
+                
+                logContentEl.appendChild(li);
+                
+                // 스크롤 미동작 방지 (안정적인 DOM 렌더링 후 스크롤 조율을 위해 미세 지연)
+                setTimeout(() => {
+                    logContentEl.scrollTop = logContentEl.scrollHeight;
+                }, 10);
+            }
+        }
+    }
+
+    info(msg, context = '') {
+        this.log(msg, 'info', context);
     }
 
     critical(msg, context = '') {
-        this.show(); // Always surface critical errors
+        this.openDashboard();
         this.log(msg, 'critical', context);
     }
 
     error(msg, context = '') {
-        this.show(); // Auto-show on error
+        this.openDashboard();
         this.log(msg, 'error', context);
     }
 
@@ -3570,118 +4613,34 @@ class LogBox {
     }
 
     clear() {
-        if (this.list) this.list.innerHTML = '';
         this.logs = [];
+        if (this.popupWindow && !this.popupWindow.closed) {
+            const doc = this.popupWindow.document;
+            const logContentEl = doc.getElementById('toki-logbox-content');
+            if (logContentEl) logContentEl.innerHTML = '';
+        }
     }
 
     show() {
-        if (this.container) this.container.classList.add('toki-visible-flex');
+        this.openDashboard();
     }
 
     hide() {
-        if (this.container) this.container.classList.remove('toki-visible-flex');
-    }
-
-    async exportReport() {
-        const version = typeof GM_info !== 'undefined' ? GM_info.script.version : 'Unknown';
-        const ua = navigator.userAgent;
-        // Include query parameters for accurate book ID tracking
-        let currentUrl = window.location.href;
-        // Sanitize sensitive tokens if any (like '?token=')
-        currentUrl = currentUrl.replace(/([&?])(token|key|pwd)=[^&]+/g, '$1$2=***');
-        
-        // Retrieve run settings
-        const config = (0,core_config/* getConfig */.zj)();
-        const dest = config.destination || 'native';
-        const isCbz = config.saveAs === 'cbz';
-        const smartSkip = config.useSmartSkip ? 'ON' : 'OFF';
-
-        // Severity grouping
-        const critical = this.logs.filter(l => l.type === 'critical');
-        const warn     = this.logs.filter(l => l.type === 'warn' || l.type === 'error');
-        const info     = this.logs.filter(l => l.type !== 'critical' && l.type !== 'warn' && l.type !== 'error');
-
-        const fmt = (logs) => logs.length
-            ? logs.map(l => { const ctx = l.context ? `[${l.context}] ` : ''; return `[${l.time}] ${ctx}${l.msg}`; }).join('\n')
-            : '(없음)';
-
-        const report = `### 🐞 TokiSync Bug Report
-
-**System Information:**
-- **Version:** ${version}
-- **URL:** \`${currentUrl}\`
-- **User Agent:** ${ua}
-
-**Execution Settings:**
-- **Destination:** \`${dest}\`
-- **Format:** \`${isCbz ? 'CBZ Archive' : 'Raw Images'}\`
-- **Smart Skip:** \`${smartSkip}\`
-
-### 🔴 CRITICAL (작업 중단 오류)
-\`\`\`
-${fmt(critical)}
-\`\`\`
-
-### 🟡 WARN (비치명 / 폴백 발생)
-\`\`\`
-${fmt(warn)}
-\`\`\`
-
-### ⚪ INFO (정상 흐름)
-\`\`\`
-${fmt(info)}
-\`\`\`
-`.trim();
-
-        try {
-            // Priority: GM_setClipboard > navigator.clipboard > execCommand
-            if (typeof GM_setClipboard === 'function') {
-                GM_setClipboard(report);
-            } else if (navigator.clipboard && navigator.clipboard.writeText) {
-                await navigator.clipboard.writeText(report);
-            } else {
-                const textArea = document.createElement("textarea");
-                textArea.value = report;
-                document.body.appendChild(textArea);
-                textArea.select();
-                try {
-                    document.execCommand('copy');
-                } catch (err) {
-                    console.error('Copy Failed', err);
-                }
-                document.body.removeChild(textArea);
-            }
-            
-            this.success('버그 리포트가 클립보드에 복사되었습니다.', 'System');
-            Notifier.notify('TokiSync 버그 리포트', '클립보드 복사 완료! GitHub 이슈 탭이 열립니다.');
-            
-            setTimeout(() => {
-                window.open('https://github.com/pray4skylark/tokiSync/issues/new', '_blank');
-            }, 800);
-            
-        } catch (e) {
-            this.error('리포트 복사실패: ' + e.message, 'System');
+        if (this.popupWindow && !this.popupWindow.closed) {
+            this.popupWindow.close();
         }
     }
 
     toggle() {
-        if (!this.container) return;
-        if (!this.container.classList.contains('toki-visible-flex')) {
-            this.show();
-        } else {
+        if (this.popupWindow && !this.popupWindow.closed) {
             this.hide();
+        } else {
+            this.show();
         }
     }
-
 }
 
 class Notifier {
-    /**
-     * Send OS Notification
-     * @param {string} title 
-     * @param {string} text 
-     * @param {Function} onclick 
-     */
     static notify(title, text, onclick = null) {
         if (typeof GM_notification === 'function') {
             GM_notification({
@@ -3691,334 +4650,305 @@ class Notifier {
                 onclick: onclick
             });
         } else {
-            // Fallback
             console.log(`[Notification] ${title}: ${text}`);
-            // Do not use alert() as it blocks execution
         }
     }
 }
 
-/**
- * MenuModal (v1.5.0)
- * Unified Menu with Accordion & FAB
- */
 class MenuModal {
     static instance = null;
 
     constructor(handlers = {}) {
         if (MenuModal.instance) return MenuModal.instance;
-        this.handlers = handlers; // { onDownload, openViewer, openSettings, toggleLog, ... }
+        this.handlers = handlers;
         this.init();
         MenuModal.instance = this;
     }
 
     init() {
-        if (document.getElementById('toki-menu-fab')) return;
-        
-        // 1. Create FAB
-        this.createFAB();
-        
-        // 2. Keyboard Shortcut (Ctrl+Shift+T & ESC)
-        window.addEventListener('keydown', (e) => {
-            if (e.ctrlKey && e.shiftKey && (e.key === 'T' || e.key === 't' || e.code === 'KeyT')) {
-                e.preventDefault();
-                this.toggle();
-            }
-            if (e.key === 'Escape') {
-                const overlay = document.querySelector('.toki-modal-overlay');
-                if (overlay) this.close(overlay);
-            }
-        });
+        // [임시] 대시보드 팝업 분리형으로, 대상 DOM 내 FAB 자동생성은 차단합니다.
     }
 
-    createFAB() {
-        const fab = document.createElement('div');
-        fab.id = 'toki-menu-fab';
-        fab.className = 'toki-fab';
-        fab.title = 'TokiSync 메뉴 (Ctrl+Shift+T)';
-        fab.innerHTML = `<svg viewBox="0 0 24 24"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>`;
-        
-        fab.onclick = () => this.show();
-        document.body.appendChild(fab);
-    }
-
-    render() {
-        // Retrieve current config for UI state
-        // We assume config is available or we pass it. For simplicity, we read it here if available, 
-        // but ui.js doesn't import config directly to avoid circular dependency if possible.
-        // Better to pass current state or read from GM_getValue directly purely for UI init if needed.
-        
-        const overlay = document.createElement('div');
-        overlay.className = 'toki-modal-overlay';
-        overlay.onclick = (e) => { if(e.target === overlay) this.close(overlay); };
-
-        const modal = document.createElement('div');
-        modal.className = 'toki-modal';
-        overlay.appendChild(modal);
-
-        // -- Header --
-        const header = document.createElement('div');
-        header.className = 'toki-modal-header';
-        header.innerHTML = `
-            <div class="toki-modal-title"><span>⚡ TokiSync</span></div>
-            <div class="toki-flex-row">
-                <button class="toki-btn-ghost" id="toki-btn-viewer-link" title="Open Viewer">
-                    🌐 <span>Viewer</span>
-                </button>
-                <button class="toki-modal-close" id="toki-btn-menu-close" title="Close">&times;</button>
-            </div>
-        `;
-        modal.appendChild(header);
-
-        // -- Tabs Header --
-        const tabsHeader = document.createElement('div');
-        tabsHeader.className = 'toki-tabs';
-        tabsHeader.innerHTML = `
-            <button class="toki-tab-btn active" data-tab="download">📥 다운로드</button>
-            <button class="toki-tab-btn" data-tab="settings">⚙️ 설정</button>
-            <button class="toki-tab-btn" data-tab="history">📊 기록</button>
-            <button class="toki-tab-btn" data-tab="tools">🛠️ 도구</button>
-        `;
-        modal.appendChild(tabsHeader);
-
-        // -- Body --
-        const body = document.createElement('div');
-        body.className = 'toki-modal-body';
-        
-        // 1. Download Tab
-        const tabDown = document.createElement('div');
-        tabDown.className = 'toki-tab-content active';
-        tabDown.id = 'toki-tab-download';
-        tabDown.innerHTML = `
-                <div class="toki-control-group">
-                    <label class="toki-label">빠른 작업</label>
-                    <button class="toki-btn-action toki-btn-gradient-green" id="toki-btn-down-current">
-                        <span>🚀 현재 회차 즉시 다운로드</span>
-                    </button>
+    getHTML() {
+        return `
+        <div id="toki-dashboard-popup">
+            <div id="toki-dashboard-header">
+                <span id="toki-dashboard-title">⚡ TokiSync 통합 대시보드</span>
+                <div id="toki-dashboard-header-controls">
+                    <button class="toki-btn-ghost" id="toki-btn-viewer-link" title="Open Viewer">🌐 Viewer</button>
+                    <button class="toki-btn-ghost" id="toki-btn-menu-close" title="Close">❌ 닫기</button>
                 </div>
-                <hr class="toki-divider">
-                <div class="toki-control-group">
-                    <label class="toki-label">에피소드 범위 지정</label>
-                    <input type="text" id="toki-range-input" class="toki-input"
-                        placeholder="예: 1,2,4-10,15 (비우면 전체)">
-                    <div class="toki-text-xs toki-mt-8 toki-ml-4">쉼표(,)로 개별 번호, 하이픈(-)으로 연속 범위 지정</div>
-                </div>
-                <div class="toki-control-group toki-mb-24">
-                    <label class="toki-checkbox-wrapper">
-                        <input type="checkbox" id="toki-chk-force-overwrite" class="toki-checkbox-input">
-                        <span class="toki-checkbox"></span>
-                        <span class="toki-checkbox-label">⚠️ 강제 재다운로드 (파일 덮어쓰기)</span>
-                    </label>
-                </div>
-                <div class="toki-btn-group-row">
-                    <button class="toki-btn-action toki-flex-1-4" id="toki-btn-down-range">
-                        <span>선택 다운로드</span>
-                    </button>
-                    <button class="toki-btn-action toki-btn-secondary" id="toki-btn-down-all">
-                        <span>전체</span>
-                    </button>
-                </div>
-        `;
-        body.appendChild(tabDown);
-
-        // 2. Settings Tab (Unified v1.9.1)
-        const tabSettings = document.createElement('div');
-        tabSettings.className = 'toki-tab-content';
-        tabSettings.id = 'toki-tab-settings';
-        tabSettings.innerHTML = `
-            <div class="toki-section-title toki-mt-0">Download Settings</div>
-            <div class="toki-control-group">
-                <label class="toki-label">저장 정책</label>
-                <select id="toki-sel-policy" class="toki-select">
-                    <option value="individual">개별 파일</option>
-                    <option value="zipOfCbzs">챕터 묶음</option>
-                    <option value="native">자동 분류</option>
-                    <option value="drive">드라이브</option>
-                </select>
             </div>
             
-            <div class="toki-control-group">
-                <label class="toki-label">다운로드 속도</label>
-                <select id="toki-sel-speed" class="toki-select">
-                    <option value="agile">빠름</option>
-                    <option value="cautious">신중</option>
-                    <option value="thorough">철저</option>
-                    <option value="slow">느림</option>
-                    <option value="very_slow">매우 느림</option>
-                </select>
+            <div class="toki-tabs">
+                <button class="toki-tab-btn active" data-tab="download">📥 다운로드</button>
+                <button class="toki-tab-btn" data-tab="settings">⚙️ 설정</button>
+                <button class="toki-tab-btn" data-tab="history">📊 기록</button>
+                <button class="toki-tab-btn" data-tab="tools">🛠️ 도구</button>
             </div>
-
-            <div id="toki-native-helper" class="toki-hidden toki-helper-box-blue">
-                <div class="toki-text-sm toki-text-primary toki-mb-10 toki-helper-desc">
-                    ⚠️ Native 모드는 브라우저 설정 변경이 필요합니다.
-                </div>
-                <button class="toki-btn-action toki-btn-secondary toki-btn-sm" id="toki-btn-test-native">
-                    📂 기능 동작 테스트 실행
-                </button>
-            </div>
-
-            <div class="toki-section-title">Novel Settings</div>
-            <div class="toki-form-grid">
-                <div class="toki-control-group">
-                    <label class="toki-label">소설 포맷</label>
-                    <select id="toki-sel-novel-format" class="toki-select">
-                        <option value="epub">EPUB</option>
-                        <option value="txt">TXT</option>
-                    </select>
-                </div>
-                <div class="toki-control-group">
-                    <label class="toki-label">Smart Skip</label>
-                    <select id="toki-sel-smartskip" class="toki-select">
-                        <option value="90">90% (민감)</option>
-                        <option value="70">70% (보통)</option>
-                        <option value="50">50% (기본)</option>
-                    </select>
-                </div>
-            </div>
-
-            <div class="toki-control-group">
-                <label class="toki-label">소설 패키징</label>
-                <select id="toki-sel-novel-mode" class="toki-select">
-                    <option value="perChapter">회차별 개별 저장</option>
-                    <option value="singleVolume">범위 합본 저장</option>
-                </select>
-            </div>
-
-            <div class="toki-section-title">Configuration</div>
-            <button class="toki-btn-action toki-btn-secondary toki-btn-slate" id="toki-btn-advanced">
-                🛠️ 상세 주소 및 API 키 설정 (Advanced)
-            </button>
-        `;
-        body.appendChild(tabSettings);
-
-        // 3. History Tab (NEW)
-        const tabHistory = document.createElement('div');
-        tabHistory.className = 'toki-tab-content';
-        tabHistory.id = 'toki-tab-history';
-        tabHistory.innerHTML = `
-            <div class="toki-info-card">
-                <div class="toki-info-row">
-                    <span class="toki-info-label">동기화 상태</span>
-                    <span class="toki-info-val"><span class="toki-status-dot toki-status-online"></span>연결됨</span>
-                </div>
-                <div class="toki-info-row">
-                    <span class="toki-info-label">마지막 동기화</span>
-                    <span class="toki-info-val" id="toki-txt-last-sync">-</span>
-                </div>
-            </div>
-            <div class="toki-control-group">
-                <button class="toki-btn-action toki-btn-sync" id="toki-btn-sync-now">
-                    <span>🔄 지금 즉시 동기화</span>
-                </button>
-            </div>
-            <p class="toki-text-xs toki-text-center toki-line-16">
-                구글 드라이브의 데이터를 기반으로 목록에 완료 표시(✅)를 업데이트합니다.
-            </p>
-        `;
-        body.appendChild(tabHistory);
-
-        // 4. Tools Tab (Renamed from System)
-        const tabTools = document.createElement('div');
-        tabTools.className = 'toki-tab-content';
-        tabTools.id = 'toki-tab-tools';
-        tabTools.innerHTML = `
-                <div class="toki-control-group">
-                    <label class="toki-label">파일 관리</label>
-                    <div class="toki-btn-group-stack">
-                        <button class="toki-btn-action toki-btn-secondary" id="toki-btn-migration">
-                            📂 기존 파일명 표준화 (Migration)
+            
+            <div class="toki-modal-body">
+                <!-- 1. Download Tab -->
+                <div class="toki-tab-content active" id="toki-tab-download">
+                    <div class="toki-control-group">
+                        <label class="toki-label">빠른 작업</label>
+                        <button class="toki-btn-action toki-btn-gradient-green" id="toki-btn-down-current">
+                            <span>🚀 현재 회차 즉시 다운로드</span>
                         </button>
-                        <button class="toki-btn-action toki-btn-secondary" id="toki-btn-thumb-optim">
-                            🔄 썸네일 통합 및 캐 최적화
+                    </div>
+                    <hr class="toki-divider">
+                    <div class="toki-control-group">
+                        <label class="toki-label">에피소드 범위 지정</label>
+                        <input type="text" id="toki-range-input" class="toki-input" placeholder="예: 1,2,4-10,15 (비우면 전체)">
+                        <div class="toki-text-xs toki-mt-8 toki-ml-4">쉼표(,)로 개별 번호, 하이픈(-)으로 연속 범위 지정</div>
+                    </div>
+                    <div class="toki-control-group toki-mb-24">
+                        <label class="toki-checkbox-wrapper">
+                            <input type="checkbox" id="toki-chk-force-overwrite" class="toki-checkbox-input">
+                            <span class="toki-checkbox"></span>
+                            <span class="toki-checkbox-label">⚠️ 강제 재다운로드 (파일 덮어쓰기)</span>
+                        </label>
+                    </div>
+                    <div class="toki-btn-group-row">
+                        <button class="toki-btn-action toki-flex-1-4" id="toki-btn-down-range">
+                            <span>선택 다운로드</span>
+                        </button>
+                        <button class="toki-btn-action toki-btn-secondary" id="toki-btn-down-all">
+                            <span>전체</span>
                         </button>
                     </div>
                 </div>
-                <hr class="toki-divider">
-                <div class="toki-control-group">
-                    <label class="toki-label">시스템 도구</label>
-                    <div class="toki-btn-group-stack">
-                        <button class="toki-btn-action toki-btn-secondary" id="toki-btn-log">
-                            📝 실시간 로그창 토글
-                        </button>
-                        <button class="toki-btn-action toki-btn-indigo" id="toki-btn-tree-editor">
-                            🧩 파싱 규칙 편집기 (Tree Editor)
+
+                <!-- 2. Settings Tab -->
+                <div class="toki-tab-content" id="toki-tab-settings">
+                    <div class="toki-section-title toki-mt-0">Download Settings</div>
+                    <div class="toki-control-group">
+                        <label class="toki-label">저장 정책</label>
+                        <select id="toki-sel-policy" class="toki-select">
+                            <option value="individual">개별 파일</option>
+                            <option value="zipOfCbzs">챕터 묶음</option>
+                            <option value="native">자동 분류</option>
+                            <option value="drive">드라이브</option>
+                        </select>
+                    </div>
+                    
+                    <div class="toki-control-group">
+                        <label class="toki-label">다운로드 속도</label>
+                        <select id="toki-sel-speed" class="toki-select">
+                            <option value="agile">빠름</option>
+                            <option value="cautious">신중</option>
+                            <option value="thorough">철저</option>
+                            <option value="slow">느림</option>
+                            <option value="very_slow">매우 느림</option>
+                        </select>
+                    </div>
+
+                    <div id="toki-native-helper" class="toki-hidden toki-helper-box-blue">
+                        <div class="toki-text-sm toki-text-primary toki-mb-10 toki-helper-desc">
+                            ⚠️ Native 모드는 브라우저 설정 변경이 필요합니다.
+                        </div>
+                        <button class="toki-btn-action toki-btn-secondary toki-btn-sm" id="toki-btn-test-native">
+                            📂 기능 동작 테스트 실행
                         </button>
                     </div>
+
+                    <div class="toki-section-title">Novel Settings</div>
+                    <div class="toki-form-grid">
+                        <div class="toki-control-group">
+                            <label class="toki-label">소설 포맷</label>
+                            <select id="toki-sel-novel-format" class="toki-select">
+                                <option value="epub">EPUB</option>
+                                <option value="txt">TXT</option>
+                            </select>
+                        </div>
+                        <div class="toki-control-group">
+                            <label class="toki-label">Smart Skip</label>
+                            <select id="toki-sel-smartskip" class="toki-select">
+                                <option value="90">90% (민감)</option>
+                                <option value="70">70% (보통)</option>
+                                <option value="50">50% (기본)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="toki-control-group">
+                        <label class="toki-label">소설 패키징</label>
+                        <select id="toki-sel-novel-mode" class="toki-select">
+                            <option value="perChapter">회차별 개별 저장</option>
+                            <option value="singleVolume">범위 합본 저장</option>
+                        </select>
+                    </div>
+
+                    <div class="toki-section-title">Configuration</div>
+                    <button class="toki-btn-action toki-btn-secondary toki-btn-slate" id="toki-btn-advanced">
+                        🛠️ 상세 주소 및 API 키 설정 (Advanced)
+                    </button>
                 </div>
+
+                <!-- 3. History Tab -->
+                <div class="toki-tab-content" id="toki-tab-history">
+                    <div class="toki-info-card">
+                        <div class="toki-info-row">
+                            <span class="toki-info-label">동기화 상태</span>
+                            <span class="toki-info-val"><span class="toki-status-dot toki-status-online"></span>연결됨</span>
+                        </div>
+                        <div class="toki-info-row">
+                            <span class="toki-info-label">마지막 동기화</span>
+                            <span class="toki-info-val" id="toki-txt-last-sync">-</span>
+                        </div>
+                    </div>
+                    <div class="toki-control-group">
+                        <button class="toki-btn-action toki-btn-sync" id="toki-btn-sync-now">
+                            <span>🔄 지금 즉시 동기화</span>
+                        </button>
+                    </div>
+                    <p class="toki-text-xs toki-text-center toki-line-16">
+                        구글 드라이브의 데이터를 기반으로 목록에 완료 표시(✅)를 업데이트합니다.
+                    </p>
+                </div>
+
+                <!-- 4. Tools Tab -->
+                <div class="toki-tab-content" id="toki-tab-tools">
+                    <div class="toki-control-group">
+                        <label class="toki-label">파일 관리</label>
+                        <div class="toki-btn-group-stack">
+                            <button class="toki-btn-action toki-btn-secondary" id="toki-btn-migration">
+                                📂 기존 파일명 표준화 (Migration)
+                            </button>
+                            <button class="toki-btn-action toki-btn-secondary" id="toki-btn-thumb-optim">
+                                🔄 썸네일 통합 및 캐시 최적화
+                            </button>
+                        </div>
+                    </div>
+                    <hr class="toki-divider">
+                    <div class="toki-control-group">
+                        <label class="toki-label">시스템 도구</label>
+                        <div class="toki-btn-group-stack">
+                            <button class="toki-btn-action toki-btn-secondary" id="toki-btn-test-extract">
+                                🧪 현재 페이지 이미지/소설 추출 테스트
+                            </button>
+                            <button class="toki-btn-action toki-btn-indigo" id="toki-btn-tree-editor">
+                                🧩 파싱 규칙 편집기 (Tree Editor)
+                            </button>
+                            <button class="toki-btn-action toki-btn-lavender" id="toki-btn-form-editor">
+                                📝 간편 규칙 편집기 (Form Editor)
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <hr class="toki-divider">
+
+            <!-- 📊 실시간 진행 상황 및 큐 모니터 (상시 고정) -->
+            <div id="toki-logbox-progress" style="display: block;">
+                <div id="toki-progress-header">
+                    <span id="toki-progress-overall-text">진행률: 0% (0 / 0)</span>
+                    <div id="toki-progress-overall-controls">
+                        <span id="toki-btn-queue-clear" title="완료/실패 큐 정리" class="toki-cursor-pointer toki-progress-btn">🧹</span>
+                        <span id="toki-btn-queue-pause" title="일시 정지" class="toki-cursor-pointer toki-progress-btn">⏸️</span>
+                        <span id="toki-btn-queue-stop" title="수집 중단" class="toki-cursor-pointer toki-progress-btn">⏹️</span>
+                    </div>
+                </div>
+                <div class="toki-progress-bar-container">
+                    <div id="toki-progress-overall-bar" class="toki-progress-overall-bar-fill"></div>
+                </div>
+                <div id="toki-progress-workers-list">
+                    <!-- 활성 팝업(Worker) 동적 렌더링 -->
+                </div>
+                <div id="toki-progress-queue-section" style="display: none;">
+                    <div id="toki-queue-section-header">
+                        <span>📋 수집 대기열 목록</span>
+                    </div>
+                    <div id="toki-progress-queue-list">
+                        <!-- 대기열 목록 동적 렌더링 -->
+                    </div>
+                </div>
+            </div>
+
+            <hr class="toki-divider">
+
+            <!-- 📝 실시간 로그 박스 모니터 (상시 고정) -->
+            <div id="toki-dashboard-log-section">
+                <div id="toki-log-header">
+                    <span>📋 실시간 수집 로그 모니터</span>
+                    <span id="toki-btn-log-clear" title="Clear Logs" class="toki-cursor-pointer" style="font-size: 12px; color: var(--toki-color-warning, #e6a23c); cursor: pointer;">🚫 비우기</span>
+                </div>
+                <ul id="toki-logbox-content"></ul>
+            </div>
+        </div>
         `;
-        body.appendChild(tabTools);
-
-        modal.appendChild(body);
-        document.body.appendChild(overlay);
-
-        // --- Bind Events & Init Logic ---
-        this.bindEvents(overlay);
     }
 
-    // Helper removed as no longer using accordion
+    bindEventsToPopup(popupWindow) {
+        const doc = popupWindow.document;
 
-    bindEvents(overlay) {
-        // Tab Switching Logic
-        const tabBtns = overlay.querySelectorAll('.toki-tab-btn');
-        const tabContents = overlay.querySelectorAll('.toki-tab-content');
+        // 1. Tab Switching Logic
+        const tabBtns = doc.querySelectorAll('.toki-tab-btn');
+        const tabContents = doc.querySelectorAll('.toki-tab-content');
 
         tabBtns.forEach(btn => {
             btn.onclick = () => {
                 const target = btn.getAttribute('data-tab');
-                
-                // Toggle Buttons
                 tabBtns.forEach(b => b.classList.toggle('active', b === btn));
-                // Toggle Contents
                 tabContents.forEach(c => {
                     c.classList.toggle('active', c.id === `toki-tab-${target}`);
                 });
             };
         });
 
-        // Headers
-        const closeBtn = document.getElementById('toki-btn-menu-close');
-        if (closeBtn) closeBtn.onclick = () => this.close(overlay);
-        
-        const viewerLink = document.getElementById('toki-btn-viewer-link');
-        if (viewerLink) viewerLink.onclick = () => {
-             if(this.handlers.openViewer) this.handlers.openViewer();
-        };
+        // 2. Control Buttons
+        const closeBtn = doc.getElementById('toki-btn-menu-close');
+        if (closeBtn) {
+            closeBtn.onclick = () => popupWindow.close();
+        }
 
-        // 1. Download Tab
-        const downAllBtn = document.getElementById('toki-btn-down-all');
-        if (downAllBtn) downAllBtn.onclick = () => {
-            const force = document.getElementById('toki-chk-force-overwrite').checked;
-            if(this.handlers.downloadAll) this.handlers.downloadAll(force);
-            this.close(overlay);
-        };
+        const viewerLink = doc.getElementById('toki-btn-viewer-link');
+        if (viewerLink) {
+            viewerLink.onclick = () => {
+                if (this.handlers.openViewer) this.handlers.openViewer();
+            };
+        }
 
-        const downRangeBtn = document.getElementById('toki-btn-down-range');
-        if (downRangeBtn) downRangeBtn.onclick = () => {
-            const spec = document.getElementById('toki-range-input').value.trim();
-            const force = document.getElementById('toki-chk-force-overwrite').checked;
-            if (this.handlers.downloadRange) {
-                this.handlers.downloadRange(spec || undefined, force);
-            }
-            this.close(overlay);
-        };
+        // 3. Download Tab Events
+        const downAllBtn = doc.getElementById('toki-btn-down-all');
+        if (downAllBtn) {
+            downAllBtn.onclick = () => {
+                const force = doc.getElementById('toki-chk-force-overwrite').checked;
+                if (this.handlers.downloadAll) this.handlers.downloadAll(force);
+            };
+        }
 
-        const downCurrentBtn = document.getElementById('toki-btn-down-current');
-        if (downCurrentBtn) downCurrentBtn.onclick = () => {
-             if(this.handlers.downloadCurrent) this.handlers.downloadCurrent();
-             this.close(overlay);
-        };
+        const downRangeBtn = doc.getElementById('toki-btn-down-range');
+        if (downRangeBtn) {
+            downRangeBtn.onclick = () => {
+                const spec = doc.getElementById('toki-range-input').value.trim();
+                const force = doc.getElementById('toki-chk-force-overwrite').checked;
+                if (this.handlers.downloadRange) {
+                    this.handlers.downloadRange(spec || undefined, force);
+                }
+            };
+        }
 
-        const testExtractBtn = document.getElementById('toki-btn-test-extract');
-        if (testExtractBtn) testExtractBtn.onclick = () => {
-             if(this.handlers.testExtraction) this.handlers.testExtraction();
-        };
+        const downCurrentBtn = doc.getElementById('toki-btn-down-current');
+        if (downCurrentBtn) {
+            downCurrentBtn.onclick = () => {
+                if (this.handlers.downloadCurrent) this.handlers.downloadCurrent();
+            };
+        }
 
-        // 2. Settings Tab
-        const selPolicy = document.getElementById('toki-sel-policy');
-        const selSpeed = document.getElementById('toki-sel-speed');
-        const selNovelTerm = document.getElementById('toki-sel-novel-mode');
+        const testExtractBtn = doc.getElementById('toki-btn-test-extract');
+        if (testExtractBtn) {
+            testExtractBtn.onclick = () => {
+                if (this.handlers.testExtraction) this.handlers.testExtraction();
+            };
+        }
 
-        // Load Initial Values
+        // 4. Settings Tab Events
+        const selPolicy = doc.getElementById('toki-sel-policy');
+        const selSpeed = doc.getElementById('toki-sel-speed');
+        const selNovelTerm = doc.getElementById('toki-sel-novel-mode');
+
         if (this.handlers.getConfig) {
             const cfg = this.handlers.getConfig();
             if (cfg.policy && selPolicy) selPolicy.value = cfg.policy;
@@ -4027,14 +4957,14 @@ class MenuModal {
         }
 
         if (selPolicy) {
-            selPolicy.onchange = () => { 
-                if(this.handlers.setConfig) this.handlers.setConfig('TOKI_DOWNLOAD_POLICY', selPolicy.value);
-                this.updateNativeHelper(selPolicy.value);
+            selPolicy.onchange = () => {
+                if (this.handlers.setConfig) this.handlers.setConfig('TOKI_DOWNLOAD_POLICY', selPolicy.value);
+                this.updateNativeHelper(doc, selPolicy.value);
             };
-            this.updateNativeHelper(selPolicy.value);
+            this.updateNativeHelper(doc, selPolicy.value);
         }
-        
-        const testNativeBtn = document.getElementById('toki-btn-test-native');
+
+        const testNativeBtn = doc.getElementById('toki-btn-test-native');
         if (testNativeBtn) {
             testNativeBtn.onclick = async () => {
                 if (this.handlers.testNativeDownload) {
@@ -4043,33 +4973,41 @@ class MenuModal {
                     const success = await this.handlers.testNativeDownload();
                     if (success) {
                         testNativeBtn.textContent = '✅ 테스트 성공 (폴더 확인)';
-                        testNativeBtn.classList.add('toki-text-success');
-                        testNativeBtn.classList.remove('toki-text-danger');
+                        testNativeBtn.style.color = '#67c23a';
                     } else {
                         testNativeBtn.textContent = '❌ 테스트 실패 (설정 확인)';
-                        testNativeBtn.classList.add('toki-text-danger');
-                        testNativeBtn.classList.remove('toki-text-success');
+                        testNativeBtn.style.color = '#f56c6c';
                     }
                     setTimeout(() => {
                         testNativeBtn.disabled = false;
                         testNativeBtn.textContent = '📂 자동 분류 기능 테스트';
-                        testNativeBtn.classList.remove('toki-text-success', 'toki-text-danger');
+                        testNativeBtn.style.color = '';
                     }, 3000);
                 }
             };
         }
 
-        if (selSpeed) selSpeed.onchange = () => { if(this.handlers.setConfig) this.handlers.setConfig('TOKI_SLEEP_MODE', selSpeed.value); };
-        if (selNovelTerm) selNovelTerm.onchange = () => { if(this.handlers.setConfig) this.handlers.setConfig('TOKI_NOVEL_MODE', selNovelTerm.value); };
+        if (selSpeed) {
+            selSpeed.onchange = () => {
+                if (this.handlers.setConfig) this.handlers.setConfig('TOKI_SLEEP_MODE', selSpeed.value);
+            };
+        }
 
-        const advancedBtn = document.getElementById('toki-btn-advanced');
-        if (advancedBtn) advancedBtn.onclick = () => {
-            if(this.handlers.openSettings) this.handlers.openSettings();
-            this.close(overlay); 
-        };
+        if (selNovelTerm) {
+            selNovelTerm.onchange = () => {
+                if (this.handlers.setConfig) this.handlers.setConfig('TOKI_NOVEL_MODE', selNovelTerm.value);
+            };
+        }
 
-        // 3. History Tab
-        const syncBtn = document.getElementById('toki-btn-sync-now');
+        const advancedBtn = doc.getElementById('toki-btn-advanced');
+        if (advancedBtn) {
+            advancedBtn.onclick = () => {
+                if (this.handlers.openSettings) this.handlers.openSettings(doc);
+            };
+        }
+
+        // 5. History Tab Events
+        const syncBtn = doc.getElementById('toki-btn-sync-now');
         if (syncBtn) {
             syncBtn.onclick = async () => {
                 if (this.handlers.syncHistory) {
@@ -4079,59 +5017,94 @@ class MenuModal {
                     syncBtn.disabled = false;
                     syncBtn.innerHTML = '<span>🔄 지금 즉시 동기화</span>';
                     
-                    const timeEl = document.getElementById('toki-txt-last-sync');
+                    const timeEl = doc.getElementById('toki-txt-last-sync');
                     if (timeEl) timeEl.textContent = new Date().toLocaleTimeString();
                 }
             };
         }
 
-        // 4. Tools Tab
-        const migrationBtn = document.getElementById('toki-btn-migration');
-        if (migrationBtn) migrationBtn.onclick = () => {
-            if(this.handlers.migrateFilenames) this.handlers.migrateFilenames();
-            this.close(overlay);
-        };
+        // 6. Tools Tab Events
+        const migrationBtn = doc.getElementById('toki-btn-migration');
+        if (migrationBtn) {
+            migrationBtn.onclick = () => {
+                if (this.handlers.migrateFilenames) this.handlers.migrateFilenames();
+            };
+        }
 
-        const thumbBtn = document.getElementById('toki-btn-thumb-optim');
-        if (thumbBtn) thumbBtn.onclick = () => {
-            if(this.handlers.migrateThumbnails) this.handlers.migrateThumbnails();
-            this.close(overlay);
-        };
+        const thumbBtn = doc.getElementById('toki-btn-thumb-optim');
+        if (thumbBtn) {
+            thumbBtn.onclick = () => {
+                if (this.handlers.migrateThumbnails) this.handlers.migrateThumbnails();
+            };
+        }
 
-        const logBtn = document.getElementById('toki-btn-log');
-        if (logBtn) logBtn.onclick = () => {
-            if(this.handlers.toggleLog) this.handlers.toggleLog();
-        };
+        const treeEditorBtn = doc.getElementById('toki-btn-tree-editor');
+        if (treeEditorBtn) {
+            treeEditorBtn.onclick = () => {
+                const editor = new TreeRuleEditor();
+                editor.show(doc);
+            };
+        }
 
-        const treeEditorBtn = document.getElementById('toki-btn-tree-editor');
-        if (treeEditorBtn) treeEditorBtn.onclick = () => {
-            const editor = new TreeRuleEditor();
-            editor.show();
-        };
-    }
+        const formEditorBtn = doc.getElementById('toki-btn-form-editor');
+        if (formEditorBtn) {
+            formEditorBtn.onclick = () => {
+                const editor = new FormRuleEditor();
+                editor.show(doc);
+            };
+        }
 
-    // getEpisodeRange 핸들러는 슬라이더 제거로 더 이상 UI에서 사용 안 함 (main.js 호환용으로 유지)
+        // 7. Queue Control Events
+        const queueClearBtn = doc.getElementById('toki-btn-queue-clear');
+        if (queueClearBtn) {
+            queueClearBtn.onclick = () => {
+                if (typeof window.tokiQueue !== 'undefined') {
+                    if (confirm('🧹 완료/실패 항목을 정리하시겠습니까?')) {
+                        window.tokiQueue.removeCompletedAndFailedItems();
+                        LogBox.getInstance().updateProgressUI();
+                    }
+                }
+            };
+        }
 
-    show() {
-        this.render();
-    }
+        const queuePauseBtn = doc.getElementById('toki-btn-queue-pause');
+        if (queuePauseBtn) {
+            queuePauseBtn.onclick = () => {
+                if (typeof window.tokiQueue !== 'undefined') {
+                    const isPaused = window.tokiQueue.getQueuePaused();
+                    window.tokiQueue.setQueuePaused(!isPaused);
+                    LogBox.getInstance().updateProgressUI();
+                }
+            };
+        }
 
-    close(overlay) {
-        if(overlay) {
-            // overlay.style.transition = 'opacity 0.2s'; // CSS handles transition
-            overlay.classList.add('toki-hidden');
-            setTimeout(() => overlay.remove(), 200);
+        const queueStopBtn = doc.getElementById('toki-btn-queue-stop');
+        if (queueStopBtn) {
+            queueStopBtn.onclick = () => {
+                if (typeof window.tokiQueue !== 'undefined') {
+                    if (confirm('⚠️ 모든 배치 작업을 중단하시겠습니까?')) {
+                        window.tokiQueue.stopAllWorkers();
+                        LogBox.getInstance().updateProgressUI();
+                    }
+                }
+            };
         }
     }
 
-    toggle() {
-        const existing = document.querySelector('.toki-modal-overlay');
-        if (existing) this.close(existing);
-        else this.show();
+    show() {
+        LogBox.getInstance().openDashboard();
     }
 
-    updateNativeHelper(policy) {
-        const helper = document.getElementById('toki-native-helper');
+    close() {
+        LogBox.getInstance().hide();
+    }
+
+    toggle() {
+        LogBox.getInstance().toggle();
+    }
+
+    updateNativeHelper(doc, policy) {
+        const helper = doc.getElementById('toki-native-helper');
         if (helper) {
             if (policy === 'native') {
                 helper.classList.remove('toki-hidden');
@@ -4139,6 +5112,13 @@ class MenuModal {
                 helper.classList.add('toki-hidden');
             }
         }
+    }
+
+    static getInstance() {
+        if (!MenuModal.instance) {
+            new MenuModal();
+        }
+        return MenuModal.instance;
     }
 }
 
@@ -4221,8 +5201,9 @@ class TreeRuleEditor {
         };
     }
 
-    show() {
-        this.overlay = document.createElement('div');
+    show(popupDoc = document) {
+        const doc = popupDoc;
+        this.overlay = doc.createElement('div');
         this.overlay.className = 'toki-modal-overlay';
         // z-index handled by .toki-tree-modal in ui.css
         
@@ -4263,20 +5244,21 @@ class TreeRuleEditor {
             </div>
         `;
 
-        document.body.appendChild(this.overlay);
-        this.render();
-        this.bindEvents();
+        doc.body.appendChild(this.overlay);
+        this.render(doc);
+        this.bindEvents(doc);
     }
 
-    render() {
+    render(popupDoc = document) {
+        const doc = popupDoc;
         const root = this.overlay.querySelector('#tree-root');
         root.innerHTML = '';
         
-        const mainNode = document.createElement('div');
+        const mainNode = doc.createElement('div');
         mainNode.innerHTML = `<div class="toki-tree-item"><span class="toki-tree-key">Rules [Array]</span><button class="toki-tree-btn-small" id="tree-add-rule">➕ 룰 추가</button></div>`;
         root.appendChild(mainNode);
 
-        const listNode = document.createElement('div');
+        const listNode = doc.createElement('div');
         listNode.className = 'toki-tree-node';
         this.rules.forEach((rule, idx) => {
             listNode.appendChild(this.renderNode(rule, `[${idx}]`, rule.name || rule.id || `Rule ${idx + 1}`));
@@ -4286,19 +5268,19 @@ class TreeRuleEditor {
         this.updateJsonPreview();
     }
 
-    renderNode(data, path, label = '') {
-        const wrapper = document.createElement('div');
+    renderNode(data, path, label = '', doc = document) {
+        const wrapper = doc.createElement('div');
         wrapper.className = 'toki-tree-node-wrapper';
 
-        const item = document.createElement('div');
+        const item = doc.createElement('div');
         item.className = 'toki-tree-item';
         
         const isObject = data !== null && typeof data === 'object';
-        const toggle = document.createElement('span');
+        const toggle = doc.createElement('span');
         toggle.className = 'toki-tree-toggle';
         toggle.textContent = isObject ? '▼' : '•';
         
-        const keySpan = document.createElement('span');
+        const keySpan = doc.createElement('span');
         keySpan.className = 'toki-tree-key';
         keySpan.textContent = label || path.split('.').pop();
         if (this.hints[keySpan.textContent]) {
@@ -4309,17 +5291,17 @@ class TreeRuleEditor {
         item.appendChild(keySpan);
 
         if (!isObject) {
-            const input = document.createElement('input');
+            const input = doc.createElement('input');
             input.className = 'toki-tree-val';
             input.value = data;
             input.dataset.path = path;
             input.oninput = (e) => this.updateValue(path, e.target.value);
             item.appendChild(input);
         } else {
-            const actions = document.createElement('div');
+            const actions = doc.createElement('div');
             actions.className = 'toki-tree-actions';
             
-            const btnDel = document.createElement('button');
+            const btnDel = doc.createElement('button');
             btnDel.className = 'toki-tree-btn-small';
             btnDel.textContent = '🗑️';
             btnDel.onclick = () => this.removeNode(path);
@@ -4331,10 +5313,10 @@ class TreeRuleEditor {
         wrapper.appendChild(item);
 
         if (isObject) {
-            const children = document.createElement('div');
+            const children = doc.createElement('div');
             children.className = 'toki-tree-node';
             Object.keys(data).forEach(key => {
-                children.appendChild(this.renderNode(data[key], `${path}.${key}`, key));
+                children.appendChild(this.renderNode(data[key], `${path}.${key}`, key, doc));
             });
             wrapper.appendChild(children);
 
@@ -4391,7 +5373,7 @@ class TreeRuleEditor {
         editor.value = JSON.stringify(this.rules, null, 2);
     }
 
-    bindEvents() {
+    bindEvents(popupDoc = document) {
         const overlay = this.overlay;
         
         overlay.querySelector('#tree-close-btn').onclick = () => overlay.remove();
@@ -4574,6 +5556,717 @@ class TreeRuleEditor {
         };
     }
 }
+
+/**
+ * FormRuleEditor (v1.21.0)
+ * Specialist UI for managing parsing rules with a sleek Form-Tree Hybrid Two-Track interface.
+ */
+class FormRuleEditor {
+    constructor() {
+        this.rules = RuleManager/* RuleManager */.u.getCustomRules() || [];
+        this.overlay = null;
+        this.currentRuleIndex = 0;
+        this.isDropperActive = false;
+        this.targetDropperInputId = null;
+        
+        // Ensure at least one rule exists
+        if (this.rules.length === 0) {
+            this.rules.push(this.createNewRuleDraft());
+        }
+    }
+
+    createNewRuleDraft() {
+        return {
+            id: 'new_site_rule',
+            name: '신규 사이트 규칙',
+            urlPattern: '.*example\\\\.com/.*',
+            category: 'Webtoon',
+            meta: {
+                title: 'h1.title',
+                author: 'span.author',
+                thumb: { selector: 'div.thumb > img', attr: 'src' }
+            },
+            list: {
+                container: 'ul.list',
+                item: 'li.item',
+                num: 'span.no',
+                title: 'a.link',
+                link: { selector: 'a.link', attr: 'href' }
+            },
+            viewer: {
+                fetchMethod: 'iframe',
+                imageRegex: 'https?:\\\\/\\\\/[a-zA-Z0-9_\\\\.\\\\/-]+\\\\.(?:jpg|png|webp|gif)',
+                imageContainer: 'div.viewer',
+                imageItem: 'img',
+                lazyAttrOptions: ['data-src', 'src']
+            }
+        };
+    }
+
+    show(popupDoc = document) {
+        const doc = popupDoc;
+        if (doc.getElementById('toki-form-editor-overlay')) return;
+
+        this.overlay = doc.createElement('div');
+        this.overlay.id = 'toki-form-editor-overlay';
+        this.overlay.className = 'toki-modal-overlay';
+        this.overlay.style.zIndex = '10001';
+        
+        this.render();
+        doc.body.appendChild(this.overlay);
+        this.bindEvents(doc);
+        this.loadRuleIntoForm();
+    }
+
+    render() {
+        this.overlay.innerHTML = `
+            <div class="toki-modal toki-form-editor-modal">
+                <div class="toki-modal-header">
+                    <div class="toki-modal-title">📝 간편 규칙 편집기 (Form Editor) <span class="toki-text-xs">v1.21.0</span></div>
+                    <div class="toki-flex-row-8">
+                        <button class="toki-btn-rule" id="form-btn-export">📤 내보내기</button>
+                        <button class="toki-btn-rule" id="form-btn-import">📥 가져오기</button>
+                        <button class="toki-modal-close" id="form-close-btn">&times;</button>
+                    </div>
+                </div>
+                <div class="toki-form-editor-container">
+                    <!-- Left Column: Input Form -->
+                    <div class="toki-form-editor-left">
+                        <!-- 1. 기본 정보 카드 -->
+                        <div class="toki-form-card">
+                            <div class="toki-form-card-title">
+                                <span>🌐 기본 사이트 정보</span>
+                                <select id="form-rule-selector" class="toki-select toki-btn-sm" style="width: auto; padding: 4px 24px 4px 10px; margin: 0;">
+                                    ${this.rules.map((r, i) => `<option value="${i}">${r.name} (${r.id})</option>`).join('')}
+                                    <option value="new">+ 신규 규칙 추가</option>
+                                </select>
+                            </div>
+                            <div class="toki-form-grid">
+                                <div class="toki-form-row">
+                                    <span class="toki-form-row-label">규칙 ID</span>
+                                    <input type="text" id="rule-id" class="toki-input-compact" placeholder="예: blacktoon_webtoon">
+                                </div>
+                                <div class="toki-form-row">
+                                    <span class="toki-form-row-label">규칙 이름</span>
+                                    <input type="text" id="rule-name" class="toki-input-compact" placeholder="예: 블랙툰 웹툰 규칙">
+                                </div>
+                            </div>
+                            <div class="toki-form-grid">
+                                <div class="toki-form-row">
+                                    <span class="toki-form-row-label">URL 패턴 (정규식)</span>
+                                    <input type="text" id="rule-urlPattern" class="toki-input-compact" placeholder="예: .*/webtoon/.*">
+                                </div>
+                                <div class="toki-form-row">
+                                    <span class="toki-form-row-label">카테고리</span>
+                                    <select id="rule-category" class="toki-select" style="padding: 10px 14px; font-size:13px; height:38px;">
+                                        <option value="Webtoon">Webtoon (웹툰)</option>
+                                        <option value="Manga">Manga (만화)</option>
+                                        <option value="Novel">Novel (소설)</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 2. 작품 정보(Meta) 카드 -->
+                        <div class="toki-form-card">
+                            <div class="toki-form-card-title">📖 작품 정보 추출 (Meta)</div>
+                            <div class="toki-form-grid">
+                                <div class="toki-form-row">
+                                    <div class="toki-form-row-header">
+                                        <span class="toki-form-row-label">제목 셀렉터</span>
+                                        <span class="toki-form-dropper-btn" data-target="rule-meta-title" title="화면에서 스포이드로 선택">🎯</span>
+                                    </div>
+                                    <div class="toki-flex-row-8">
+                                        <input type="text" id="rule-meta-title" class="toki-input-compact toki-flex-1" placeholder="예: h1.hero-v2-title">
+                                        <span class="toki-badge-match zero" id="match-rule-meta-title">0</span>
+                                    </div>
+                                </div>
+                                <div class="toki-form-row">
+                                    <div class="toki-form-row-header">
+                                        <span class="toki-form-row-label">작가 셀렉터</span>
+                                        <span class="toki-form-dropper-btn" data-target="rule-meta-author" title="화면에서 스포이드로 선택">🎯</span>
+                                    </div>
+                                    <div class="toki-flex-row-8">
+                                        <input type="text" id="rule-meta-author" class="toki-input-compact toki-flex-1" placeholder="예: div.hero-v2-author">
+                                        <span class="toki-badge-match zero" id="match-rule-meta-author">0</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="toki-form-grid">
+                                <div class="toki-form-row">
+                                    <div class="toki-form-row-header">
+                                        <span class="toki-form-row-label">썸네일 이미지 셀렉터</span>
+                                        <span class="toki-form-dropper-btn" data-target="rule-meta-thumb-selector" title="화면에서 스포이드로 선택">🎯</span>
+                                    </div>
+                                    <div class="toki-flex-row-8">
+                                        <input type="text" id="rule-meta-thumb-selector" class="toki-input-compact toki-flex-1" placeholder="예: div.hero-v2-thumb img">
+                                        <span class="toki-badge-match zero" id="match-rule-meta-thumb-selector">0</span>
+                                    </div>
+                                </div>
+                                <div class="toki-form-row">
+                                    <span class="toki-form-row-label">썸네일 추출 속성</span>
+                                    <input type="text" id="rule-meta-thumb-attr" class="toki-input-compact" placeholder="기본값: src (비워두면 src)">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 3. 회차 목록(List) 카드 -->
+                        <div class="toki-form-card">
+                            <div class="toki-form-card-title">📜 회차 목록 추출 (List)</div>
+                            <div class="toki-form-grid">
+                                <div class="toki-form-row">
+                                    <div class="toki-form-row-header">
+                                        <span class="toki-form-row-label">목록 부모 컨테이너</span>
+                                        <span class="toki-form-dropper-btn" data-target="rule-list-container" title="화면에서 스포이드로 선택">🎯</span>
+                                    </div>
+                                    <div class="toki-flex-row-8">
+                                        <input type="text" id="rule-list-container" class="toki-input-compact toki-flex-1" placeholder="예: ul.ep-list-v2">
+                                        <span class="toki-badge-match zero" id="match-rule-list-container">0</span>
+                                    </div>
+                                </div>
+                                <div class="toki-form-row">
+                                    <div class="toki-form-row-header">
+                                        <span class="toki-form-row-label">회차 아이템 (개별 행)</span>
+                                        <span class="toki-form-dropper-btn" data-target="rule-list-item" title="화면에서 스포이드로 선택">🎯</span>
+                                    </div>
+                                    <div class="toki-flex-row-8">
+                                        <input type="text" id="rule-list-item" class="toki-input-compact toki-flex-1" placeholder="예: li.ep-row-v2">
+                                        <span class="toki-badge-match zero" id="match-rule-list-item">0</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="toki-form-grid">
+                                <div class="toki-form-row">
+                                    <div class="toki-form-row-header">
+                                        <span class="toki-form-row-label">회차 링크 셀렉터</span>
+                                        <span class="toki-form-dropper-btn" data-target="rule-list-link-selector" title="화면에서 스포이드로 선택">🎯</span>
+                                    </div>
+                                    <div class="toki-flex-row-8">
+                                        <input type="text" id="rule-list-link-selector" class="toki-input-compact toki-flex-1" placeholder="예: a.ep-row-v2-link">
+                                        <span class="toki-badge-match zero" id="match-rule-list-link-selector">0</span>
+                                    </div>
+                                </div>
+                                <div class="toki-form-row">
+                                    <div class="toki-form-row-header">
+                                        <span class="toki-form-row-label">회차 제목 셀렉터</span>
+                                        <span class="toki-form-dropper-btn" data-target="rule-list-title" title="화면에서 스포이드로 선택">🎯</span>
+                                    </div>
+                                    <div class="toki-flex-row-8">
+                                        <input type="text" id="rule-list-title" class="toki-input-compact toki-flex-1" placeholder="예: .ep-row-v2-title strong">
+                                        <span class="toki-badge-match zero" id="match-rule-list-title">0</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 4. 본문/뷰어(Viewer) 카드 -->
+                        <div class="toki-form-card">
+                            <div class="toki-form-card-title">🖼️ 본문/이미지 추출 (Viewer)</div>
+                            <div class="toki-form-grid">
+                                <div class="toki-form-row">
+                                    <span class="toki-form-row-label">수집 방식 (fetchMethod)</span>
+                                    <select id="rule-viewer-fetchMethod" class="toki-select" style="padding: 10px 14px; font-size:13px; height:38px;">
+                                        <option value="iframe">iframe (정적/동적 DOM 수집)</option>
+                                        <option value="api">api (소설 및 암호화 API)</option>
+                                        <option value="direct">direct (단일 다이렉트 패치)</option>
+                                    </select>
+                                </div>
+                                <div class="toki-form-row">
+                                    <div class="toki-form-row-header">
+                                        <span class="toki-form-row-label">뷰어 본문/이미지 부모 컨테이너</span>
+                                        <span class="toki-form-dropper-btn" data-target="rule-viewer-imageContainer" title="화면에서 스포이드로 선택">🎯</span>
+                                    </div>
+                                    <div class="toki-flex-row-8">
+                                        <input type="text" id="rule-viewer-imageContainer" class="toki-input-compact toki-flex-1" placeholder="예: div.vw-imgs, article.viewer">
+                                        <span class="toki-badge-match zero" id="match-rule-viewer-imageContainer">0</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="toki-form-grid">
+                                <div class="toki-form-row">
+                                    <div class="toki-form-row-header">
+                                        <span class="toki-form-row-label">뷰어 이미지/문단 태그</span>
+                                        <span class="toki-form-dropper-btn" data-target="rule-viewer-imageItem" title="화면에서 스포이드로 선택">🎯</span>
+                                    </div>
+                                    <div class="toki-flex-row-8">
+                                        <input type="text" id="rule-viewer-imageItem" class="toki-input-compact toki-flex-1" placeholder="예: img 또는 p">
+                                        <span class="toki-badge-match zero" id="match-rule-viewer-imageItem">0</span>
+                                    </div>
+                                </div>
+                                <div class="toki-form-row">
+                                    <span class="toki-form-row-label">레이지로드 속성 후보 (반점 구분)</span>
+                                    <input type="text" id="rule-viewer-lazyAttrOptions" class="toki-input-compact" placeholder="예: data-src, data-lazy, src">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right Column: JSON Preview & Sandbox -->
+                    <div class="toki-form-editor-right">
+                        <div class="toki-flex-between">
+                            <span class="toki-form-row-label" style="font-weight: 800;">⚙️ 실시간 완성 JSON 규칙</span>
+                            <span id="form-json-status" class="toki-badge-match ok">✓ Valid</span>
+                        </div>
+                        <textarea class="toki-tree-json-preview toki-flex-1" id="form-json-editor" spellcheck="false" style="font-size: 11px; line-height:1.4;"></textarea>
+                        
+                        <div class="toki-form-card" style="margin: 0; padding: 12px; background: rgba(0,0,0,0.02);">
+                            <div class="toki-form-row-label" style="font-weight: 800; color: var(--toki-primary);">🧪 로컬 셀렉터 가상 테스트</div>
+                            <div class="toki-flex-row-8">
+                                <input type="text" id="form-test-url" class="toki-input-compact toki-flex-1" style="height:32px; font-size:12px; padding: 4px 10px;" value="${window.location.href}">
+                                <button class="toki-btn-rule toki-text-success" id="form-btn-test" style="height:32px; padding:0 12px;">테스트</button>
+                            </div>
+                            <div id="form-test-result" class="toki-text-xs" style="margin-top: 4px; color: var(--toki-text-muted);">
+                                현재 페이지 또는 지정한 URL 주소의 DOM 파싱 검증을 원클릭으로 가상 작동해보세요.
+                            </div>
+                        </div>
+                        
+                        <button class="toki-btn-action toki-btn-lavender" id="form-btn-save" style="height: 48px; border-radius:14px; box-shadow: 0 4px 12px rgba(106, 90, 205, 0.2);">
+                            저장 및 즉시 스케줄러 적용
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    loadRuleIntoForm() {
+        const rule = this.rules[this.currentRuleIndex];
+        if (!rule) return;
+
+        // Base
+        this.setValue('rule-id', rule.id || '');
+        this.setValue('rule-name', rule.name || '');
+        this.setValue('rule-urlPattern', rule.urlPattern || '');
+        this.setValue('rule-category', rule.category || 'Webtoon');
+
+        // Meta
+        this.setValue('rule-meta-title', typeof rule.meta?.title === 'string' ? rule.meta.title : rule.meta?.title?.selector || '');
+        this.setValue('rule-meta-author', typeof rule.meta?.author === 'string' ? rule.meta.author : rule.meta?.author?.selector || '');
+        this.setValue('rule-meta-thumb-selector', rule.meta?.thumb?.selector || (typeof rule.meta?.thumb === 'string' ? rule.meta.thumb : ''));
+        this.setValue('rule-meta-thumb-attr', rule.meta?.thumb?.attr || '');
+
+        // List
+        this.setValue('rule-list-container', rule.list?.container || '');
+        this.setValue('rule-list-item', rule.list?.item || '');
+        this.setValue('rule-list-link-selector', rule.list?.link?.selector || (typeof rule.list?.link === 'string' ? rule.list.link : ''));
+        this.setValue('rule-list-title', rule.list?.title || '');
+
+        // Viewer
+        this.setValue('rule-viewer-fetchMethod', rule.viewer?.fetchMethod || 'iframe');
+        this.setValue('rule-viewer-imageContainer', rule.viewer?.imageContainer || '');
+        this.setValue('rule-viewer-imageItem', rule.viewer?.imageItem || '');
+        this.setValue('rule-viewer-lazyAttrOptions', Array.isArray(rule.viewer?.lazyAttrOptions) ? rule.viewer.lazyAttrOptions.join(', ') : '');
+
+        this.updateJsonPreview();
+        this.runRealtimeDomMatchCount();
+    }
+
+    setValue(id, val) {
+        const el = this.overlay.querySelector('#' + id);
+        if (el) el.value = val;
+    }
+
+    getValue(id) {
+        const el = this.overlay.querySelector('#' + id);
+        return el ? el.value.trim() : '';
+    }
+
+    updateJsonPreview() {
+        const rule = this.rules[this.currentRuleIndex];
+        if (!rule) return;
+
+        // Sync form values into rule object
+        rule.id = this.getValue('rule-id');
+        rule.name = this.getValue('rule-name');
+        rule.urlPattern = this.getValue('rule-urlPattern');
+        rule.category = this.getValue('rule-category');
+
+        rule.meta = {
+            title: this.getValue('rule-meta-title'),
+            author: this.getValue('rule-meta-author'),
+            thumb: {
+                selector: this.getValue('rule-meta-thumb-selector'),
+                attr: this.getValue('rule-meta-thumb-attr') || 'src'
+            }
+        };
+
+        rule.list = {
+            container: this.getValue('rule-list-container'),
+            item: this.getValue('rule-list-item'),
+            num: 'span.no', // Default baseline fallback
+            title: this.getValue('rule-list-title'),
+            link: {
+                selector: this.getValue('rule-list-link-selector'),
+                attr: 'href'
+            }
+        };
+
+        const lazyStr = this.getValue('rule-viewer-lazyAttrOptions');
+        rule.viewer = {
+            fetchMethod: this.getValue('rule-viewer-fetchMethod'),
+            imageRegex: rule.viewer?.imageRegex || 'https?:\\\\/\\\\/[a-zA-Z0-9_\\\\.\\\\/-]+\\\\.(?:jpg|png|webp|gif)',
+            imageContainer: this.getValue('rule-viewer-imageContainer'),
+            imageItem: this.getValue('rule-viewer-imageItem'),
+            lazyAttrOptions: lazyStr ? lazyStr.split(',').map(s => s.trim()) : []
+        };
+
+        const editor = this.overlay.querySelector('#form-json-editor');
+        if (editor) {
+            editor.value = JSON.stringify(rule, null, 2);
+        }
+    }
+
+    runRealtimeDomMatchCount() {
+        const selectors = [
+            'rule-meta-title',
+            'rule-meta-author',
+            'rule-meta-thumb-selector',
+            'rule-list-container',
+            'rule-list-item',
+            'rule-list-link-selector',
+            'rule-list-title',
+            'rule-viewer-imageContainer',
+            'rule-viewer-imageItem'
+        ];
+
+        selectors.forEach(id => {
+            const selector = this.getValue(id);
+            const badge = this.overlay.querySelector('#match-' + id);
+            if (!badge) return;
+
+            if (!selector) {
+                badge.textContent = '0';
+                badge.className = 'toki-badge-match zero';
+                return;
+            }
+
+            try {
+                const count = document.querySelectorAll(selector).length;
+                badge.textContent = count;
+                if (count > 0) {
+                    badge.className = 'toki-badge-match ok';
+                } else {
+                    badge.className = 'toki-badge-match zero';
+                }
+            } catch (e) {
+                badge.textContent = 'Err';
+                badge.className = 'toki-badge-match error';
+            }
+        });
+    }
+
+    bindEvents(popupDoc = document) {
+        const doc = popupDoc;
+        
+        // Close
+        this.overlay.querySelector('#form-close-btn').onclick = () => this.overlay.remove();
+
+        // 룰 셀렉터 체인지
+        const selector = this.overlay.querySelector('#form-rule-selector');
+        selector.onchange = () => {
+            if (selector.value === 'new') {
+                const newRule = this.createNewRuleDraft();
+                newRule.id = 'custom_rule_' + Date.now();
+                newRule.name = '새로운 규칙 ' + (this.rules.length + 1);
+                this.rules.push(newRule);
+                this.currentRuleIndex = this.rules.length - 1;
+                
+                // Re-render select options
+                selector.innerHTML = `
+                    ${this.rules.map((r, i) => `<option value="${i}">${r.name} (${r.id})</option>`).join('')}
+                    <option value="new">+ 신규 규칙 추가</option>
+                `;
+                selector.value = this.currentRuleIndex;
+            } else {
+                this.currentRuleIndex = parseInt(selector.value);
+            }
+            this.loadRuleIntoForm();
+        };
+
+        // Form inputs -> JSON Preview & Match Count
+        const inputs = this.overlay.querySelectorAll('.toki-input-compact, .toki-select');
+        inputs.forEach(el => {
+            el.oninput = () => {
+                this.updateJsonPreview();
+                this.runRealtimeDomMatchCount();
+            };
+        });
+
+        // JSON Preview -> Form (Reverse binding)
+        const jsonEditor = this.overlay.querySelector('#form-json-editor');
+        jsonEditor.oninput = () => {
+            const status = this.overlay.querySelector('#form-json-status');
+            try {
+                const parsed = JSON.parse(jsonEditor.value);
+                status.textContent = '✓ Valid';
+                status.className = 'toki-badge-match ok';
+                this.rules[this.currentRuleIndex] = parsed;
+                // Re-populate without recursive oninput loop
+                this.loadFormFromData(parsed);
+            } catch (e) {
+                status.textContent = '⚠️ Invalid';
+                status.className = 'toki-badge-match error';
+            }
+        };
+
+        // Dropper Buttons
+        const droppers = this.overlay.querySelectorAll('.toki-form-dropper-btn');
+        droppers.forEach(btn => {
+            btn.onclick = () => {
+                const targetId = btn.getAttribute('data-target');
+                this.activateDropper(targetId);
+            };
+        });
+
+        // Test button
+        this.overlay.querySelector('#form-btn-test').onclick = async () => {
+            const res = this.overlay.querySelector('#form-test-result');
+            res.textContent = '⏳ 파싱 테스트 작동 중...';
+            try {
+                const url = this.overlay.querySelector('#form-test-url').value;
+                const domain = new URL(url).origin;
+                const rule = this.rules[this.currentRuleIndex];
+
+                const parser = new GenericParser/* GenericParser */.b(domain, rule);
+                const result = await (0,extractor/* extractEpisodeData */.d)(document, parser, { site: 'test', category: rule.category }, false);
+
+                res.innerHTML = `
+                    <div class="toki-text-success" style="font-weight:800;">성공! (Virtual Match)</div>
+                    <div>• 제목: <strong>${result.title || '미추출'}</strong></div>
+                    <div>• 총 에피소드 수: <strong>${result.urls?.length || (result.content ? '1 (Text)' : '0')}개</strong></div>
+                `;
+            } catch (e) {
+                res.innerHTML = `<div class="toki-text-danger">❌ 실패: ${e.message}</div>`;
+            }
+        };
+
+        // Save Button
+        this.overlay.querySelector('#form-btn-save').onclick = () => {
+            this.updateJsonPreview();
+            RuleManager/* RuleManager */.u.saveCustomRules(this.rules);
+            const status = this.overlay.querySelector('#form-json-status');
+            status.textContent = '💾 저장됨!';
+            status.className = 'toki-badge-match ok';
+            setTimeout(() => {
+                status.textContent = '✓ Valid';
+            }, 1500);
+            
+            // Notify LogBox of parser reload
+            new LogBox().log('[FormEditor] 새로운 파싱 규칙이 디스크 큐 세마포어에 즉시 영속 반영되었습니다.', 'success');
+        };
+
+        // Export & Import
+        this.overlay.querySelector('#form-btn-export').onclick = () => {
+            const blob = new Blob([JSON.stringify(this.rules, null, 2)], {type: 'application/json'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `tokisync_custom_rules_${Date.now()}.json`;
+            a.click();
+        };
+
+        this.overlay.querySelector('#form-btn-import').onclick = () => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+            input.onchange = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    try {
+                        const parsed = JSON.parse(evt.target.result);
+                        const list = Array.isArray(parsed) ? parsed : (parsed.rules || [parsed]);
+                        this.rules = list;
+                        RuleManager/* RuleManager */.u.saveCustomRules(this.rules);
+                        this.currentRuleIndex = 0;
+                        
+                        // Reset select box options
+                        const selector = this.overlay.querySelector('#form-rule-selector');
+                        selector.innerHTML = `
+                            ${this.rules.map((r, i) => `<option value="${i}">${r.name} (${r.id})</option>`).join('')}
+                            <option value="new">+ 신규 규칙 추가</option>
+                        `;
+                        selector.value = 0;
+                        this.loadRuleIntoForm();
+                    } catch (err) {
+                        alert('잘못된 규칙 JSON 파일입니다: ' + err.message);
+                    }
+                };
+                reader.readAsText(file);
+            };
+            input.click();
+        };
+    }
+
+    loadFormFromData(rule) {
+        this.setValue('rule-id', rule.id || '');
+        this.setValue('rule-name', rule.name || '');
+        this.setValue('rule-urlPattern', rule.urlPattern || '');
+        this.setValue('rule-category', rule.category || 'Webtoon');
+
+        this.setValue('rule-meta-title', typeof rule.meta?.title === 'string' ? rule.meta.title : rule.meta?.title?.selector || '');
+        this.setValue('rule-meta-author', typeof rule.meta?.author === 'string' ? rule.meta.author : rule.meta?.author?.selector || '');
+        this.setValue('rule-meta-thumb-selector', rule.meta?.thumb?.selector || '');
+        this.setValue('rule-meta-thumb-attr', rule.meta?.thumb?.attr || '');
+
+        this.setValue('rule-list-container', rule.list?.container || '');
+        this.setValue('rule-list-item', rule.list?.item || '');
+        this.setValue('rule-list-link-selector', rule.list?.link?.selector || '');
+        this.setValue('rule-list-title', rule.list?.title || '');
+
+        this.setValue('rule-viewer-fetchMethod', rule.viewer?.fetchMethod || 'iframe');
+        this.setValue('rule-viewer-imageContainer', rule.viewer?.imageContainer || '');
+        this.setValue('rule-viewer-imageItem', rule.viewer?.imageItem || '');
+        this.setValue('rule-viewer-lazyAttrOptions', Array.isArray(rule.viewer?.lazyAttrOptions) ? rule.viewer.lazyAttrOptions.join(', ') : '');
+
+        this.runRealtimeDomMatchCount();
+    }
+
+    activateDropper(targetInputId) {
+        if (this.isDropperActive) return;
+
+        this.isDropperActive = true;
+        this.targetDropperInputId = targetInputId;
+
+        // Hide form editor and main logbox completely (physical display none to bypass CSS animation forwards)
+        const formOverlay = document.getElementById('toki-form-editor-overlay');
+        const logBox = document.getElementById('toki-logbox');
+        
+        if (formOverlay) {
+            formOverlay.style.display = 'none';
+            formOverlay.style.pointerEvents = 'none';
+        }
+        if (logBox) {
+            logBox.style.display = 'none';
+        }
+
+        const style = document.createElement('style');
+        style.id = 'toki-dropper-style';
+        style.innerHTML = `
+            .toki-dropper-hover {
+                outline: 3px dashed #7c3aed !important;
+                outline-offset: 2px !important;
+                background-color: rgba(124, 58, 237, 0.15) !important;
+                cursor: crosshair !important;
+                transition: outline 0.1s ease !important;
+            }
+        `;
+        document.head.appendChild(style);
+
+        const onMouseOver = (e) => {
+            e.stopPropagation();
+            if (e.target.closest('#toki-form-editor-overlay') || e.target.closest('#toki-logbox')) return;
+            e.target.classList.add('toki-dropper-hover');
+        };
+
+        const onMouseOut = (e) => {
+            e.stopPropagation();
+            e.target.classList.remove('toki-dropper-hover');
+        };
+
+        const onClick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+
+            const element = e.target;
+            element.classList.remove('toki-dropper-hover');
+
+            const selector = this.getUniqueSelector(element);
+            this.setValue(this.targetDropperInputId, selector);
+
+            // Clean up
+            document.removeEventListener('mouseover', onMouseOver, true);
+            document.removeEventListener('mouseout', onMouseOut, true);
+            document.removeEventListener('click', onClick, true);
+            
+            const styleNode = document.getElementById('toki-dropper-style');
+            if (styleNode) styleNode.remove();
+
+            // Restore form editor and logbox visibility to their default stylesheet/class states
+            const restoredFormOverlay = document.getElementById('toki-form-editor-overlay');
+            const restoredLogBox = document.getElementById('toki-logbox');
+            
+            if (restoredFormOverlay) {
+                restoredFormOverlay.style.display = '';
+                restoredFormOverlay.style.pointerEvents = 'auto';
+            }
+            if (restoredLogBox) {
+                restoredLogBox.style.display = '';
+            }
+            this.isDropperActive = false;
+
+            this.updateJsonPreview();
+            this.runRealtimeDomMatchCount();
+            
+            new LogBox().log(`[Dropper] 자동 CSS 셀렉터 감지 완료: ${selector}`, 'success');
+        };
+
+        document.addEventListener('mouseover', onMouseOver, true);
+        document.addEventListener('mouseout', onMouseOut, true);
+        document.addEventListener('click', onClick, true);
+    }
+
+    getUniqueSelector(el) {
+        if (!(el instanceof Element)) return '';
+        const path = [];
+        let current = el;
+
+        while (current && current.nodeType === Node.ELEMENT_NODE) {
+            let selector = current.nodeName.toLowerCase();
+            
+            if (current.id) {
+                selector += '#' + current.id;
+                path.unshift(selector);
+                break; // IDs are unique enough
+            } else {
+                let className = '';
+                if (current.className) {
+                    // Extract classes ignoring toki specific classes
+                    const classes = current.className.split(/\\s+/).filter(c => c && !c.startsWith('toki-'));
+                    if (classes.length > 0) {
+                        className = '.' + classes.join('.');
+                    }
+                }
+                selector += className;
+                
+                // If not unique among siblings, add nth-of-type
+                let sibling = current;
+                let nth = 1;
+                while (sibling = sibling.previousElementSibling) {
+                    if (sibling.nodeName.toLowerCase() === current.nodeName.toLowerCase()) nth++;
+                }
+                if (nth > 1) {
+                    // Avoid nth-of-type for generic structural wrappers unless required
+                    if (!className && (selector === 'div' || selector === 'li')) {
+                        selector += `:nth-of-type(${nth})`;
+                    }
+                }
+            }
+            path.unshift(selector);
+            current = current.parentNode;
+        }
+
+        // Refine path to make it shorter and cleaner
+        let finalPath = path.join(' > ');
+        // If too long, try to simplify
+        if (path.length > 3) {
+            const lastThree = path.slice(-3);
+            finalPath = lastThree.join(' > ');
+            // If still unique in document, use it
+            if (document.querySelectorAll(finalPath).length === 1) {
+                return finalPath;
+            }
+            // Otherwise try query with class of last item
+            const lastItem = path[path.length - 1];
+            if (lastItem.includes('.') && document.querySelectorAll(lastItem).length === 1) {
+                return lastItem;
+            }
+        }
+        return finalPath;
+    }
+}
+
 
 
 /***/ })
@@ -4895,15 +6588,101 @@ class TxtBuilder {
 var ui = __webpack_require__(989);
 // EXTERNAL MODULE: ./src/core/config.js
 var core_config = __webpack_require__(899);
-// EXTERNAL MODULE: ./src/core/anti_sleep.js
-var anti_sleep = __webpack_require__(209);
+;// ./src/core/anti_sleep.js
+/**
+ * Anti-Sleep Module
+ * Prevents browser tab throttling by playing silent audio
+ */
+
+let audioContext = null;
+let audioEl = null;
+let oscillator = null;
+
+function startSilentAudio() {
+    if (audioContext && audioContext.state === 'running') {
+        console.log('[Anti-Sleep] Already running');
+        return;
+    }
+    
+    try {
+        if (!audioContext) {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        
+        if (audioContext.state === 'suspended') {
+            audioContext.resume();
+        }
+        
+        const dest = audioContext.createMediaStreamDestination();
+        const gain = audioContext.createGain();
+        
+        oscillator = audioContext.createOscillator();
+        oscillator.frequency.value = 1; // 1Hz (Inaudible)
+        oscillator.type = 'sine';
+        gain.gain.value = 0.001; // Near silence
+        
+        oscillator.connect(gain);
+        gain.connect(dest);
+        oscillator.start();
+        
+        if (!audioEl) {
+            audioEl = document.createElement('audio');
+            audioEl.classList.add('toki-hidden');
+            document.body.appendChild(audioEl);
+        }
+        
+        audioEl.srcObject = dest.stream;
+        audioEl.play()
+            .then(() => console.log('🔊 [Anti-Sleep] Audio started successfully'))
+            .catch(e => {
+                console.warn('🚫 [Anti-Sleep] Autoplay blocked:', e);
+                throw e; // Re-throw to let caller handle
+            });
+            
+    } catch (e) {
+        console.error('[Anti-Sleep] Failed to start:', e);
+        throw e;
+    }
+}
+
+function stopSilentAudio() {
+    try {
+        if (oscillator) {
+            oscillator.stop();
+            oscillator.disconnect();
+            oscillator = null;
+        }
+        
+        if (audioEl) {
+            audioEl.pause();
+            audioEl.srcObject = null;
+        }
+        
+        if (audioContext) {
+            audioContext.close().then(() => {
+                audioContext = null;
+                console.log('🔇 [Anti-Sleep] Audio stopped');
+            });
+        }
+    } catch (e) {
+        console.error('[Anti-Sleep] Failed to stop:', e);
+    }
+}
+
+function isAudioRunning() {
+    return audioContext && audioContext.state === 'running';
+}
+
 // EXTERNAL MODULE: ./src/core/gas.js
 var gas = __webpack_require__(488);
 // EXTERNAL MODULE: ./src/core/network.js
 var network = __webpack_require__(391);
-// EXTERNAL MODULE: ./src/core/novel-decryptor.js
-var novel_decryptor = __webpack_require__(602);
+// EXTERNAL MODULE: ./src/core/worker-controller.js
+var worker_controller = __webpack_require__(572);
+// EXTERNAL MODULE: ./src/core/queue.js
+var queue = __webpack_require__(302);
 ;// ./src/core/downloader.js
+
 
 
 
@@ -4927,7 +6706,7 @@ const SLEEP_POLICIES = {
     very_slow: { min: 10000, max: 30000 } // 매우 느림 (10-30초)
 };
 
-async function processItem(item, builder, siteInfo, iframe, parser, seriesTitle = "", targetDoc = null) {
+async function processItem(item, builder, siteInfo, iframe, parser, seriesTitle = "", targetDoc = null, rootFolder = "") {
     const { category } = siteInfo;
     const isNovel = (category === 'Novel' || category === 'novel');
     const viewerCfg = parser.rule.viewer || {};
@@ -4936,80 +6715,74 @@ async function processItem(item, builder, siteInfo, iframe, parser, seriesTitle 
     const config = (0,core_config/* getConfig */.zj)();
     let policy = SLEEP_POLICIES[config.sleepMode] || SLEEP_POLICIES.agile;
 
-    if (isNovel) {
-        logger.log(`[소설] 추출 중: ${item.title}`, 'Downloader');
+    const id = (0,queue/* getQueueItemId */.G8)(seriesTitle, item.num ? item.num.toString() : '');
+    const destination = (config.policy === 'native') ? 'native' : (config.gasUrl ? 'drive' : 'local');
+    
+    // 상태를 'processing'으로 올려 즉시 실시간 수집 연동 시작 (단일/로컬 워커 진행률 연동용)
+    (0,queue/* updateQueueItem */.Gg)(id, { status: 'processing', stage: queue/* WORKER_STAGE */.WB.INIT });
 
-        const text = await (0,novel_decryptor/* fetchNovelText */.UT)(item.src, {
-            ...(viewerCfg.decryptApi || {}),
-            viewerCfg: viewerCfg
-        });
+    const finalRootFolder = rootFolder || seriesTitle || 'UnknownSeries';
 
-        if (text) {
-            builder.addChapter(item.title, text);
-            logger.log(`✅ 추출 성공: ${item.title}`, 'Downloader');
-        } else {
-            throw new Error(`추출 실패 (본문 응답 없음)`);
-        }
+    try {
+        if (isNovel) {
+            logger.log(`[소설] 추출 중: ${item.title}`, 'Downloader');
 
-        await (0,utils/* sleep */.yy)(policy.min, policy.max);
-    } 
-    else {
-        logger.log(`[만화] 추출 중: ${item.title}`, 'Downloader');
-
-        // 자식 팝업 내부에서 스크롤 로드 및 이미지 다운로드까지 전담하여 ArrayBuffer 패키지 회신
-        const popupImages = await (0,novel_decryptor/* fetchComicImages */.gq)(item.src, {
-            viewerCfg: viewerCfg
-        });
-
-        if (popupImages && popupImages.length > 0) {
-            // 부모 탭에서 ArrayBuffer 패키지를 Blob 배열로 환원 (MIME 형식 기반 확장자 유입)
-            const resolvedImages = popupImages.map(img => {
-                const getExtFromMime = (mime) => {
-                    if (!mime) return '.jpg';
-                    const lower = mime.toLowerCase();
-                    if (lower.includes('png')) return '.png';
-                    if (lower.includes('webp')) return '.webp';
-                    if (lower.includes('gif')) return '.gif';
-                    return '.jpg';
-                };
-
-                const mimeType = img.type || 'image/jpeg';
-                const ext = getExtFromMime(mimeType);
-
-                if (img.data) {
-                    return {
-                        url: img.url,
-                        blob: new Blob([img.data], { type: mimeType }),
-                        ext: ext,
-                        isMissing: false
-                    };
-                } else {
-                    return {
-                        url: img.url,
-                        blob: new Blob([]),
-                        ext: ext,
-                        isMissing: true
-                    };
-                }
+            const result = await (0,worker_controller/* fetchNovelText */.UT)(item.src, {
+                decryptApi: viewerCfg.decryptApi || null,
+                viewerCfg: viewerCfg,
+                seriesTitle: seriesTitle,
+                rootFolder: finalRootFolder,
+                queueId: id,
+                episodeTitle: item.title,
+                episodeNum: item.num,
+                folderId: item.folderId || config.folderId || '',
+                destination: destination,
+                novelFormat: config.novelFormat || 'epub',
+                matchedRule: parser.rule,
+                protocolDomain: parser.protocolDomain
             });
 
-            // 제목 정제 규칙 적용
-            let chapterTitleOnly = item.title;
-            if (seriesTitle && chapterTitleOnly.startsWith(seriesTitle)) {
-                chapterTitleOnly = chapterTitleOnly.replace(seriesTitle, '').trim();
+            if (result === true) {
+                logger.log(`✅ [자립형 워커] 소설 수집 및 드라이브/로컬 저장 성공: ${item.title}`, 'Downloader');
+                await (0,utils/* sleep */.yy)(policy.min, policy.max);
+                return true; // Self-contained completed
+            } else if (typeof result === 'string') {
+                // Plan C Fallback (API Decryption) - runs locally in parent
+                builder.addChapter(item.title, result);
+                logger.log(`✅ [Plan C API 폴백] 추출 성공: ${item.title}`, 'Downloader');
+                await (0,utils/* sleep */.yy)(policy.min, policy.max);
+                return false; // Requires parent to save
+            } else {
+                throw new Error(`추출 실패 (소설 본문 응답 없음)`);
             }
+        } 
+        else {
+            logger.log(`[만화] 추출 중: ${item.title}`, 'Downloader');
 
-            const chapterMatch = chapterTitleOnly.match(/(\d+)화/);
-            const chapterNum = chapterMatch ? chapterMatch[1].padStart(4, '0') : item.num;
-            const cleanChapterTitle = `${chapterNum} ${chapterTitleOnly}`;
+            const success = await (0,worker_controller/* fetchComicImages */.gq)(item.src, {
+                viewerCfg: viewerCfg,
+                seriesTitle: seriesTitle,
+                rootFolder: finalRootFolder,
+                queueId: id,
+                episodeTitle: item.title,
+                episodeNum: item.num,
+                folderId: item.folderId || config.folderId || '',
+                destination: destination,
+                matchedRule: parser.rule,
+                protocolDomain: parser.protocolDomain
+            });
 
-            builder.addChapter(cleanChapterTitle, resolvedImages);
-            logger.log(`✅ 추출 및 다운로드 성공: ${item.title} (이미지 ${resolvedImages.length}개)`, 'Downloader');
-        } else {
-            throw new Error(`추출 실패 (이미지 팝업 패키지 획득 불가)`);
+            if (success) {
+                logger.log(`✅ [자립형 워커] 만화 수집 및 드라이브/로컬 저장 성공: ${item.title}`, 'Downloader');
+                await (0,utils/* sleep */.yy)(policy.min, policy.max);
+                return true; // Self-contained completed
+            } else {
+                throw new Error(`추출 실패 (만화 팝업 수집 실패)`);
+            }
         }
-
-        await (0,utils/* sleep */.yy)(policy.min, policy.max);
+    } finally {
+        // 단일/로컬 워커 수집 완료/실패 후 대기열 임시 아이템 클린업
+        (0,queue/* removeQueueItem */.d$)(id);
     }
 }
 
@@ -5041,11 +6814,11 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
     const logger = ui.LogBox.getInstance();
     logger.init();
     logger.show();
-    logger.log(`다운로드 시작 (정책: ${policy}, 강제 덮어쓰기: ${forceOverwrite})...`);
+    logger.info(`다운로드 시작 (정책: ${policy}, 강제 덮어쓰기: ${forceOverwrite})...`);
 
     // Auto-start Anti-Sleep mode
     try {
-        (0,anti_sleep/* startSilentAudio */.yS)();
+        startSilentAudio();
         logger.success('[Anti-Sleep] 백그라운드 모드 자동 활성화');
     } catch (e) {
         logger.log('[Anti-Sleep] 자동 시작 실패 (사용자 상호작용 필요)', 'error');
@@ -5056,14 +6829,14 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
     const siteInfo = await (0,detector/* detectSite */.T)();
     if (!siteInfo) {
         alert("지원하지 않는 사이트이거나 다운로드 페이지가 아닙니다.");
-        (0,anti_sleep/* stopSilentAudio */.Cv)();
+        stopSilentAudio();
         return;
     }
 
     const parser = await ParserFactory/* ParserFactory */.O.getParser();
     if (!parser) {
         alert("파서를 초기화할 수 없습니다.");
-        (0,anti_sleep/* stopSilentAudio */.Cv)();
+        stopSilentAudio();
         return;
     }
 
@@ -5154,7 +6927,7 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
         if (list.length > 0) {
             const first = parser.parseListItem(list[list.length - 1]); // usually reversed order
             const last = parser.parseListItem(list[0]);
-            logger.log(`총 ${list.length}개 항목 처리 예정. (${first.title} ~ ${last.title})`, 'Downloader');
+            logger.info(`총 ${list.length}개 항목 처리 예정. (${first.title} ~ ${last.title})`, 'Downloader');
         } else {
             logger.log(`총 0개 항목 처리 예정.`, 'Downloader');
         }
@@ -5235,6 +7008,7 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                     const histResult = await (0,network/* fetchHistoryDirect */.GA)(rootFolder, category);
                     
                     if (histResult.success) {
+                        historyFolderId = histResult.folderId;
                         // Normalize: accept padded ("0001") and plain ("1") forms
                         histResult.data.forEach(id => {
                             const plain = parseInt(id).toString();
@@ -5321,6 +7095,123 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
             }
         }
 
+        // [v1.21.2] 공통 범용 큐 선등록 래퍼 (Universal Queue Pre-Registration)
+        // 어떤 다운로드 정책이 들어와도 루프 시작 전 전체 수집 대상 에피소드 목록을 큐에 선등록
+        const currentNovelMode = (0,core_config/* getConfig */.zj)().novelMode;
+        const currentIsSingleVolume = isNovel && currentNovelMode === 'singleVolume';
+        
+        const pendingEpisodes = [];
+        for (let i = 0; i < list.length; i++) {
+            const item = parser.parseListItem(list[i].element || list[i]);
+            const numStr = item.num ? item.num.toString() : '';
+            const numPlain = parseInt(numStr).toString();
+            
+            // 구글 드라이브 스킵 필터 (드라이브 전용)
+            if (destination === 'drive' && !currentIsSingleVolume) {
+                if (uploadedHistorySet.size > 0 && (uploadedHistorySet.has(numStr) || uploadedHistorySet.has(numPlain))) {
+                    continue;
+                }
+                
+                if (historyCheckTimeoutFlag && historyFolderId) {
+                    const isUploaded = await (0,network/* checkSingleHistoryDirect */.OS)(historyFolderId, numStr);
+                    if (isUploaded) continue;
+                }
+            }
+            
+            pendingEpisodes.push({
+                title: item.title,
+                url: item.src || item.url || (list[i].element || list[i]).href || location.href,
+                episodeNum: numStr,
+                category: category,
+                viewerCfg: parser.rule.viewer || {},
+                rootFolder: rootFolder,
+                destination: destination,
+                novelFormat: configNovelFormat,
+                matchedRule: parser.rule,
+                protocolDomain: parser.protocolDomain || window.location.origin
+            });
+        }
+
+        if (pendingEpisodes.length === 0) {
+            if (destination === 'drive' && !currentIsSingleVolume) {
+                logger.success('✅ 모든 에피소드가 이미 드라이브에 존재하여 수집을 조기 완료합니다.', 'Queue');
+                stopSilentAudio();
+                return;
+            }
+        } else {
+            // [v1.21.4] 구글 드라이브 업로드 모드 시, 큐 등록 전 작품 폴더를 선제 생성/확정하여 큐 전파 (경쟁적 중복 폴더 생성 차단)
+            let activeFolderId = historyFolderId;
+            if (destination === 'drive' && !activeFolderId) {
+                logger.log(`📁 [Drive] 신규 작품 폴더 선제 생성 중: ${seriesTitle}`);
+                try {
+                    const token = await (0,network/* getOAuthToken */.Py)();
+                    activeFolderId = await (0,network/* getOrCreateFolder */.aj)(seriesTitle, (0,core_config/* getConfig */.zj)().folderId, token, category);
+                    logger.success(`📁 [Drive] 신규 작품 폴더 선제 생성 완료 -> ID: ${activeFolderId}`);
+                } catch (folderErr) {
+                    logger.error(`❌ [Drive] 폴더 선제 생성 중 에러 발생: ${folderErr.message}`);
+                }
+            }
+
+            // 모든 pendingEpisodes에 확정된 폴더 ID 주입
+            const mappedEpisodes = pendingEpisodes.map(ep => ({
+                ...ep,
+                folderId: activeFolderId || ''
+            }));
+
+            const injected = (0,queue/* addEpisodesToQueue */.id)(mappedEpisodes, seriesTitle);
+            logger.log(`🗂️ [공통 큐] 수집 대상 ${injected}개 에피소드를 대기열에 선등록 완료.`, 'Queue');
+        }
+
+        // [v1.21.0] 차세대 자율형 멀티큐 배치 수집기 기동 가교 (구글 드라이브 업로드 전용 비동기 스케줄러 라우팅)
+        if (destination === 'drive' && !currentIsSingleVolume) {
+            logger.log(`🚦 [멀티큐] 차세대 자율형 멀티큐 배치 수집기(v1.21.0) 가동 준비...`, 'Queue');
+
+            // 팝업 차단 회피용 동기적 자식 창 사전 오픈 (Pre-open)
+            const MAX_CONCURRENCY = 2;
+            const openCount = Math.min(MAX_CONCURRENCY, pendingEpisodes.length);
+            logger.log(`🛡️ 팝업 차단 필터 우회를 위한 자식 창 ${openCount}개 선제 확보(Pre-open) 중...`, 'Queue');
+
+            const width = 400;
+            const height = 600;
+            const leftBase = window.screen.width - width - 50;
+            const topBase = 100;
+
+            const freshlyOpened = [];
+            for (let i = 0; i < openCount; i++) {
+                const ep = pendingEpisodes[i];
+                const id = (0,queue/* getQueueItemId */.G8)(seriesTitle, ep.episodeNum);
+                const left = leftBase - (i * 50);
+                const top = topBase + (i * 50);
+                const workerName = `tokisync_novel_worker_${id}`.replace(/[^a-zA-Z0-9_]/g, '');
+
+                logger.log(`🚀 [Pre-open #${i + 1}] 자식 팝업 창 생성: ${ep.title}`);
+                const popupRef = window.open(
+                    ep.url,
+                    workerName,
+                    `width=${width},height=${height},left=${left},top=${top},noopener=false,scrollbars=yes,resizable=yes`
+                );
+
+                if (popupRef) {
+                    queue/* activeWorkers */.mR.set(id, popupRef);
+                    (0,queue/* updateQueueItem */.Gg)(id, { status: 'processing', stage: queue/* WORKER_STAGE */.WB.INIT });
+                    freshlyOpened.push(id);
+                } else {
+                    logger.error(`❌ [Pre-open #${i + 1}] 브라우저 차단으로 자식 창 확보에 실패하였습니다.`, 'Queue');
+                }
+            }
+
+            if (freshlyOpened.length > 0) {
+                logger.success(`🚦 멀티큐 스케줄러 기동 완료. 릴레이 루프 활성화.`, 'Queue');
+                (0,worker_controller/* initBatchWorkerController */.hh)();
+                (0,queue/* initQueueScheduler */.$8)();
+            } else {
+                logger.error(`❌ 선제 확보된 자식 창이 없어 큐 수집을 중지합니다.`, 'Queue');
+                stopSilentAudio();
+            }
+
+            return; // 큐 엔진에 스케줄 위임 후 early exit
+        }
+
         // Create IFrame
         // 목록 페이지 최하단에 배치 + opacity 0.1
         // IntersectionObserver가 정상 동작하며, 브라우저가 일반 문서 흐름으로 렌더링
@@ -5343,7 +7234,7 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
         for (let i = 0; i < list.length; i++) {
             const item = parser.parseListItem(list[i].element || list[i]); 
             console.clear();
-            logger.log(`[${i + 1}/${list.length}] 처리 중: ${item.title}`);
+            logger.info(`[${i + 1}/${list.length}] 처리 중: ${item.title}`);
 
             // [v1.5.0 Smart Skip] Skip already-uploaded episodes (Drive policy only)
             // [v1.7.1] Bypass skipping in Single Volume mode (we need all chapters)
@@ -5379,11 +7270,12 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
             }
 
             // Process Item
+            let selfContained = false;
             try {
-                const result = await processItem(item, currentBuilder, siteInfo, iframe, parser, seriesTitle);
+                selfContained = await processItem(item, currentBuilder, siteInfo, iframe, parser, seriesTitle, null, rootFolder);
                 
-                // [v1.8.1] 부분 실패 체크 (이미지 누락 여부)
-                if (currentBuilder && currentBuilder.chapters) {
+                // [v1.8.1] 부분 실패 체크 (이미지 누락 여부) - 자립형 워커가 아닌 로컬 빌더 구동 시에만 처리
+                if (!selfContained && currentBuilder && currentBuilder.chapters) {
                     const latestChapter = currentBuilder.chapters[currentBuilder.chapters.length - 1];
                     if (latestChapter && Array.isArray(latestChapter.images)) {
                         const missingCount = latestChapter.images.filter(img => img.isMissing).length;
@@ -5398,7 +7290,7 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                     }
                 }
 
-                if (isSingleVolume) {
+                if (!selfContained && isSingleVolume) {
                     const currentSize = currentBuilder.chapters ? currentBuilder.chapters.length : (currentBuilder.content ? currentBuilder.content.split('===').length - 1 : 0);
                     logger.log(`📥 챕터 추가 완료: ${item.title} (현재 ${currentSize}개)`, 'Downloader');
                 }
@@ -5414,6 +7306,11 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                     error: errorMsg
                 });
                 continue; // Skip faulty item but continue loop
+            }
+
+            // 만약 자식 워커가 업로드/저장까지 자체 종결했다면, 부모 창의 개별 파일 빌딩/저장 흐름을 완전히 건너뛴다.
+            if (selfContained) {
+                continue;
             }
 
             // Post-Process for Non-Default Policies
@@ -5470,7 +7367,7 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                         const batchNum = Math.ceil(processedCount / BATCH_SIZE);
                         const batchFilename = `${rootFolder}_Part${batchNum}`;
                         
-                        logger.log(`📦 배치 저장 중... (${batchFilename})`);
+                        logger.info(`📦 배치 저장 중... (${batchFilename})`);
                         await (0,utils/* saveFile */.OJ)(masterZip, batchFilename, 'local', 'zip', { category });
                         
                         // Clear masterZip for next batch to save memory
@@ -5610,7 +7507,7 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                     }
                     const finalFilename = `${seriesTitle || rootFolder} (${rangeLabel})`;
                     
-                    logger.log(`📚 단행본 조립 및 저장 중... (${finalFilename})`);
+                    logger.info(`📚 단행본 조립 및 저장 중... (${finalFilename})`);
                     
                     const finalZip = await masterNovelBuilder.build({
                         series: seriesTitle || rootFolder,
@@ -5660,12 +7557,12 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
         alert(`다운로드 중 오류 발생:\n${error.message}`);
     } finally {
         // Auto-stop Anti-Sleep mode
-        (0,anti_sleep/* stopSilentAudio */.Cv)();
+        stopSilentAudio();
         logger.log('[Anti-Sleep] 백그라운드 모드 자동 종료');
         
         // [Cleanup 팝업 세션] 다운로드 종료 후 액티브 팝업 폐쇄
         try {
-            (0,novel_decryptor/* closeActivePopup */.dI)();
+            (0,worker_controller/* closeActiveWorker */.hr)();
         } catch (popupErr) {
             console.warn('[Downloader] 팝업 클린업 실패:', popupErr);
         }
@@ -5676,94 +7573,7 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
     }
 }
 
-async function fetchImages(imageUrls) {
-    const logger = LogBox.getInstance();
-    const promises = imageUrls.map(async (src) => {
-        let retries = 3;
-        let lastBlob = null;
-        let lastExt = '.jpg';
-        
-        while (retries > 0) {
-            try {
-                const blob = await fetchBlobWithXHR(src);
-                
-                if (blob.size === 0) {
-                    throw new Error("빈 이미지 데이터 (Blob size 0)");
-                }
 
-                // Metadata Extraction
-                let ext = '.jpg';
-                const extMatch = src.match(/\.[a-zA-Z]+$/);
-                
-                if (extMatch) {
-                    ext = extMatch[0];
-                } else {
-                    // Fallback: Infer from Content-Type
-                    const type = response.headers.get('content-type');
-                    if (type) {
-                        if (type.includes('png')) ext = '.png';
-                        else if (type.includes('gif')) ext = '.gif';
-                        else if (type.includes('webp')) ext = '.webp';
-                        else if (type.includes('jpeg') || type.includes('jpg')) ext = '.jpg';
-                    }
-                }
-
-                lastBlob = blob;
-                lastExt = ext;
-
-                // [v1.7.3] Hybrid Dummy Detection: Size + Resolution
-                // 100KB 이하일 경우 Dummy일 확률이 있으나, 해상도가 높으면 정상으로 수용
-                if (blob.size < 100 * 1024 && retries > 1) {
-                    // 1. 확실한 더미 패턴 URL이면 재시도 없이 즉시 실패 처리
-                    const isDummyUrl = (u) => u && (u.includes('blank.gif') || u.includes('loading.gif') || u.includes('pixel.gif'));
-                    if (isDummyUrl(src)) {
-                        retries = 1; 
-                        throw new Error(`더미 이미지 URL 확인됨 (Skip retry)`);
-                    }
-
-                    // 2. 해상도 체크 (가로 또는 세로가 300px 이상이면 정상 이미지로 간주)
-                    const { getImageDimensions } = await Promise.resolve(/* import() */).then(__webpack_require__.bind(__webpack_require__, 924));
-                    const { width, height } = await getImageDimensions(blob);
-                    
-                    if (width > 300 || height > 300) {
-                        // 규격이 정상인 경우 용량에 상관없이 수용
-                        return { src, blob, ext };
-                    }
-
-                    throw new Error(`저용량 및 저해상도 의심 (${(blob.size/1024).toFixed(1)}KB, ${width}x${height}) - Lazy 더미 이미지일 수 있으므로 재시도`);
-                }
-
-                return { src, blob, ext };
-            } catch (e) {
-                retries--;
-                const retryCount = 3 - retries;
-                if (retries > 0) logger.warn(`이미지 다운로드 재시도 (${retryCount}/3): ${e.message}`, 'Network:Image');
-                
-                if (retries === 0) {
-                    // 3회 모두 실패했고 lastBlob이 존재하지만, 여전히 dummy 성격이면 거절
-                    if (lastBlob && lastBlob.size > 10000) { // 10KB 이상일 때만 보수적 수용
-                        logger.log(`⚠️ 용량이 작지만 수용 (${(lastBlob.size/1024).toFixed(1)}KB): ${src.split('/').pop()}`, 'Network:Image');
-                        return { src, blob: lastBlob, ext: lastExt };
-                    }
-                    
-                    console.error(`이미지 다운로드 최종 실패 (${src}):`, e);
-                    logger.error(`⚠️ 이미지 누락: ${src.split('/').pop()} (3회 재시도 실패)`, 'Network:Image');
-                    
-                    // [Fix] 다운로드 실패 시 null 반환 대신 안내 페이지 삽입
-                    const placeholderText = `[PAGE_MISSING]\n\n해당 웹툰 페이지를 다운로드할 수 없었습니다.\n원인: 서버 제한 또는 백그라운드 스로틀링 (Lazy Load 실패)\n\nURL: ${src}`;
-                    const placeholderBlob = new Blob([placeholderText], { type: 'text/plain' });
-                    
-                    return { src, blob: placeholderBlob, ext: '.txt', isMissing: true };
-                }
-                
-                // 재시도 대기 (v1.7.2: 1.5초 -> 0.5초)
-                await new Promise((resolve) => setTimeout(resolve, 500));
-            }
-        }
-    });
-
-    return await Promise.all(promises);
-}
 
 /**
  * [v1.8.1] 다운로드 실패 리포트 생성 및 다운로드 (MCP 검토 의견 반영)
@@ -6065,7 +7875,7 @@ async function main() {
             tokiDownload(spec, config.policy, forceOverwrite);
         },
         openViewer: openViewer,
-        openSettings: () => (0,core_config/* showConfigModal */.Vh)(),
+        openSettings: (popupDoc) => (0,core_config/* showConfigModal */.Vh)(popupDoc),
         toggleLog: () => logger.toggle(),
         getConfig: core_config/* getConfig */.zj,
         setConfig: core_config/* setConfig */.Nk,
@@ -6276,188 +8086,131 @@ async function main() {
     });
 }
 
-;// ./src/core/index.js
+// EXTERNAL MODULE: ./src/core/ipc-broker.js
+var ipc_broker = __webpack_require__(941);
+// EXTERNAL MODULE: ./src/core/parsers/GenericParser.js + 1 modules
+var GenericParser = __webpack_require__(443);
+// EXTERNAL MODULE: ./src/core/novel-decryptor.js
+var novel_decryptor = __webpack_require__(602);
+;// ./src/core/worker-extractor.js
+/**
+ * tokiSync - Self-contained Worker Extractor
+ * Executes extraction, packaging, and direct Drive uploading inside the child popup.
+ */
 
 
 
 
-(async function () {
-    'use strict';
-
-    // =============================================================
-    // 📝 [통합 로깅 시스템] localStorage 기반 부모-자식 통합 로그 캡처
-    // =============================================================
-    const originalConsole = {
-        log: console.log,
-        debug: console.debug,
-        warn: console.warn,
-        error: console.error
-    };
-    
-    const ctxMarker = (window.name === 'tokisync-novel-worker' || (window.opener && window.name === '')) ? '[Worker]' : '[Parent]';
-
-    function saveLogToStorage(level, args) {
-        try {
-            const msg = args.map(a => {
-                if (a && typeof a === 'object') {
-                    try { return JSON.stringify(a); } catch(e) { return String(a); }
-                }
-                return String(a);
-            }).join(' ');
-            
-            const now = new Date();
-            const timeStr = now.toISOString().split('T')[1].replace('Z', '') + '.' + String(now.getMilliseconds()).padStart(3, '0');
-            const line = `[${timeStr}] ${ctxMarker} [${level}] ${msg}\n`;
-            
-            let existing = localStorage.getItem('TOKI_DEBUG_LOGS') || '';
-            if (existing.length > 300000) existing = existing.slice(-150000);
-            localStorage.setItem('TOKI_DEBUG_LOGS', existing + line);
-        } catch (err) {}
-    }
-
-    console.log = function(...args) { saveLogToStorage('LOG', args); originalConsole.log.apply(this, args); };
-    console.debug = function(...args) { saveLogToStorage('DEBUG', args); originalConsole.debug.apply(this, args); };
-    console.warn = function(...args) { saveLogToStorage('WARN', args); originalConsole.warn.apply(this, args); };
-    console.error = function(...args) { saveLogToStorage('ERROR', args); originalConsole.error.apply(this, args); };
-
-    window.downloadTokiLogs = function() {
-        try {
-            const logs = localStorage.getItem('TOKI_DEBUG_LOGS') || '로그가 없습니다.';
-            const blob = new Blob([logs], { type: 'text/plain;charset=utf-8' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `tokisync_debug_${new Date().getTime()}.txt`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            originalConsole.log("💾 텍스트 로그 파일 다운로드 완료.");
-        } catch (e) {
-            originalConsole.error("로그 다운로드 실패:", e);
-        }
-    };
-    
-    window.clearTokiLogs = function() {
-        localStorage.removeItem('TOKI_DEBUG_LOGS');
-        originalConsole.log("🗑️ 텍스트 로그 초기화 완료.");
-    };
 
 
 
-    // =============================================================
-    // 🛡️ [보안 극복] 네이티브 함수 가로채기 (Proxy 기반 위장)
-    // =============================================================
-    const originalAttachShadow = Element.prototype.attachShadow;
 
-    Element.prototype.attachShadow = new Proxy(originalAttachShadow, {
-        apply(target, thisArg, argumentsList) {
-            if (argumentsList[0] && argumentsList[0].mode === 'closed') {
-                console.log('[TokiSync-Worker] 🔒 닫힌 Shadow DOM 감지 -> Open 모드로 개방 완료');
-                argumentsList[0].mode = 'open';
-            }
-            return Reflect.apply(target, thisArg, argumentsList);
-        }
+
+
+// Define localized stage reporting helper
+function reportProgress(queueId, percent, stage) {
+    (0,queue/* updateQueueItem */.Gg)(queueId, {
+        progressPercent: Math.min(100, Math.max(0, Math.round(percent))),
+        stage: stage
     });
+    // Send lightweight progress update to parent UI
+    (0,ipc_broker/* sendToParent */.Ac)('WORKER_PROGRESS', {
+        queueId,
+        percent: Math.min(100, Math.max(0, Math.round(percent))),
+        stage
+    });
+}
 
-    // =============================================================
-    // 🚀 [자식 팝업 - Worker] 다형성 미디어 수집 및 부모 창 IPC 브릿지
-    // =============================================================
-    let isSessionWorker = false;
-    try { isSessionWorker = sessionStorage.getItem('tokisync_worker_flag') === '1'; } catch(e) {}
+/**
+ * Main execution of the Self-contained Worker
+ */
+function initWorkerExtractor() {
+    console.log("🚀 [TokiSync:Worker] 자립형 워커 엔진 시동 완료");
 
-    const isWorkerPopup = (
-        window.name === 'tokisync-novel-worker' || 
-        (window.opener && window.name === '') ||
-        isSessionWorker
-    );
+    // Establish Handshake Heartbeat every second until parent injects instructions
+    let handshakeInterval = setInterval(() => {
+        console.log("[TokiSync:Worker] 📢 READY 핸드셰이킹 하트비트 전송 중...");
+        (0,ipc_broker/* sendToParent */.Ac)('WORKER_READY', {
+            targetUrl: window.location.href,
+            timestamp: Date.now()
+        });
+    }, 1000);
 
+    let isExtracting = false;
 
-
-    if (isWorkerPopup) {
-        // 향후 location.replace 등으로 인한 컨텍스트 소실(짝수 회차 방어)을 대비해 현재 탭(세션)에 워커 각인
-        try { sessionStorage.setItem('tokisync_worker_flag', '1'); } catch(e) {}
-        console.log("🚀 [TokiSync-Worker] 자식 팝업 수동 대기 모드 기동");
-        
-        // window.opener 은폐 및 로컬 참조 복사
-        const parentWin = window.opener;
-        try {
-            Object.defineProperty(window, 'opener', { value: null });
-        } catch (e) {
-            window.opener = null;
-        }
-
-        // 부모 창에게 준비 완료 신호 전송 (부모가 지시를 줄 때까지 1초마다 Heartbeat)
-        let readyInterval = null;
-        const startReadyHeartbeat = () => {
-            if (readyInterval) clearInterval(readyInterval);
+    // Register listener for commands from parent
+    const cleanupIpc = (0,ipc_broker/* registerIpcListener */.Q_)(async (msg) => {
+        if (msg.type === 'START_EXTRACTION') {
+            // CF Challenge Check
+            const isCloudflare = document.title.includes('Just a moment') ||
+                                 document.getElementById('cf-challenge-running') ||
+                                 document.querySelector('.cf-browser-verification') ||
+                                 document.getElementById('challenge-running');
             
-            const sendReady = () => {
-                if (parentWin) {
-                    console.log("[TokiSync-Worker] 📢 부모 창에 준비 완료 신호 전송 (Handshake Heartbeat)");
-                    parentWin.postMessage({
-                        type: 'TOKI_WORKER_READY',
-                        timestamp: Date.now()
-                    }, '*');
-                }
-            };
+            if (isCloudflare) {
+                console.warn("⚠️ [TokiSync:Worker] 클라우드플레어 보안 챌린지 감지 - 대기 모드 진입");
+                (0,ipc_broker/* sendToParent */.Ac)('CAPTCHA_DETECTED');
+                return;
+            }
 
-            sendReady();
-            readyInterval = setInterval(sendReady, 1000);
-        };
+            if (isExtracting) return;
+            isExtracting = true;
 
-        // 중복 실행 방지용 락(Lock)
-        let isExtracting = false;
+            // Stop Handshake Heartbeat
+            if (handshakeInterval) {
+                clearInterval(handshakeInterval);
+                handshakeInterval = null;
+            }
 
-        // 지시 수신 리스너 셋업
-        window.addEventListener('message', async (event) => {
-            if (event.data && event.data.type === 'TOKI_START_EXTRACTION') {
-                // --- Cloudflare/Captcha Check ---
-                const isCloudflare = document.title.includes('Just a moment') ||
-                                     document.getElementById('cf-challenge-running') ||
-                                     document.querySelector('.cf-browser-verification') ||
-                                     document.getElementById('challenge-running');
+            const { 
+                queueId, 
+                targetType, 
+                seriesTitle, 
+                rootFolder, // Normalized parent-side root folder name ([ID] Title)
+                episodeTitle, 
+                episodeNum, 
+                folderId, 
+                destination, 
+                novelFormat, 
+                matchedRule,
+                protocolDomain
+            } = msg.payload;
+
+            console.log(`🚀 [TokiSync:Worker] 동작 지시문 수신 (ID: ${queueId}, 유형: ${targetType})`);
+            reportProgress(queueId, 10, queue/* WORKER_STAGE */.WB.DOM_READY);
+
+            // Reconstruct parser instance using injected matchedRule
+            const parser = new GenericParser/* GenericParser */.b(protocolDomain || window.location.origin, matchedRule);
+            const viewerCfg = parser.rule.viewer || {};
+
+            try {
+                let blob = null;
+                const configNovelFormat = novelFormat || 'epub';
+                const extension = (targetType === 'novel') ? configNovelFormat : 'cbz';
                 
-                if (isCloudflare) {
-                    console.warn("⚠️ [TokiSync-Worker] 클라우드플레어 인증/대기 페이지 감지. 통과를 대기합니다.");
-                    if (parentWin) {
-                        parentWin.postMessage({ type: 'TOKI_CAPTCHA_DETECTED', timestamp: Date.now() }, '*');
-                    }
-                    return; // 캡차가 통과되어 새 페이지로 리다이렉트 될 때까지 중복 실행을 막으며 조용히 대기
-                }
+                // Padded filename logic ("0001 - Title")
+                const paddedNum = (episodeNum || '').toString().padStart(4, '0');
+                const fullFilename = `${paddedNum} - ${episodeTitle}`;
 
-                if (isExtracting) {
-                    return;
-                }
-                isExtracting = true;
-
-                const { targetType, viewerCfg } = event.data;
-                console.log(`🚀 [TokiSync-Worker] 부모의 동작 지시문 수신 완료! (유형: ${targetType})`);
-
-                // 하트비트 즉각 해제
-                if (readyInterval) {
-                    clearInterval(readyInterval);
-                    readyInterval = null;
-                }
-
+                // --- 1. SOSEL EXTRACTION ---
                 if (targetType === 'novel') {
-                    // [소설 수집 동작]
+                    reportProgress(queueId, 20, queue/* WORKER_STAGE */.WB.DOM_READY);
+                    let content = "";
                     let attempt = 0;
-                    const checkInterval = setInterval(() => {
-                        attempt++;
-                        console.log(`[TokiSync-Worker] 소설 Shadow DOM 대기 중... (시도: ${attempt}회)`);
+                    const maxAttempts = 10;
 
+                    // Poll Shadow DOM for novel text
+                    while (attempt < maxAttempts) {
+                        attempt++;
+                        console.log(`[TokiSync:Worker] 소설 Shadow DOM 폴링 중... (${attempt}/${maxAttempts})`);
+                        
                         const novelSel = viewerCfg.novelContent || '#novel_content';
-                        // 동적 셀렉터 및 폴백 적용
                         const shadowHost = document.querySelector(novelSel)?.getRootNode()?.host
                                         || document.querySelector('.novel-epub-rendered')?.getRootNode()?.host
                                         || document.querySelector('.vw-bot-mini--novel')?.parentElement?.querySelector('div[style*="--novel-font-size"]');
 
                         if (shadowHost && shadowHost.shadowRoot) {
-                            clearInterval(checkInterval);
-                            let content = '';
-
-                            // 1차: <p> 태그 수집
+                            reportProgress(queueId, 50, queue/* WORKER_STAGE */.WB.PARSING);
                             const pTags = shadowHost.shadowRoot.querySelectorAll('.novel-epub-rendered p, p');
                             if (pTags.length > 0) {
                                 content = Array.from(pTags)
@@ -6465,289 +8218,324 @@ async function main() {
                                     .filter(text => text.length > 0)
                                     .join('\n\n');
                             } else {
-                                // 2차 폴백: innerText
                                 const bodyEl = shadowHost.shadowRoot.querySelector('.novel-epub-rendered');
                                 if (bodyEl) {
                                     content = bodyEl.innerText || bodyEl.textContent;
                                 } else {
-                                    // 3차 폴백: 노이즈 제거
                                     const tempDiv = document.createElement('div');
                                     tempDiv.innerHTML = shadowHost.shadowRoot.innerHTML;
                                     tempDiv.querySelectorAll('style, script').forEach(el => el.remove());
                                     content = tempDiv.innerText || tempDiv.textContent;
                                 }
                             }
-
-                            if (content && content.trim().length > 100) {
-                                console.log(`🎯 [TokiSync-Worker] 소설 텍스트 정밀 조립 완료 - 길이: ${content.length}자`);
-                                if (parentWin) {
-                                    parentWin.postMessage({
-                                        type: 'TOKI_MEDIA_DATA',
-                                        data: {
-                                            novelId: location.pathname.split('/')[2] || '0',
-                                            episodeId: location.pathname.split('/')[3] || '0',
-                                            contentType: 'novel',
-                                            content: content.trim(),
-                                            images: null,
-                                            nextUrl: document.querySelector('a#next_episode')?.href || null,
-                                            timestamp: Date.now()
-                                        }
-                                    }, '*');
-                                }
-                            }
+                            break;
                         }
-                    }, 500);
-                } else if (targetType === 'comic') {
-                    // [만화 수집 동작]
-                    try {
-                        console.log("[TokiSync-Worker] ⏳ 웹툰/만화 콘텐츠 DOM 렌더링 대기 시작...");
-                        
-                        // 1) 팝업 창 내부에 실제 만화 이미지 요소가 렌더링될 때까지 최대 10초 대기
-                        const contentDoc = await (0,utils/* waitForContent */.UF)(window, 10000, viewerCfg);
-                        
-                        if (!contentDoc) {
-                            console.warn("[TokiSync-Worker] ⚠️ 10초 대기 내에 콘텐츠 렌더링 미감지. 갈무리 우선 진행.");
-                        } else {
-                            console.log("[TokiSync-Worker] 🎯 웹툰 콘텐츠 감지 완료! 1.5초 안정화 대기 시작...");
-                        }
-
-                        // 2) 1.5초 DOM 안정화 딜레이 (사용자 제안 반영 - 스크롤 꼬임 완벽 방지)
-                        await (0,utils/* sleep */.yy)(1500);
-
-                        console.log("[TokiSync-Worker] 🚀 1.5초 안정화 완료. 1차 스크롤 및 다운로드 돌입.");
-
-                        // 3) 지연 로딩 이미지 스크롤 활성화 (부모가 제공한 viewerCfg 적용)
-                        await (0,utils/* scrollToLoad */.Vs)(document, 25000, viewerCfg);
-
-                        // 이미지 다운로드를 처리하는 비동기 헬퍼 정의 (동시성 5개 한계 제어)
-                        const runImageDownloads = async (imageUrls) => {
-                            const downloaded = [];
-                            const CONCURRENCY_LIMIT = 5;
-
-                            for (let i = 0; i < imageUrls.length; i += CONCURRENCY_LIMIT) {
-                                const chunk = imageUrls.slice(i, i + CONCURRENCY_LIMIT);
-                                const chunkPromises = chunk.map(async (url, index) => {
-                                    const globalIndex = i + index;
-                                    try {
-                                        const blob = await (0,utils/* fetchBlobWithXHR */.Kt)(url);
-                                        const arrayBuffer = await (0,utils/* blobToArrayBuffer */._L)(blob);
-                                        return {
-                                            url,
-                                            index: globalIndex,
-                                            data: arrayBuffer,
-                                            size: blob.size,
-                                            type: blob.type
-                                        };
-                                    } catch (err) {
-                                        console.error(`[TokiSync-Worker] 이미지 다운로드 실패 (${url}):`, err);
-                                        return {
-                                            url,
-                                            index: globalIndex,
-                                            data: null,
-                                            error: err.message
-                                        };
-                                    }
-                                });
-
-                                const chunkResults = await Promise.all(chunkPromises);
-                                downloaded.push(...chunkResults);
-                            }
-                            return downloaded;
-                        };
-
-                        // 이미지 URL 목록을 추출하는 헬퍼 정의 (하이브리드 파싱)
-                        const extractImageUrls = () => {
-                            let imageSelector = '.view-padding img, .viewer-main img, #v_content img, .img-tag';
-                            if (viewerCfg.imageContainer) {
-                                const itemSel = viewerCfg.imageItem || 'img';
-                                imageSelector = viewerCfg.imageContainer.split(',').map(c => `${c.trim()} ${itemSel}`).join(', ');
-                            }
-
-                            const urls = Array.from(document.querySelectorAll(imageSelector))
-                                .map(img => img.src || img.dataset.src || img.dataset.original)
-                                .filter(src => src && !src.includes('blank.gif') && !src.includes('loading.gif'))
-                                .map(src => src.trim());
-                            return urls;
-                        };
-
-                        // 4) 1차 추출 및 다운로드 실행
-                        let finalImages = extractImageUrls();
-                        console.log(`🎯 [TokiSync-Worker] 1차 이미지 주소 ${finalImages.length}개 추출. 다운로드 개시...`);
-                        let downloadedData = await runImageDownloads(finalImages);
-
-                        // ── [iframe 명작 딥 폴백 로직 100% 재활용 이식] ──
-                        // 만약 크기가 30KB 미만인 더미 플레이스홀더 이미지나 누락된 파일이 절반 이상인 경우 2차 정밀 재스크롤 구동
-                        const suspiciousCount = downloadedData.filter(d => !d.data || d.size < 30000).length;
-                        
-                        if (suspiciousCount > finalImages.length / 2) {
-                            console.warn(`⚠️ [Deep Fallback] 다수의 저용량/누락 이미지 감지 (${suspiciousCount}/${finalImages.length}). 2초 후 15초 강제 재스크롤 재시도!`);
-                            await (0,utils/* sleep */.yy)(2000);
-                            
-                            // 2차 정밀 강제 징검다리 스크롤 기동 (15초)
-                            await (0,utils/* scrollToLoad */.Vs)(document, 15000, viewerCfg);
-                            
-                            // 최종 재추출 및 2차 재다운로드 단행
-                            finalImages = extractImageUrls();
-                            console.log(`🎯 [Deep Fallback] 2차 이미지 주소 ${finalImages.length}개 재추출. 최종 다운로드 재수행...`);
-                            downloadedData = await runImageDownloads(finalImages);
-                        }
-
-                        console.log(`🎯 [TokiSync-Worker] 모든 이미지 수집 완료 (최종 성공: ${downloadedData.filter(d => d.data).length}/${downloadedData.length})`);
-
-                        if (parentWin) {
-                            parentWin.postMessage({
-                                type: 'TOKI_MEDIA_DATA',
-                                data: {
-                                    novelId: location.pathname.split('/')[2] || '0',
-                                    episodeId: location.pathname.split('/')[3] || '0',
-                                    contentType: 'comic',
-                                    content: null,
-                                    images: downloadedData,
-                                    nextUrl: document.querySelector('a#next_episode')?.href || null,
-                                    timestamp: Date.now()
-                                }
-                            }, '*');
-                        }
-                    } catch (err) {
-                        console.error('[TokiSync-Worker] 만화 이미지 수집 중 예외 발생:', err);
+                        await (0,utils/* sleep */.yy)(500);
                     }
-                }
-            }
-        });
 
-        // 팝업 로딩 시 핸드셰이킹 시작
-        if (document.readyState === 'complete' || document.readyState === 'interactive') {
-            startReadyHeartbeat();
-        } else {
-            window.addEventListener('DOMContentLoaded', startReadyHeartbeat);
-        }
-        return; // 팝업 모드에서는 다운로더 UI 등 메인 스크립트 실행 조기 종료 (Early Exit)
-    }
-    
-    // Viewer Config Injection (Zero-Config)
-    if (location.hostname.includes('github.io') || location.hostname.includes('localhost') || location.hostname.includes('127.0.0.1')) {
-        console.log("📂 TokiView (Frontend) detected. Injecting Config...");
-        
-        const config = (0,core_config/* getConfig */.zj)();
-        
-        if (config.gasUrl && config.folderId) {
-            // [Fix] Retry injection to handle timing issues (Viewer might not be ready)
-            let retryCount = 0;
-            const maxRetries = 5;
-            let injectionConfirmed = false;
-            let retryTimer = null;
-            let pollTimer = null;
-            
-            // Check localStorage to verify injection success
-            const checkInjection = () => {
-                const storedUrl = localStorage.getItem('TOKI_API_URL');
-                const storedGasId = localStorage.getItem('TOKI_GAS_ID');
-                const storedId = localStorage.getItem('TOKI_ROOT_ID');
-                const storedKey = localStorage.getItem('TOKI_API_KEY');
-                
-                // Matches if either URL matches or ID matches
-                const urlMatches = (storedUrl === config.gasUrl || storedGasId === config.gasId);
-                
-                if (urlMatches && 
-                    storedId === config.folderId && 
-                    storedKey === (config.apiKey || '')) {
-                    
-                    injectionConfirmed = true;
-                    if (retryTimer) clearTimeout(retryTimer);
-                    if (pollTimer) clearInterval(pollTimer);
-                    console.log("✅ Config injection confirmed (localStorage verified)");
-                    return true;
+                    // Fallback to Plan C: Decryption API
+                    if ((!content || content.trim().length < 100) && viewerCfg.decryptApi) {
+                        console.warn("[TokiSync:Worker] Shadow DOM 추출 실패 - Plan C API 복호화 폴백 구동");
+                        content = await (0,novel_decryptor/* fetchNovelTextViaApi */.i)(window.location.href, viewerCfg.decryptApi);
+                    }
+
+                    if (!content || content.trim().length < 100) {
+                        throw new Error("소설 본문 추출에 실패했습니다. (Shadow DOM/API 복호화 무반응)");
+                    }
+
+                    reportProgress(queueId, 70, queue/* WORKER_STAGE */.WB.PARSING);
+                    console.log(`[TokiSync:Worker] 소설 빌더 가동 시작 (${configNovelFormat.toUpperCase()})`);
+
+                    const builder = (configNovelFormat === 'txt') ? new TxtBuilder() : new EpubBuilder();
+                    builder.addChapter(episodeTitle, content.trim());
+                    const zip = await builder.build({
+                        series: seriesTitle,
+                        title: episodeTitle,
+                        number: episodeNum,
+                        writer: 'TokiSync'
+                    });
+                    blob = await zip.generateAsync({ type: 'blob' });
+
+                } 
+                // --- 2. MANHWA EXTRACTION ---
+                else {
+                    console.log("[TokiSync:Worker] 웹툰 콘텐츠 DOM 렌더링 대기 중...");
+                    reportProgress(queueId, 20, queue/* WORKER_STAGE */.WB.DOM_READY);
+
+                    // Wait for comic content inside DOM
+                    const contentDoc = await (0,utils/* waitForContent */.UF)(window, 10000, viewerCfg);
+                    if (!contentDoc) {
+                        console.warn("[TokiSync:Worker] 10초 내 콘텐츠 렌더링 미감지. 갈무리 강행.");
+                    }
+
+                    // 1.5s DOM Stabilization delay
+                    reportProgress(queueId, 30, queue/* WORKER_STAGE */.WB.DOM_READY);
+                    await (0,utils/* sleep */.yy)(1500);
+
+                    console.log("[TokiSync:Worker] 스크롤 로드 및 이미지 다운로드 활성화");
+                    reportProgress(queueId, 40, queue/* WORKER_STAGE */.WB.SCROLLING);
+
+                    // Physical scroll down
+                    await (0,utils/* scrollToLoad */.Vs)(document, 25000, viewerCfg);
+
+                    // Downloader helper with concurrency 5
+                    const runImageDownloads = async (imageUrls) => {
+                        const downloaded = [];
+                        const CONCURRENCY_LIMIT = 5;
+                        let processedCount = 0;
+
+                        reportProgress(queueId, 0, queue/* WORKER_STAGE */.WB.DOWNLOADING);
+
+                        for (let i = 0; i < imageUrls.length; i += CONCURRENCY_LIMIT) {
+                            const chunk = imageUrls.slice(i, i + CONCURRENCY_LIMIT);
+                            const chunkPromises = chunk.map(async (url, index) => {
+                                const globalIndex = i + index;
+                                try {
+                                    const imgBlob = await (0,utils/* fetchBlobWithXHR */.Kt)(url);
+                                    const arrayBuffer = await (0,utils/* blobToArrayBuffer */._L)(imgBlob);
+                                    processedCount++;
+
+                                    const percent = (processedCount / imageUrls.length) * 100;
+                                    reportProgress(queueId, percent, queue/* WORKER_STAGE */.WB.DOWNLOADING);
+
+                                    return {
+                                        url,
+                                        index: globalIndex,
+                                        data: arrayBuffer,
+                                        size: imgBlob.size,
+                                        type: imgBlob.type
+                                    };
+                                } catch (err) {
+                                    console.error(`[TokiSync:Worker] 이미지 다운로드 실패 (${url}):`, err);
+                                    processedCount++;
+                                    const percent = (processedCount / imageUrls.length) * 100;
+                                    reportProgress(queueId, percent, queue/* WORKER_STAGE */.WB.DOWNLOADING);
+
+                                    return {
+                                        url,
+                                        index: globalIndex,
+                                        data: null,
+                                        error: err.message
+                                    };
+                                }
+                            });
+
+                            const chunkResults = await Promise.all(chunkPromises);
+                            downloaded.push(...chunkResults);
+                        }
+                        return downloaded;
+                    };
+
+                    // Execute initial fetch & download
+                    let finalImages = parser.getImageList(document);
+                    console.log(`🎯 [TokiSync:Worker] 1차 이미지 주소 ${finalImages.length}개 추출 완료.`);
+                    let downloadedData = await runImageDownloads(finalImages.map(img => img.url));
+
+                    // Deep Fallback: Trigger 15s retry if >50% placeholder dummy detected
+                    const suspiciousCount = downloadedData.filter(d => !d.data || d.size < 30000).length;
+                    if (suspiciousCount > finalImages.length / 2) {
+                        console.warn(`⚠️ [Deep Fallback] 다수 더미 파일 감지 (${suspiciousCount}/${finalImages.length}) - 15초 정밀 재스크롤 시도`);
+                        reportProgress(queueId, 35, queue/* WORKER_STAGE */.WB.SCROLLING);
+                        await (0,utils/* sleep */.yy)(2000);
+                        
+                        await (0,utils/* scrollToLoad */.Vs)(document, 15000, viewerCfg);
+                        
+                        finalImages = parser.getImageList(document);
+                        console.log(`🎯 [Deep Fallback] 2차 이미지 주소 ${finalImages.length}개 재추출 완료.`);
+                        downloadedData = await runImageDownloads(finalImages.map(img => img.url));
+                    }
+
+                    // Placeholders Bypass Integration
+                    const mergedData = downloadedData.map((downloadedItem, idx) => {
+                        const originalInfo = finalImages[idx];
+                        if ((!downloadedItem.data || downloadedItem.size < 100) && originalInfo && !originalInfo.isDummy) {
+                            console.log(`[Worker] Dummy placeholder bypassed back to verified URL: ${downloadedItem.url}`);
+                        }
+                        return downloadedItem;
+                    });
+
+                    console.log(`🎯 [TokiSync:Worker] 이미지 조립 및 CBZ 빌딩 개시`);
+                    reportProgress(queueId, 85, queue/* WORKER_STAGE */.WB.PARSING);
+
+                    const builder = new CbzBuilder();
+                    const resolvedImages = mergedData.map(img => {
+                        const mimeType = img.type || 'image/jpeg';
+                        return {
+                            url: img.url,
+                            blob: img.data ? new Blob([img.data], { type: mimeType }) : new Blob([]),
+                            ext: img.type?.includes('png') ? '.png' : (img.type?.includes('webp') ? '.webp' : '.jpg'),
+                            isMissing: !img.data
+                        };
+                    });
+
+                    builder.addChapter(episodeTitle, resolvedImages);
+                    const zip = await builder.build({
+                        series: seriesTitle,
+                        title: episodeTitle,
+                        number: episodeNum,
+                        writer: 'TokiSync'
+                    });
+                    blob = await zip.generateAsync({ type: 'blob' });
                 }
-                return false;
-            };
-            
-            const injectConfig = () => {
-                if (injectionConfirmed) return; // Stop if already confirmed
-                
-                window.postMessage({ 
-                    type: 'TOKI_CONFIG', 
-                    url: config.gasUrl,
-                    folderId: config.folderId,
-                    apiKey: config.apiKey
-                }, '*');
-                
-                console.log(`🚀 Config Injection Attempt ${retryCount + 1}/${maxRetries}:`, { 
-                    gasUrl: config.gasUrl, 
-                    apiKey: config.apiKey ? '***' : '(empty)'
+
+                // --- 3. STORAGE PERSISTENCE (Direct Save/Upload) ---
+                console.log(`[TokiSync:Worker] I/O 드라이버 기동 - 저장소 적재 시작 (${destination})`);
+                reportProgress(queueId, 90, queue/* WORKER_STAGE */.WB.UPLOADING);
+
+                await (0,utils/* saveFile */.OJ)(blob, fullFilename, destination || 'drive', extension, {
+                    folderName: rootFolder || seriesTitle,
+                    category: targetType,
+                    folderId: folderId || ''
                 });
 
-                retryCount++;
-                if (retryCount < maxRetries && !injectionConfirmed) {
-                    retryTimer = setTimeout(injectConfig, 1000);
+                console.log(`[TokiSync:Worker] 🎉 에피소드 수집 & 저장 완착 완료! (${fullFilename})`);
+                
+                // Update final queue status inside Dexie/GM storage
+                (0,queue/* updateQueueItem */.Gg)(queueId, { 
+                    status: 'completed', 
+                    stage: queue/* WORKER_STAGE */.WB.COMPLETED, 
+                    progressPercent: 100 
+                });
+                
+                reportProgress(queueId, 100, queue/* WORKER_STAGE */.WB.COMPLETED);
+                
+                // Notify parent that task succeeded
+                (0,ipc_broker/* sendToParent */.Ac)('TASK_COMPLETED', { queueId });
+                cleanupIpc();
+
+            } catch (err) {
+                console.error(`[TokiSync:Worker] ❌ 에피소드 수집 중 치명적 오류 발생:`, err);
+                
+                (0,queue/* updateQueueItem */.Gg)(queueId, { 
+                    status: 'failed', 
+                    stage: queue/* WORKER_STAGE */.WB.FAILED, 
+                    errorMsg: err.message 
+                });
+                
+                reportProgress(queueId, 0, queue/* WORKER_STAGE */.WB.FAILED);
+                
+                // Notify parent that task failed
+                (0,ipc_broker/* sendToParent */.Ac)('TASK_FAILED', { queueId, errorMsg: err.message });
+                cleanupIpc();
+            }
+        }
+    });
+}
+
+;// ./src/core/index.js
+
+
+
+(async function () {
+    'use strict';
+
+    // ── 🔒 [초고도 스텔스 섀도 DOM 개방 및 클로킹 엔진] ────────────────
+    try {
+        const originalAttachShadow = Element.prototype.attachShadow;
+        const originalToString = Function.prototype.toString;
+        const originalCreateElement = Document.prototype.createElement;
+
+        if (originalAttachShadow) {
+            // A. 초스텔스 개방 가로채기 함수 정의
+            const customAttachShadow = function attachShadow(init) {
+                if (init && init.mode === 'closed') {
+                    init.mode = 'open';
+                    console.log('[TokiSync] 🔒 닫힌 Shadow DOM -> Open 모드로 은밀 개방 완료');
                 }
+                return originalAttachShadow.apply(this, arguments);
             };
 
-            // Start polling localStorage (check every 200ms)
-            pollTimer = setInterval(checkInjection, 200);
+            // B. 네이티브 프로토타입 체인 완벽 일치 (hasOwnProperty('toString') 방어)
+            Object.setPrototypeOf(customAttachShadow, Function.prototype);
             
-            // Timeout after 5 seconds
-            setTimeout(() => {
-                if (pollTimer) clearInterval(pollTimer);
-                if (!injectionConfirmed) {
-                    console.warn("⚠️ Config injection timeout (5s)");
+            // C. 글로벌 toString() 킹핀 클로킹 (자기 자신 및 가로채기 함수 위장)
+            const patchedToString = function toString() {
+                if (this === customAttachShadow) {
+                    return 'function attachShadow() { [native code] }';
                 }
-            }, 5000);
-
-            // Start injection loop
-            setTimeout(injectConfig, 500);
-
-        } else {
-            console.warn("⚠️ GAS URL or Folder ID missing. Please configure via menu.");
-        }
-        
-        // API Proxy (CORS Bypass using GM_xmlhttpRequest)
-        window.addEventListener('message', (event) => {
-            // Security: Only accept from same origin
-            if (event.source !== window) return;
+                if (this === patchedToString) {
+                    return 'function toString() { [native code] }';
+                }
+                return originalToString.apply(this, arguments);
+            };
             
-            const msg = event.data;
-            if (msg.type === 'TOKI_API_REQUEST') {
-                console.log('[Proxy] Received API request:', msg.payload);
-                
-                GM_xmlhttpRequest({
-                    method: 'POST',
-                    url: config.gasUrl,
-                    data: JSON.stringify(msg.payload),
-                    headers: { 'Content-Type': 'text/plain' },
-                    onload: (response) => {
+            Object.setPrototypeOf(patchedToString, Function.prototype);
+            Function.prototype.toString = patchedToString;
+
+            // D. 네이티브 디스크립터 완벽 동기화
+            Object.defineProperty(Element.prototype, 'attachShadow', {
+                value: customAttachShadow,
+                writable: true,
+                enumerable: true,
+                configurable: true
+            });
+
+            // E. Iframe 우회 차단 감지 격파 (동적 생성 iframe 프로토타입 오염)
+            Document.prototype.createElement = function (tagName) {
+                const element = originalCreateElement.apply(this, arguments);
+                if (tagName && tagName.toLowerCase() === 'iframe') {
+                    // iframe이 생성되어 DOM에 부착되는 시점을 추적하여 동기화 주입
+                    const observer = new MutationObserver(() => {
                         try {
-                            const result = JSON.parse(response.responseText);
-                            window.postMessage({
-                                type: 'TOKI_API_RESPONSE',
-                                requestId: msg.requestId,
-                                result: result
-                            }, '*');
-                        } catch (e) {
-                            window.postMessage({
-                                type: 'TOKI_API_RESPONSE',
-                                requestId: msg.requestId,
-                                error: 'Parse error: ' + e.message
-                            }, '*');
-                        }
-                    },
-                    onerror: () => {
-                        window.postMessage({
-                            type: 'TOKI_API_RESPONSE',
-                            requestId: msg.requestId,
-                            error: 'Network error'
-                        }, '*');
-                    }
-                });
-            }
-        });
-        
-        console.log("✅ API Proxy initialized (CORS bypass)");
+                            if (element.contentWindow && element.contentWindow.Element) {
+                                const iframeAttach = element.contentWindow.Element.prototype.attachShadow;
+                                if (iframeAttach && iframeAttach !== customAttachShadow) {
+                                    Object.defineProperty(element.contentWindow.Element.prototype, 'attachShadow', {
+                                        value: customAttachShadow,
+                                        writable: true,
+                                        enumerable: true,
+                                        configurable: true
+                                    });
+                                }
+                            }
+                        } catch (err) {}
+                        observer.disconnect();
+                    });
+                    observer.observe(document.documentElement, { childList: true, subtree: true });
+                }
+                return element;
+            };
+            
+            Object.setPrototypeOf(Document.prototype.createElement, Function.prototype);
+        }
+    } catch (e) {
+        console.warn('[TokiSync] 초스텔스 섀도 DOM 엔진 로드 실패:', e.message);
     }
-    // Delay main execution to prevent React Hydration errors (#418) on SPA sites
+    // ───────────────────────────────────────────────────────────────
+
+    // 1. 모든 console.log 덮어쓰기 제거
+    // 2. window.tokiQueue, downloadTokiLogs 등 모든 전역 노출 차단
+    // 3. window.fetch, sendBeacon, XHR Proxy 가로채기 전면 비활성화 (스텔스 유지)
+    // 4. window.name 및 sessionStorage 워커 각인 흔적 배제
+
+    // window.opener가 존재할 경우 워커로 판별하여 Extractor 기동 (스텔스 모드)
+    if (window.opener) {
+        const startWorker = () => {
+            try {
+                initWorkerExtractor();
+            } catch (e) {
+                console.error('[TokiSync:Worker] Worker 초기화 실패:', e);
+            }
+        };
+        if (document.readyState === 'complete') {
+            startWorker();
+        } else {
+            window.addEventListener('load', startWorker);
+        }
+        return; // 부모 창의 메인 수집 로직 실행 차단 (Early Exit)
+    }
+
+    console.log('[TokiSync] 🛡️ 스텔스(Stealth) 순수 무취 실행 모드가 활성화되었습니다.');
+
     const startMain = async () => {
         setTimeout(async () => {
-            await main();
-        }, 500); // 500ms buffer for hydration to complete
+            try {
+                // 핵심 수집 기능만 순수하게 기동
+                await main();
+            } catch (e) {
+                console.error('[TokiSync] Main execution error:', e);
+            }
+        }, 500); // SPA 사이트 Hydration 대비 버퍼 500ms
     };
 
     if (document.readyState === 'complete') {
@@ -6756,6 +8544,5 @@ async function main() {
         window.addEventListener('load', startMain);
     }
 })();
-
 /******/ })()
 ;
