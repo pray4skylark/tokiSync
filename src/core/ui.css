@@ -18,7 +18,9 @@
     bottom: 100px;
     right: 30px;
     width: 480px;
-    height: 350px;
+    height: auto;
+    min-height: 250px;
+    max-height: 500px;
     background: var(--toki-bg);
     color: var(--toki-text);
     font-family: 'Cascadia Code', Consolas, monospace;
@@ -79,6 +81,7 @@
     padding: 4px 8px;
     border-radius: 6px;
     line-height: 1.4;
+    color: #f1f5f9; /* 밝은 회백색 지정으로 가독성 극대화 */
 }
 
 #toki-logbox-content li.critical {
@@ -91,6 +94,7 @@
 #toki-logbox-content li.error { color: #e11d48; }
 #toki-logbox-content li.warn { color: #d97706; }
 #toki-logbox-content li.success { color: #059669; font-weight: 600; }
+#toki-logbox-content li.info { color: #38bdf8; font-weight: 500; }
 
 /* Modal Styles */
 .toki-modal-overlay {
@@ -704,4 +708,556 @@
     gap: 6px;
 }
 
+/* --- Multi-Queue Progress Monitor Panel (v1.21.0) --- */
+#toki-logbox-progress {
+    padding: 14px 18px;
+    background: rgba(255, 255, 255, 0.25);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    backdrop-filter: blur(10px);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
 
+#toki-progress-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+#toki-progress-overall-text {
+    font-size: 12px;
+    font-weight: 800;
+    color: var(--toki-primary);
+    letter-spacing: -0.02em;
+    background: linear-gradient(135deg, #4f46e5, #06b6d4);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+}
+
+#toki-progress-overall-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.toki-progress-btn {
+    font-size: 13px;
+    cursor: pointer;
+    transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), filter 0.2s ease, opacity 0.2s ease;
+    user-select: none;
+    opacity: 0.85;
+}
+
+.toki-progress-btn:hover {
+    transform: scale(1.25);
+    opacity: 1;
+    filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.6));
+}
+
+#toki-btn-queue-stop:hover {
+    filter: drop-shadow(0 0 6px #ef4444);
+}
+
+.toki-progress-bar-paused {
+    background: linear-gradient(90deg, #9ca3af 0%, #6b7280 50%, #4b5563 100%) !important;
+    box-shadow: 0 1px 3px rgba(107, 114, 128, 0.4) !important;
+    animation: tokiPulsePaused 2s infinite ease-in-out;
+}
+
+@keyframes tokiPulsePaused {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.65; }
+}
+
+.toki-empty-queue-msg {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 16px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px dashed rgba(0, 0, 0, 0.08);
+    border-radius: 12px;
+    text-align: center;
+    gap: 6px;
+    margin: 8px 0;
+    backdrop-filter: blur(5px);
+}
+
+.toki-empty-queue-msg span {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--toki-primary, #6366f1);
+    opacity: 0.85;
+}
+
+.toki-empty-queue-msg p {
+    font-size: 11px;
+    color: #4b5563;
+    opacity: 0.75;
+    margin: 0;
+    line-height: 1.4;
+}
+
+.toki-progress-bar-container {
+    width: 100%;
+    height: 8px;
+    background: rgba(0, 0, 0, 0.06);
+    border-radius: 999px;
+    overflow: hidden;
+    position: relative;
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.toki-progress-bar-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #6366f1 0%, #3b82f6 50%, #06b6d4 100%);
+    border-radius: 999px;
+    transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 0 1px 3px rgba(99, 102, 241, 0.4);
+}
+
+#toki-progress-workers-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 6px;
+    max-height: 160px;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+/* Custom Scrollbar for Workers List */
+#toki-progress-workers-list::-webkit-scrollbar {
+    width: 4px;
+}
+#toki-progress-workers-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+#toki-progress-workers-list::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 999px;
+}
+
+.toki-worker-progress-item {
+    background: rgba(255, 255, 255, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    border-radius: 10px;
+    padding: 8px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);
+    transition: all 0.2s ease;
+}
+
+.toki-worker-progress-item:hover {
+    background: rgba(255, 255, 255, 0.55);
+    border-color: rgba(37, 99, 235, 0.15);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.04);
+}
+
+.toki-worker-stage {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--toki-text-muted);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.toki-worker-bar-container {
+    width: 100%;
+    height: 5px;
+    background: rgba(0, 0, 0, 0.04);
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.toki-worker-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #10b981 0%, #34d399 100%);
+    border-radius: 999px;
+    transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* --- 📋 Realtime Queue List & Badges (v1.21.0) --- */
+#toki-progress-queue-section {
+    margin-top: 10px;
+    border-top: 1px solid rgba(0, 0, 0, 0.06);
+    padding-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+#toki-queue-section-header {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--toki-text-muted);
+    opacity: 0.85;
+}
+
+#toki-progress-queue-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 120px;
+    overflow-y: auto;
+    padding-right: 2px;
+}
+
+#toki-progress-queue-list::-webkit-scrollbar {
+    width: 4px;
+}
+#toki-progress-queue-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+#toki-progress-queue-list::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.08);
+    border-radius: 999px;
+}
+
+.toki-queue-list-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px 8px;
+    background: rgba(255, 255, 255, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    border-radius: 6px;
+    font-size: 11px;
+    transition: all 0.2s ease;
+}
+
+.toki-queue-list-item:hover {
+    background: rgba(255, 255, 255, 0.45);
+    transform: translateX(1px);
+}
+
+.toki-queue-item-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+}
+
+.toki-queue-item-title {
+    color: var(--toki-text);
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.toki-queue-item-delete {
+    font-size: 10px;
+    cursor: pointer;
+    opacity: 0.6;
+    transition: all 0.15s ease;
+    padding: 2px;
+}
+
+.toki-queue-item-delete:hover {
+    opacity: 1;
+    transform: scale(1.2);
+}
+
+/* 세련된 HSL 상태 배지 */
+.toki-badge {
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 9px;
+    font-weight: 700;
+    white-space: nowrap;
+    text-transform: uppercase;
+}
+
+/* 대기 (🟡 HSL Tailored Yellow) */
+.toki-badge-pending {
+    background: hsl(45, 93%, 94%);
+    color: hsl(45, 90%, 35%);
+    border: 1px solid hsl(45, 93%, 85%);
+}
+
+/* 진행 (🟢 HSL Tailored Emerald) */
+.toki-badge-processing {
+    background: hsl(150, 84%, 93%);
+    color: hsl(150, 84%, 25%);
+    border: 1px solid hsl(150, 84%, 82%);
+}
+
+/* 완료 (🔵 HSL Tailored Sapphire) */
+.toki-badge-completed {
+    background: hsl(220, 95%, 94%);
+    color: hsl(220, 90%, 40%);
+    border: 1px solid hsl(220, 95%, 86%);
+}
+
+/* 실패 (🔴 HSL Tailored Ruby) */
+.toki-badge-failed {
+    background: hsl(0, 93%, 94%);
+    color: hsl(0, 90%, 45%);
+    border: 1px solid hsl(0, 93%, 86%);
+}
+
+/* --- FormRuleEditor: Hybrid Two-Track Parser GUI (v1.21.0) --- */
+.toki-form-editor-modal {
+    width: 1200px !important;
+    height: 90vh !important;
+    max-height: 90vh !important;
+    border-radius: 24px !important;
+}
+
+.toki-form-editor-container {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+    gap: 20px;
+    padding: 20px;
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.toki-form-editor-left {
+    flex: 1.2;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding-right: 8px;
+}
+
+.toki-form-editor-left::-webkit-scrollbar {
+    width: 6px;
+}
+.toki-form-editor-left::-webkit-scrollbar-track {
+    background: transparent;
+}
+.toki-form-editor-left::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.08);
+    border-radius: 999px;
+}
+
+.toki-form-editor-right {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    background: rgba(255, 255, 255, 0.4);
+    padding: 20px;
+    border-radius: 18px;
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    overflow: hidden;
+}
+
+.toki-form-card {
+    background: rgba(255, 255, 255, 0.45);
+    border: 1px solid rgba(0, 0, 0, 0.04);
+    border-radius: 16px;
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.01);
+    transition: all 0.2s ease;
+}
+
+.toki-form-card:hover {
+    background: rgba(255, 255, 255, 0.65);
+    border-color: rgba(37, 99, 235, 0.1);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.02);
+}
+
+.toki-form-card-title {
+    font-size: 13px;
+    font-weight: 800;
+    color: var(--toki-primary);
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.03);
+    padding-bottom: 8px;
+}
+
+.toki-form-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.toki-form-row-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.toki-form-row-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--toki-text-muted);
+}
+
+.toki-input-compact {
+    padding: 10px 14px;
+    background: rgba(255, 255, 255, 0.7);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    border-radius: 10px;
+    font-size: 13px;
+    font-family: inherit;
+    transition: all 0.2s ease;
+}
+
+.toki-input-compact:focus {
+    outline: none;
+    border-color: var(--toki-primary);
+    background: #fff;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);
+}
+
+.toki-badge-match {
+    font-size: 10px;
+    font-weight: 800;
+    padding: 2px 6px;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+}
+
+.toki-badge-match.ok {
+    background: rgba(16, 185, 129, 0.1);
+    color: #10b981;
+}
+
+.toki-badge-match.zero {
+    background: rgba(245, 158, 11, 0.1);
+    color: #f59e0b;
+}
+
+.toki-badge-match.error {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+}
+
+.toki-form-dropper-btn {
+    cursor: pointer;
+    font-size: 14px;
+    transition: transform 0.2s;
+    user-select: none;
+}
+.toki-form-dropper-btn:hover {
+    transform: scale(1.2);
+}
+
+/* --- 📱 Compact Responsive LogBox for Popups & Small Screens (v1.21.0 추가) --- */
+@media (max-width: 500px) {
+    #toki-logbox {
+        width: 100% !important;
+        height: 100% !important;
+        max-height: 100% !important;
+        bottom: 0 !important;
+        right: 0 !important;
+        left: 0 !important;
+        top: 0 !important;
+        border-radius: 0 !important;
+        border: none !important;
+        box-shadow: none !important;
+    }
+    /* 팝업에서는 전체 화면을 채우므로 드래그 헤더 무효화 및 모바일 친화형 축소 */
+    #toki-logbox-header {
+        cursor: default !important;
+        padding: 8px 12px !important;
+        border-top-left-radius: 0 !important;
+        border-top-right-radius: 0 !important;
+    }
+    #toki-logbox-content {
+        padding: 8px !important;
+        display: block !important; /* 팝업 상세로그 강제 개방 */
+        height: calc(100% - 35px) !important; /* 헤더를 제외한 영역 100% 점유 */
+        max-height: calc(100% - 35px) !important;
+    }
+    /* 팝업 내 불필요한 컨트롤 및 큐 진행률 카드 영역 강제 은닉 (사용자 피드백 반영) */
+    #toki-btn-audio, #toki-btn-report, #toki-logbox-progress {
+        display: none !important;
+    }
+}
+
+
+
+
+/* --- Dashboard Popup Specific Layout --- */
+#toki-dashboard-popup {
+    display: flex;
+    flex-direction: column;
+    width: 100vw;
+    height: 100vh;
+    margin: 0;
+    background: var(--toki-bg);
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    overflow: hidden;
+}
+
+#toki-dashboard-header {
+    padding: 24px 32px;
+    background: rgba(255, 255, 255, 0.4);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+#toki-dashboard-title {
+    font-size: 24px;
+    font-weight: 800;
+    color: #0f172a;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    letter-spacing: -0.03em;
+}
+
+#toki-dashboard-header-controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+#toki-dashboard-log-section {
+    padding: 16px 20px;
+    background: rgba(0, 0, 0, 0.05);
+    border-radius: 12px;
+    margin: 0 20px 20px 20px;
+    display: flex;
+    flex-direction: column;
+    height: 250px; /* 실시간 로그창 영역 높이 명시 */
+    overflow: hidden;
+}
+
+#toki-dashboard-log-section #toki-logbox-content {
+    flex: 1;
+    overflow-y: auto; /* 내부 스크롤 강제 */
+    padding: 12px;
+    margin: 0;
+    list-style: none;
+    background: rgba(0, 0, 0, 0.2); /* 로그 시인성 제고를 위한 세련된 다크 패널 */
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+#toki-log-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: 700;
+    margin-bottom: 12px;
+    color: var(--toki-text-muted);
+}

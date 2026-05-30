@@ -66,15 +66,16 @@ export function setConfig(key, value) {
 /**
  * Show Configuration Modal
  */
-export function showConfigModal() {
+export function showConfigModal(popupDoc = document) {
+    const doc = popupDoc;
     // Remove existing modal if any
-    const existing = document.getElementById('toki-config-modal');
+    const existing = doc.getElementById('toki-config-modal');
     if (existing) existing.remove();
 
     const config = getConfig();
 
     // -- HTML Structure (v1.9.1 Glassmorphism) --
-    const overlay = document.createElement('div');
+    const overlay = doc.createElement('div');
     overlay.id = 'toki-config-modal';
     overlay.className = 'toki-modal-overlay';
     
@@ -168,37 +169,37 @@ export function showConfigModal() {
         </div>
     `;
 
-    document.body.appendChild(overlay);
+    doc.body.appendChild(overlay);
 
     // -- Logic --
-    const policySelect = document.getElementById('toki-cfg-policy');
+    const policySelect = doc.getElementById('toki-cfg-policy');
     if(policySelect) policySelect.value = config.policy;
     
-    const sleepModeSelect = document.getElementById('toki-cfg-sleepmode');
+    const sleepModeSelect = doc.getElementById('toki-cfg-sleepmode');
     if(sleepModeSelect) sleepModeSelect.value = config.sleepMode;
 
-    const smartSkipSelect = document.getElementById('toki-cfg-smartskip');
+    const smartSkipSelect = doc.getElementById('toki-cfg-smartskip');
     if(smartSkipSelect) smartSkipSelect.value = config.smartSkipRatio;
 
-    const novelModeSelect = document.getElementById('toki-cfg-novel-mode');
+    const novelModeSelect = doc.getElementById('toki-cfg-novel-mode');
     if(novelModeSelect) novelModeSelect.value = config.novelMode;
 
-    const novelFormatSelect = document.getElementById('toki-cfg-novel-format');
+    const novelFormatSelect = doc.getElementById('toki-cfg-novel-format');
     if(novelFormatSelect) novelFormatSelect.value = config.novelFormat;
 
-    document.getElementById('toki-btn-cancel').onclick = () => overlay.remove();
+    doc.getElementById('toki-btn-cancel').onclick = () => overlay.remove();
     
-    document.getElementById('toki-btn-save').onclick = () => {
-        const newGasId = document.getElementById('toki-cfg-gas-id').value.trim();
-        const newFolder = document.getElementById('toki-cfg-folder').value.trim();
-        const newApiKey = document.getElementById('toki-cfg-apikey').value.trim();
-        const newPolicy = document.getElementById('toki-cfg-policy').value;
-        const newSleepMode = document.getElementById('toki-cfg-sleepmode').value;
-        const newSmartSkip = document.getElementById('toki-cfg-smartskip').value;
-        const newNovelMode = document.getElementById('toki-cfg-novel-mode').value;
-        const newNovelFormat = document.getElementById('toki-cfg-novel-format').value;
-        const newRemoteRule = document.getElementById('toki-cfg-remote-rule').value.trim();
-        const newCustomRule = document.getElementById('toki-cfg-custom-rule').value.trim() || '[]';
+    doc.getElementById('toki-btn-save').onclick = () => {
+        const newGasId = doc.getElementById('toki-cfg-gas-id').value.trim();
+        const newFolder = doc.getElementById('toki-cfg-folder').value.trim();
+        const newApiKey = doc.getElementById('toki-cfg-apikey').value.trim();
+        const newPolicy = doc.getElementById('toki-cfg-policy').value;
+        const newSleepMode = doc.getElementById('toki-cfg-sleepmode').value;
+        const newSmartSkip = doc.getElementById('toki-cfg-smartskip').value;
+        const newNovelMode = doc.getElementById('toki-cfg-novel-mode').value;
+        const newNovelFormat = doc.getElementById('toki-cfg-novel-format').value;
+        const newRemoteRule = doc.getElementById('toki-cfg-remote-rule').value.trim();
+        const newCustomRule = doc.getElementById('toki-cfg-custom-rule').value.trim() || '[]';
 
         // Validate Custom Rules JSON
         let validCustomRule = '[]';

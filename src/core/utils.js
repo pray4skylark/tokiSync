@@ -151,260 +151,263 @@ export async function waitForContent(targetWindow, maxWaitMs = 8000, viewerCfg =
             }
             const novelSelector = viewerCfg.novelContent || '#novel_content';
             
-            const hasImages = targetDoc.querySelector(imgSelector) !== null;
+            // [개선] 룰의 exclude/remove 셀렉터를 활용한 정밀한 유효 이미지 판정
+            const allImgs = Array.from(targetDoc.querySelectorAll(imgSelector));
+            const excludeRule = viewerCfg.exclude || viewerCfg.remove;
+            const excludeSelectors = excludeRule 
+                ? (Array.isArray(excludeRule) ? excludeRule : [excludeRule]) 
+                : [];
+
+            const validImages = allImgs.filter(img => {
+                const src = img.src || img.getAttribute('data-src') || img.getAttribute('data-lazy') || img.getAttribute('data-original') || '';
+                if (!src || src.startsWith('data:image')) return false;
+                const lower = src.toLowerCase();
+                if (lower.includes('blank.gif') || lower.includes('loading.gif') || lower.includes('loading-image.gif')) return false;
+                if (excludeSelectors.some(sel => img.matches(sel) || img.closest(sel))) return false;
+                return true;
+            });
+
+            const hasImages = validImages.length >= 3;
             const novelEl = targetDoc.querySelector(novelSelector);
             const hasNovel = novelEl && novelEl.innerText.trim().length > 50;
             
             if (hasImages || hasNovel) {
                 const type = hasImages ? 'Webtoon' : 'Novel';
-                LogBox.getInstance().log(`[DOM Poll] ${type} 콘텐츠 감지 (${(i + 1) * POLL_INTERVAL}ms)`, 'DOM:Poll');
-                return targetDoc; // 콘텐츠 발견 → 즉시 반환
+                LogBox.getInstance().log(`[DOM Poll] ${type} 콘텐츠 감지 (유효 이미지: ${validImages.length}개, ${(i + 1) * POLL_INTERVAL}ms)`, 'DOM:Poll');
+                return targetDoc;
             }
         } catch (e) {
             if (e.name === 'SecurityError' || e.message.includes('Blocked a frame')) {
-                // CORS로 완전히 막힌 경우 호출자에게 알림
                 throw e;
             }
         }
         await sleep(POLL_INTERVAL);
     }
-    // 타임아웃 — 콘텐츠 없이 진행 (후속 로직에서 빈 결과 처리)
     console.warn(`[DOM Poll] ${maxWaitMs}ms 내 콘텐츠 미감지 — 갈무리 시도`);
     LogBox.getInstance().warn(`DOM 폴링 타임아웃 ${maxWaitMs}ms — 콘텐츠 미감지, 멈춰서 물 평가`, 'DOM:Poll');
 }
 
-/**
- * iframe 내부를 끝까지 스크롤하여 레이지 로딩 이미지가 실제 URL을 불러오도록 강제하는 함수
- * [v1.7.4] 시간 기반 → 진행도 기반으로 개편
- *   Phase 1: 페이지 최하단까지 스크롤 (횟수 제한 없음, 위치 기반 종료)
- *   Phase 2: 모든 lazy 이미지가 실제 URL로 전환될 때까지 폴링
- *            - 개수가 줄어드는 한 계속 대기 (진행 중)
- *            - stallTimeoutMs 동안 변화 없으면 포기 (스톨)
- * @param {HTMLDocument} iframeDoc
- * @param {number} stallTimeoutMs 진행 없을 때 포기하는 시간 (ms), 기본 20000
- * @param {object} viewerCfg 동적 파서 뷰어 설정
- */
 export async function scrollToLoad(iframeDoc, stallTimeoutMs = 20000, viewerCfg = {}) {
-    const POLL_INTERVAL = 300;
-
     const win = iframeDoc.defaultView || iframeDoc.parentWindow;
     if (!win) return;
 
     const isHidden = document.visibilityState === 'hidden';
     const behavior = isHidden ? 'auto' : 'smooth';
-    const scrollInterval = isHidden ? 200 : 100;
-
     const logger = LogBox.getInstance();
 
-    // ── Phase 1: 요소 추적 하이브리드 점프 (EBHJ) ────────────────
-    logger.log(`[ScrollToLoad] Phase 1: 고속 점프 시작 (${behavior} 모드)`, 'DOM:Scroll');
+    logger.log('⏳ [ScrollEngine] 동적 가상화(div ➔ img) 둔갑 대기 스크롤 모드를 작동합니다.', 'DOM:Scroll');
 
-    // 범용적인 이미지 컨테이너 탐지 (마나토끼 등 다양한 사이트 구조 대응)
-    let targetSelectors;
+    // 1. 부모 이미지 컨테이너 탐지
+    let container = null;
     if (viewerCfg.imageContainer) {
-        const itemSel = viewerCfg.imageItem || 'img';
-        targetSelectors = viewerCfg.imageContainer.split(',')
-            .map(c => `${c.trim()} ${itemSel}`)
-            .join(', ');
-    } else {
-        targetSelectors = '.view-padding div img, .viewer-main img, #v_content img, .img-tag';
-    }
-    
-    const allImages = Array.from(iframeDoc.querySelectorAll(targetSelectors));
-    
-    if (allImages.length > 0) {
-        // 4개 단위로 샘플링하여 징검다리 점프 수행 (IntersectionObserver rootMargin 활용)
-        const SAMPLE_STEP = 4;
-        const jumpTargets = allImages.filter((_, idx) => idx % SAMPLE_STEP === 0);
-        
-        // 마지막 이미지는 무조건 포함
-        if (allImages.length % SAMPLE_STEP !== 1) {
-            jumpTargets.push(allImages[allImages.length - 1]);
-        }
-
-        for (let i = 0; i < jumpTargets.length; i++) {
-            const target = jumpTargets[i];
-            target.scrollIntoView({ behavior, block: 'center' });
-            
-            // 전역 스크롤 이벤트 발화 (일부 사이트용)
-            if (isHidden) win.dispatchEvent(new Event('scroll'));
-            
-            logger.log(`[EBHJ] 점프 중... (${i + 1}/${jumpTargets.length})`, 'DOM:Jump');
-            await sleep(scrollInterval);
-        }
-    } else {
-        logger.warn('[EBHJ] 화면 내 이미지 요소를 찾을 수 없어 물리 스크롤 모드로 전환합니다.', 'DOM:Scroll');
-    }
-
-    // Hybrid Fallback: 마지막에 문서를 바닥으로 내려꽂아 무한 스크롤 및 지연 로직 강제 기상
-    win.scrollTo({ top: iframeDoc.documentElement.scrollHeight, behavior });
-    if (isHidden) win.dispatchEvent(new Event('scroll'));
-    await sleep(scrollInterval * 2);
-
-    logger.log('[ScrollToLoad] Phase 1 완료 (요소 점프 및 바닥 도달). Phase 2: 이미지 활성화 대기...', 'DOM:Scroll');
-
-    // ── Phase 2: lazy 이미지가 모두 실제 URL로 바뀔 때까지 폴링 ────
-    const isDummySrc = (src) => {
-        if (!src || src.trim() === '') return true;
-        if (src.startsWith('data:image')) return true;
-        const lower = src.toLowerCase();
-        
-        // 알려진 더미 파일명 패턴
-        const dummyFilenames = [
-            'blank.gif', 'loading.gif', 'loading-image.gif',
-            'pixel.gif', 'spacer.gif', 'transparent.gif',
-            '1x1.gif', 'dot.gif',
-        ];
-        if (dummyFilenames.some(p => lower.includes(p))) return true;
-
-        // 경로 기반 패턴
-        if (/\/img\/loading/.test(lower)) return true;
-        if (/\/img\/placeholder/.test(lower)) return true;
-
-        return false;
-    };
-
-    let lastCount = -1;
-    let stallElapsed = 0;
-
-    while (true) {
-        const images = Array.from(iframeDoc.querySelectorAll(targetSelectors));
-        const remaining = images.filter(img => {
-            const src = img.src || '';
-            // 1. 알려진 플레이스홀더 URL → 대기
-            if (isDummySrc(src)) return true;
-            // 2. 이미지가 아직 로딩 중 → 대기
-            if (!img.complete) return true;
-            // 3. complete=true → 성공이든 실패든 확정 상태, 더 기다려도 바뀌지 않음
-            //    (naturalWidth=0 + complete=true = HTML 페이지 URL이거나 CORS/404 실패)
-            return false;
-        });
-
-        if (remaining.length === 0) {
-            logger.log('[ScrollToLoad] Phase 2 완료: 모든 이미지 URL 활성화!', 'DOM:Scroll');
-            break;
-        }
-
-        if (remaining.length < lastCount || lastCount === -1) {
-            // 진행 중 → 스톨 타이머 리셋
-            stallElapsed = 0;
-            logger.log(`[ScrollToLoad] 진행 중... 잔여 lazy: ${remaining.length}개`, 'DOM:Scroll');
-        } else {
-            // 변화 없음 → 스톨 누적
-            stallElapsed += POLL_INTERVAL;
-
-            // 5초마다 스톨 대상 이미지 상세 정보 출력
-            if (stallElapsed % 5000 < POLL_INTERVAL) {
-                logger.warn(`[ScrollToLoad] 스톨 중 (${stallElapsed / 1000}s 경과) — 미해결 이미지 목록:`, 'DOM:Scroll');
-                remaining.forEach((img, i) => {
-                    const src = img.src || '(empty)';
-                    const shortSrc = src.length > 80 ? '...' + src.slice(-77) : src;
-                    const reason = isDummySrc(img.src || '')
-                        ? ((!img.src || img.src.trim() === '') ? 'src 없음' : img.src.startsWith('data:image') ? 'data:image' : '더미 URL 패턴')
-                        : `naturalWidth=${img.naturalWidth} (complete=${img.complete})`;
-                    logger.warn(`  [${i + 1}] ${reason} | ${shortSrc}`, 'DOM:Stall');
-                });
-            }
-
-            if (stallElapsed >= stallTimeoutMs) {
-                logger.warn(`[ScrollToLoad] 스톨 감지: ${remaining.length}개 미활성화 상태로 ${stallTimeoutMs / 1000}초 경과. 갈무리 진행.`, 'DOM:Scroll');
-                // 최종 스톨 목록 출력
-                remaining.forEach((img, i) => {
-                    const src = img.src || '(empty)';
-                    const shortSrc = src.length > 80 ? '...' + src.slice(-77) : src;
-                    logger.warn(`  [최종 스톨 ${i + 1}] src="${shortSrc}" | naturalWidth=${img.naturalWidth} | complete=${img.complete}`, 'DOM:Stall');
-                });
+        const containers = viewerCfg.imageContainer.split(',');
+        for (const sel of containers) {
+            const el = iframeDoc.querySelector(sel.trim());
+            if (el) {
+                container = el;
                 break;
             }
         }
-
-        lastCount = remaining.length;
-        await sleep(POLL_INTERVAL);
     }
+
+    // 폴백용 이미지 셀렉터 정의 (부모 컨테이너가 없거나 감지 실패 시를 대비)
+    let fallbackSelectors = '.view-padding div img, .viewer-main img, #v_content img, .img-tag';
+    if (viewerCfg.imageContainer) {
+        const itemSel = viewerCfg.imageItem || 'img';
+        fallbackSelectors = viewerCfg.imageContainer.split(',').map(c => `${c.trim()} ${itemSel}`).join(', ');
+    }
+
+    // ── [케이스 1: 부모 컨테이너가 존재하고 내부 자식 노드들이 확인되는 경우 (가상화 뷰어 직격)] ──
+    if (container && container.children && container.children.length > 0) {
+        const pageElements = Array.from(container.children);
+        logger.log(`🎯 [ScrollEngine] 컨테이너 내 직계 자식 노드 ${pageElements.length}개 발견. 둔갑 추적을 기동합니다.`, 'DOM:Scroll');
+
+        for (let idx = 0; idx < pageElements.length; idx++) {
+            const displayIdx = idx + 1;
+            
+            // 해당 순번의 노드를 부드럽게 화면 중앙에 고정 (Intersection Observer 트리거)
+            const initialEl = container.children[idx];
+            if (initialEl) {
+                initialEl.scrollIntoView({ behavior, block: 'center' });
+                if (isHidden) win.dispatchEvent(new Event('scroll'));
+            }
+
+            // 둔갑 및 이미지 실시간 완착 대기 루프 (최대 4초)
+            const SINGLE_PAGE_TIMEOUT = 4000;
+            const POLL_INTERVAL = 200;
+            let elapsed = 0;
+
+            while (elapsed < SINGLE_PAGE_TIMEOUT) {
+                // 매 주기마다 해당 인덱스의 최신 DOM 노드를 재조회 (div에서 img로 치환되는 동적 상황 대응)
+                const currentEl = container.children[idx];
+                if (!currentEl) break;
+
+                // 해당 자리가 진짜 img 태그로 바뀌었거나, 자식으로 img 요소를 채웠는지 실시간 판별
+                let targetImg = null;
+                if (currentEl.tagName === 'IMG') {
+                    targetImg = currentEl;
+                } else {
+                    targetImg = currentEl.querySelector('img');
+                }
+
+                // 둔갑 성공 확인 시, 해당 진짜 이미지의 바이너리 로드 완료(complete && naturalWidth > 0)까지 대기
+                if (targetImg) {
+                    const isLoaded = targetImg.complete && targetImg.naturalWidth > 0;
+                    if (isLoaded) {
+                        break;
+                    }
+                }
+
+                logger.log(`⏳ [Scroll] 페이지 [${displayIdx} / ${pageElements.length}] 이미지 둔갑 대기 중... (${elapsed}ms)`, 'DOM:Scroll');
+                await sleep(POLL_INTERVAL);
+                elapsed += POLL_INTERVAL;
+            }
+
+            if (elapsed >= SINGLE_PAGE_TIMEOUT) {
+                logger.warn(`⚠️ [Scroll] 페이지 [${displayIdx} / ${pageElements.length}] 둔갑 대기 시간 초과! (다음으로 전진)`, 'DOM:Stall');
+            } else {
+                logger.log(`✅ [Scroll] 페이지 [${displayIdx} / ${pageElements.length}] 이미지 완착 성공!`, 'DOM:Scroll');
+            }
+
+            await sleep(100); // 지연 로딩 방어용 완충 딜레이
+        }
+    } 
+    // ── [케이스 2: 부모 컨테이너가 없거나 자식이 없는 경우 (구형/일반 뷰어 안전 폴백)] ──
+    else {
+        logger.warn('⚠️ [ScrollEngine] 자식 둔갑 추적 대상 없음. 기존 이미지 탐색 폴백 모드를 가동합니다.', 'DOM:Scroll');
+        
+        const allImages = Array.from(iframeDoc.querySelectorAll(fallbackSelectors));
+        const excludeRule = viewerCfg.exclude || viewerCfg.remove;
+        const excludeSelectors = excludeRule 
+            ? (Array.isArray(excludeRule) ? excludeRule : [excludeRule]) 
+            : [];
+
+        const isDummySrc = (src) => {
+            if (!src || src.trim() === '') return true;
+            if (src.startsWith('data:image')) return true;
+            const lower = src.toLowerCase();
+            const dummyFilenames = ['blank.gif', 'loading.gif', 'loading-image.gif', 'pixel.gif', 'spacer.gif', 'transparent.gif', '1x1.gif', 'dot.gif'];
+            return dummyFilenames.some(p => lower.includes(p));
+        };
+
+        const validImages = allImages.filter(img => {
+            const src = img.src || img.getAttribute('data-src') || img.getAttribute('data-lazy') || img.getAttribute('data-original') || '';
+            if (isDummySrc(src)) return false;
+            if (excludeSelectors.some(sel => img.matches(sel) || img.closest(sel))) return false;
+            return true;
+        });
+
+        if (validImages.length === 0) {
+            logger.warn('⚠️ [ScrollEngine] 유효한 폴백 이미지를 찾지 못했습니다. 물리적 하향 스크롤을 감행합니다.', 'DOM:Scroll');
+            win.scrollTo({ top: iframeDoc.documentElement.scrollHeight, behavior });
+            if (isHidden) win.dispatchEvent(new Event('scroll'));
+            await sleep(1500);
+            return;
+        }
+
+        logger.log(`🎯 [ScrollEngine] 폴백 이미지 ${validImages.length}개 발견. 순차 로드 스캔 개시.`, 'DOM:Scroll');
+
+        for (let idx = 0; idx < validImages.length; idx++) {
+            const img = validImages[idx];
+            const displayIdx = idx + 1;
+
+            img.scrollIntoView({ behavior, block: 'center' });
+            if (isHidden) win.dispatchEvent(new Event('scroll'));
+
+            const SINGLE_IMAGE_TIMEOUT = 4000;
+            const POLL_INTERVAL = 200;
+            let elapsed = 0;
+
+            while (elapsed < SINGLE_IMAGE_TIMEOUT) {
+                if (img.complete && img.naturalWidth > 0) break;
+                logger.log(`⏳ [Scroll] 폴백 이미지 [${displayIdx} / ${validImages.length}] 로딩 대기 중... (${elapsed}ms)`, 'DOM:Scroll');
+                await sleep(POLL_INTERVAL);
+                elapsed += POLL_INTERVAL;
+            }
+            await sleep(100);
+        }
+    }
+
+    // 공통 마무리: 최하단으로 최종 스크롤 꽂아넣기
+    win.scrollTo({ top: iframeDoc.documentElement.scrollHeight, behavior });
+    if (isHidden) win.dispatchEvent(new Event('scroll'));
+    logger.log('🎉 [ScrollEngine] 모든 지연 이미지 수집 및 둔갑 대기 프로세스가 대성공으로 완료되었습니다!', 'DOM:Scroll');
+    await sleep(500);
 }
 
 // Pause execution until user resolves captcha
-function pauseForCaptcha(targetUrl) {
+export function pauseForCaptcha(targetUrl) {
     return new Promise((resumeCallback) => {
-        // Create full-screen overlay
-        const overlay = document.createElement('div');
-        overlay.id = 'toki-captcha-overlay';
-        overlay.className = 'toki-captcha-overlay';
+        const logger = LogBox.instance;
         
-        overlay.innerHTML = `
-            <h1 class="toki-text-lg toki-captcha-title">⚠️ 캡차 감지</h1>
-            <p class="toki-text-base toki-captcha-desc">아래 프레임에서 캡차를 해결해주세요. (전용 프레임 모드)</p>
-            <div class="toki-captcha-frame" id="toki-captcha-frame-container"></div>
-            <button id="toki-resume-btn" class="toki-btn-action toki-btn-gradient-green toki-btn-resume">
-                해결 후 재개하기
-            </button>
-        `;
-        
-        document.body.appendChild(overlay);
-        
-        // 캡차 조작 전용 신규 프레임 띄우기 (다운로드용 프레임의 간섭 방지)
-        const captchaIframe = document.createElement('iframe');
-        captchaIframe.classList.add('toki-visible-block', 'toki-captcha-iframe');
-        captchaIframe.src = targetUrl;
-        
-        const container = document.getElementById('toki-captcha-frame-container');
-        if (container) {
-            container.appendChild(captchaIframe);
+        // 1. 대시보드 팝업 열기 및 캡차 배너 표시
+        if (logger) {
+            logger.openDashboard();
+            logger.log(`[Captcha] ⚠️ 캡차 감지! 현재 탭에서 캡차를 해결한 후 자동으로 재개됩니다.`, 'error');
         }
 
-        captchaIframe.onload = () => {
-            try {
-                const iframeDoc = captchaIframe.contentWindow.document;
-                const captchaField = iframeDoc.querySelector('fieldset#captcha, fieldset.captcha, .captcha_box');
-                if (captchaField) {
-                    captchaField.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                }
-                const captchaInput = iframeDoc.querySelector('#captcha_key, input.captcha_box');
-                if (captchaInput) {
-                    setTimeout(() => captchaInput.focus(), 300);
-                }
-            } catch (e) {
-                console.warn('[Captcha] Auto-scroll/focus failed (May be CORS):', e.message);
-            }
+        // 대시보드 팝업에 캡차 배너 주입
+        const showCaptchaBanner = () => {
+            if (!logger) return;
+            const doc = logger.popupWindow?.document;
+            if (!doc) return;
+            const existing = doc.getElementById('toki-captcha-banner');
+            if (existing) return;
+            const banner = doc.createElement('div');
+            banner.id = 'toki-captcha-banner';
+            banner.style.cssText = `
+                position: sticky; top: 0; z-index: 9999;
+                background: #c0392b; color: #fff;
+                padding: 12px 16px; font-size: 14px; font-weight: bold;
+                display: flex; justify-content: space-between; align-items: center;
+            `;
+            banner.innerHTML = `
+                <span>⚠️ 캡차 감지 — 원본 탭에서 캡차를 해결해 주세요</span>
+                <button id="toki-captcha-manual-resume" style="background:#fff;color:#c0392b;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:bold;">✅ 수동 재개</button>
+            `;
+            doc.body.prepend(banner);
+            doc.getElementById('toki-captcha-manual-resume').onclick = () => {
+                clearInterval(checkInterval);
+                banner.remove();
+                resumeCallback();
+            };
         };
-        
-        // Periodic check for captcha resolution (auto-resume)
+
+        setTimeout(showCaptchaBanner, 300);
+
+        // 2. 현재 탭 포커스 (사용자 안내)
+        window.focus();
+
+        // 3. 백그라운드 폴링 — 대상 페이지 document를 직접 감시
         const checkInterval = setInterval(() => {
             try {
-                const iframeDoc = captchaIframe.contentWindow.document;
-                
-                // Check if captcha fields still exist
-                const captchaFieldset = iframeDoc.querySelector('fieldset#captcha, fieldset.captcha');
-                const captchaImg = iframeDoc.querySelector('img.captcha_img, img[src*="kcaptcha_image.php"]');
-                const captchaForm = iframeDoc.querySelector('form[action*="captcha_check.php"]');
-                
-                const hcaptcha = iframeDoc.querySelector('iframe[src*="hcaptcha"]');
-                const recaptcha = iframeDoc.querySelector('.g-recaptcha');
-                const cloudflare = iframeDoc.querySelector('.cf-browser-verification');
-                
+                const captchaFieldset = document.querySelector('fieldset#captcha, fieldset.captcha');
+                const captchaImg = document.querySelector('img.captcha_img, img[src*="kcaptcha_image.php"]');
+                const captchaForm = document.querySelector('form[action*="captcha_check.php"]');
+                const hcaptcha = document.querySelector('iframe[src*="hcaptcha"]');
+                const recaptcha = document.querySelector('.g-recaptcha');
+                const cloudflare = document.querySelector('.cf-browser-verification');
                 const hasCaptcha = !!(captchaFieldset || captchaImg || captchaForm || hcaptcha || recaptcha || cloudflare);
-                
+
                 if (!hasCaptcha) {
-                    console.log('[Captcha] 자동 감지: 캡차 해결됨!');
                     clearInterval(checkInterval);
-                    overlay.remove();
+                    if (logger) {
+                        const doc = logger.popupWindow?.document;
+                        doc?.getElementById('toki-captcha-banner')?.remove();
+                        logger.log('[Captcha] ✅ 해결 감지! 수집을 재개합니다.', 'success');
+                    }
                     resumeCallback();
                 }
-            } catch (e) {
-                // CORS error or iframe changed - likely resolved
-                console.log('[Captcha] 자동 감지: 상위 프레임 권한 막힘 또는 리다이렉트 발생 (해결됨으로 추정)');
+            } catch(e) {
+                // 페이지 전환 등 — 해결된 것으로 간주
                 clearInterval(checkInterval);
-                overlay.remove();
+                if (logger) {
+                    const doc = logger.popupWindow?.document;
+                    doc?.getElementById('toki-captcha-banner')?.remove();
+                }
                 resumeCallback();
             }
-        }, 1000); // Check every 1 second
-        
-        // Resume button (manual override)
-        document.getElementById('toki-resume-btn').onclick = () => {
-            clearInterval(checkInterval);
-            overlay.remove();
-            resumeCallback();
-        };
+        }, 1000);
     });
 }
 
@@ -519,25 +522,86 @@ export async function getImageDimensions(blob) {
  * @returns {Promise<Blob>}
  */
 export async function fetchBlobWithXHR(url) {
-    return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-            method: 'GET',
-            url: url,
-            headers: {
-                "Referer": window.location.origin,
-                "User-Agent": navigator.userAgent
-            },
-            responseType: 'blob',
-            timeout: 30000,
-            onload: (res) => {
-                if (res.status >= 200 && res.status < 300) {
-                    resolve(res.response);
-                } else {
-                    reject(new Error(`HTTP ${res.status}: ${url}`));
-                }
-            },
-            onerror: (err) => reject(new Error(`Network Error: ${url}`)),
-            ontimeout: () => reject(new Error(`Timeout: ${url}`))
-        });
+    // 35초 절대 강제 타임아웃 프로미스 정의 (CORS/샌드박스 먹통 상황 방어용 극약 처방)
+    let timeoutTimer = null;
+    const forceTimeoutPromise = new Promise((_, reject) => {
+        timeoutTimer = setTimeout(() => {
+            reject(new Error(`절대 타임아웃 한계(35초) 초과로 다운로드를 강제 건너뛰었습니다.`));
+        }, 35000);
     });
+
+    const downloadPromise = (async () => {
+        // 1. GM_xmlhttpRequest API 유효성 검사 및 표준 fetch 1차 폴백 우회
+        if (typeof GM_xmlhttpRequest === 'undefined') {
+            console.warn('[TokiSync Utils] GM_xmlhttpRequest가 팝업 환경에서 유효하지 않습니다. 표준 fetch API로 즉시 대체합니다:', url);
+            try {
+                const resp = await fetch(url, {
+                    mode: 'cors',
+                    credentials: 'omit'
+                });
+                if (!resp.ok) throw new Error(`HTTP status ${resp.status}`);
+                return await resp.blob();
+            } catch (fetchErr) {
+                throw new Error(`Standard Fetch 실패 (CORS 또는 네트워크 장애): ${fetchErr.message} -> ${url}`);
+            }
+        }
+
+        return new Promise((resolve, reject) => {
+            try {
+                GM_xmlhttpRequest({
+                    method: 'GET',
+                    url: url,
+                    headers: {
+                        "Referer": window.location.origin,
+                        "User-Agent": navigator.userAgent
+                    },
+                    responseType: 'blob',
+                    timeout: 25000, // 25초 네트워크 타임아웃으로 조정
+                    onload: (res) => {
+                        if (res.status >= 200 && res.status < 300) {
+                            resolve(res.response);
+                        } else {
+                            reject(new Error(`HTTP ${res.status}: ${url}`));
+                        }
+                    },
+                    onerror: (err) => {
+                        console.warn('[TokiSync Utils] GM_xmlhttpRequest 오류 감지. fetch 폴백을 발동합니다:', url);
+                        fetch(url, { mode: 'cors', credentials: 'omit' })
+                            .then(r => {
+                                if (!r.ok) throw new Error(`HTTP status ${r.status}`);
+                                return r.blob();
+                            })
+                            .then(resolve)
+                            .catch(e => reject(new Error(`GM_xmlhttpRequest 에러 및 fetch 폴백 실패: ${e.message}`)));
+                    },
+                    ontimeout: () => {
+                        console.warn('[TokiSync Utils] GM_xmlhttpRequest 25초 타임아웃. fetch 폴백 시도:', url);
+                        fetch(url, { mode: 'cors', credentials: 'omit' })
+                            .then(r => {
+                                if (!r.ok) throw new Error(`HTTP status ${r.status}`);
+                                return r.blob();
+                            })
+                            .then(resolve)
+                            .catch(reject);
+                    }
+                });
+            } catch (e) {
+                console.error('[TokiSync Utils] GM_xmlhttpRequest 호출 중 예외 발생, 일반 fetch로 긴급 우회:', e);
+                fetch(url, { mode: 'cors', credentials: 'omit' })
+                    .then(r => {
+                        if (!r.ok) throw new Error(`HTTP status ${r.status}`);
+                        return r.blob();
+                    })
+                    .then(resolve)
+                    .catch(reject);
+            }
+        });
+    })();
+
+    try {
+        const result = await Promise.race([downloadPromise, forceTimeoutPromise]);
+        return result;
+    } finally {
+        if (timeoutTimer) clearTimeout(timeoutTimer);
+    }
 }

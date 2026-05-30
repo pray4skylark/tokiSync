@@ -15,50 +15,43 @@ export class RuleManager {
     static async getRules() {
         let rules = [...this.#builtInRules];
 
-        // 1. Fetch Remote Rules (Background cache update & retrieval)
-        let remoteRules = [];
-        const cacheStr = typeof GM_getValue !== 'undefined' ? GM_getValue("TOKI_REMOTE_RULES_CACHE", "") : "";
-        let hasCache = false;
-
-        if (cacheStr) {
-            try {
-                remoteRules = JSON.parse(cacheStr);
-                hasCache = true;
-            } catch (e) {}
-        }
-
-        const configUrl = typeof GM_getValue !== 'undefined' ? GM_getValue(CFG_REMOTE_RULE_URL, "") : "";
-        const targetUrl = configUrl.trim() || "https://pray4skylark.github.io/tokiSync/rules.json";
-
-        const updatePromise = this.fetchRemoteRules(targetUrl).then(fetched => {
-            if (fetched) return fetched;
-            return null;
-        });
-
-        if (!hasCache) {
-            const fetched = await updatePromise;
-            if (fetched) remoteRules = fetched;
-        } else {
-            // Background update
-            updatePromise.catch(() => {});
-        }
-
-        if (remoteRules.length > 0) {
-            rules = [...remoteRules, ...rules];
-        }
-
-        // 2. Load Custom Rules from GM storage
+        // 1. GM storage에서 Custom Rules(유일한 룰 저장소) 불러오기
+        let customRules = [];
+        let hasCustom = false;
+        
         if (typeof GM_getValue !== 'undefined') {
-            const customStr = GM_getValue(CFG_CUSTOM_RULES, '[]');
-            try {
-                const customRules = JSON.parse(customStr);
-                if (Array.isArray(customRules) && customRules.length > 0) {
-                    // Custom rules at the beginning to take precedence during matching
-                    rules = [...customRules, ...rules];
+            const customStr = GM_getValue(CFG_CUSTOM_RULES, "");
+            if (customStr && customStr.trim() !== "" && customStr !== "[]") {
+                try {
+                    customRules = JSON.parse(customStr);
+                    hasCustom = true;
+                } catch (e) {
+                    console.error('[RuleManager] Failed to parse custom rules:', e);
                 }
-            } catch (e) {
-                console.error('[RuleManager] Failed to parse custom rules:', e);
             }
+        }
+
+        // 2. 만약 Custom Rules가 아예 없거나 빈 배열인 경우 (최초 구동 시) 원격에서 Seed 규칙 다운로드 및 이식
+        if (!hasCustom || customRules.length === 0) {
+            console.log("[RuleManager] 🚀 초기 구동 감지 -> 원격 기본 룰 파일로부터 Seed 규칙을 다운로드합니다.");
+            const configUrl = typeof GM_getValue !== 'undefined' ? GM_getValue(CFG_REMOTE_RULE_URL, "") : "";
+            const targetUrl = configUrl.trim() || "https://pray4skylark.github.io/tokiSync/rules.json";
+
+            try {
+                const fetched = await this.fetchRemoteRules(targetUrl);
+                if (fetched && Array.isArray(fetched) && fetched.length > 0) {
+                    customRules = fetched;
+                    this.saveCustomRules(customRules);
+                    console.log(`[RuleManager] ✅ 원격 기본 룰(${customRules.length}개)을 TOKI_CUSTOM_RULES에 초기 이식(Seed) 완료했습니다.`);
+                }
+            } catch (err) {
+                console.error("[RuleManager] 원격 기본 룰 가져오기 실패:", err);
+            }
+        }
+
+        // 3. 커스텀 룰을 병합하여 최종 반환 (Custom > Built-in 순)
+        if (customRules.length > 0) {
+            rules = [...customRules, ...rules];
         }
 
         return rules;
@@ -182,9 +175,6 @@ export class RuleManager {
                         const data = JSON.parse(res.responseText);
                         let rules = data.rules || data;
                         if (Array.isArray(rules)) {
-                            if (typeof GM_setValue !== 'undefined') {
-                                GM_setValue("TOKI_REMOTE_RULES_CACHE", JSON.stringify(rules));
-                            }
                             resolve(rules);
                         } else {
                             resolve(null);

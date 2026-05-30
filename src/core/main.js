@@ -244,7 +244,7 @@ export async function main() {
             tokiDownload(spec, config.policy, forceOverwrite);
         },
         openViewer: openViewer,
-        openSettings: () => showConfigModal(),
+        openSettings: (popupDoc) => showConfigModal(popupDoc),
         toggleLog: () => logger.toggle(),
         getConfig: getConfig,
         setConfig: setConfig,

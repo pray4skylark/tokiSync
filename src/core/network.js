@@ -101,7 +101,7 @@ async function getToken() {
  * @param {string} category - Category name ("Webtoon", "Novel", or "Manga")
  * @returns {Promise<string>} Series folder ID
  */
-async function getOrCreateFolder(folderName, parentId, token, category = 'Webtoon') {
+export async function getOrCreateFolder(folderName, parentId, token, category = 'Webtoon') {
     // 1. Check for legacy folder in root (migration compatibility)
     const legacySearchUrl = `https://www.googleapis.com/drive/v3/files?` +
         `q=name='${encodeURIComponent(folderName)}' and '${parentId}' in parents and trashed=false and mimeType='application/vnd.google-apps.folder'` +
@@ -385,8 +385,8 @@ export async function uploadDirect(blob, folderName, fileName, metadata = {}) {
         // Determine category
         const category = metadata.category || (fileName.endsWith('.epub') ? 'Novel' : 'Webtoon');
         
-        // 1. Get Series Folder ID
-        const seriesFolderId = await getOrCreateFolder(folderName, config.folderId, token, category);
+        // 1. Get Series Folder ID (큐에 선제 저장된 폴더 ID가 있다면 그대로 사용하고, 없으면 생성)
+        const seriesFolderId = metadata.folderId || await getOrCreateFolder(folderName, config.folderId, token, category);
         
         let targetFolderId = seriesFolderId;
         let finalFileName = fileName;

@@ -1,6 +1,6 @@
 import { waitForContent, scrollToLoad, sleep } from './utils.js';
 import { LogBox } from './ui.js';
-import { fetchNovelText } from './novel-decryptor.js';
+import { fetchNovelText } from './worker-controller.js';
 
 /**
  * 뷰어 페이지(또는 팝업 워커) 내에서 직접 데이터를 추출하는 범용 모듈
