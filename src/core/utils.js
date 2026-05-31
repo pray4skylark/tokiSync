@@ -187,7 +187,7 @@ export async function waitForContent(targetWindow, maxWaitMs = 8000, viewerCfg =
     LogBox.getInstance().warn(`DOM 폴링 타임아웃 ${maxWaitMs}ms — 콘텐츠 미감지, 멈춰서 물 평가`, 'DOM:Poll');
 }
 
-export async function scrollToLoad(iframeDoc, stallTimeoutMs = 20000, viewerCfg = {}) {
+export async function scrollToLoad(iframeDoc, stallTimeoutMs = 20000, viewerCfg = {}, multiplier = 1.0) {
     const win = iframeDoc.defaultView || iframeDoc.parentWindow;
     if (!win) return;
 
@@ -232,8 +232,8 @@ export async function scrollToLoad(iframeDoc, stallTimeoutMs = 20000, viewerCfg 
                 if (isHidden) win.dispatchEvent(new Event('scroll'));
             }
 
-            // 둔갑 및 이미지 실시간 완착 대기 루프 (최대 4초)
-            const SINGLE_PAGE_TIMEOUT = 4000;
+            // 둔갑 및 이미지 실시간 완착 대기 루프 (최대 4초 * 배율)
+            const SINGLE_PAGE_TIMEOUT = Math.round(4000 * multiplier);
             const POLL_INTERVAL = 200;
             let elapsed = 0;
 
@@ -269,7 +269,7 @@ export async function scrollToLoad(iframeDoc, stallTimeoutMs = 20000, viewerCfg 
                 logger.log(`✅ [Scroll] 페이지 [${displayIdx} / ${pageElements.length}] 이미지 완착 성공!`, 'DOM:Scroll');
             }
 
-            await sleep(100); // 지연 로딩 방어용 완충 딜레이
+            await sleep(Math.round(100 * multiplier)); // 지연 로딩 방어용 완충 딜레이
         }
     } 
     // ── [케이스 2: 부모 컨테이너가 없거나 자식이 없는 경우 (구형/일반 뷰어 안전 폴백)] ──
@@ -314,7 +314,7 @@ export async function scrollToLoad(iframeDoc, stallTimeoutMs = 20000, viewerCfg 
             img.scrollIntoView({ behavior, block: 'center' });
             if (isHidden) win.dispatchEvent(new Event('scroll'));
 
-            const SINGLE_IMAGE_TIMEOUT = 4000;
+            const SINGLE_IMAGE_TIMEOUT = Math.round(4000 * multiplier);
             const POLL_INTERVAL = 200;
             let elapsed = 0;
 
@@ -324,7 +324,7 @@ export async function scrollToLoad(iframeDoc, stallTimeoutMs = 20000, viewerCfg 
                 await sleep(POLL_INTERVAL);
                 elapsed += POLL_INTERVAL;
             }
-            await sleep(100);
+            await sleep(Math.round(100 * multiplier));
         }
     }
 

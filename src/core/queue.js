@@ -3,6 +3,8 @@
  * 영속성 디스크 큐 및 이벤트 기반 세마포어 스케줄러 엔진
  */
 
+import { LogBox } from './ui.js';
+
 export const WORKER_STAGE = {
   INIT: 'STAGE_INIT',             // 초기화 및 Handshake 대기 중
   DOM_READY: 'STAGE_DOM_READY',   // 콘텐츠 DOM 렌더링 및 안정화 대기 중
@@ -41,11 +43,12 @@ const saveRawQueue = (queue) => {
   try {
     if (typeof GM_setValue !== 'undefined') {
       GM_setValue(STORAGE_KEY, queue);
-      return;
-    }
-    if (typeof localStorage !== 'undefined') {
+    } else if (typeof localStorage !== 'undefined') {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(queue));
     }
+    try {
+      LogBox.getInstance().updateProgressUI();
+    } catch (uiErr) {}
   } catch (e) {
     console.error('[TokiSync Queue] Failed to save queue to storage:', e);
   }
@@ -415,19 +418,73 @@ export const runSchedulerOnce = async () => {
     await sleepJitter(1500, 3000);
 
     // 5. 팝업 실행 및 상태 갱신
-    console.log(`[Queue Scheduler] 🚀 팝업 기동: ${nextItem.episodeTitle} (${nextItem.episodeUrl})`);
+    console.log(`[Queue Scheduler] 🚀 팝업 릴레이 기동: ${nextItem.episodeTitle} (${nextItem.episodeUrl})`);
     updateQueueItem(nextItem.id, { status: 'processing' });
     
-    // 실제 팝업 기동 가교 함수 호출
-    const popupRef = openEpisodePopup(nextItem.episodeUrl, nextItem.id);
-    if (popupRef) {
-      activeWorkers.set(nextItem.id, popupRef);
+    // 유효한 기존 팝업 채널 재사용 탐색
+    let recycledPopup = null;
+    let targetSlotId = null;
+
+    // 2개의 슬롯 중 비어있거나 완료된 팝업 슬롯을 탐색하여 재사용
+    for (const [id, popupRef] of activeWorkers.entries()) {
+        const item = queue.find(i => i.id === id);
+        if (popupRef && !popupRef.closed && (!item || item.status === 'completed' || item.status === 'failed')) {
+            recycledPopup = popupRef;
+            targetSlotId = id;
+            break;
+        }
+    }
+
+    if (recycledPopup) {
+        const targetWindowName = `tokisync_novel_worker_${targetSlotId}`.replace(/[^a-zA-Z0-9_]/g, '');
+        const newWindowName = `tokisync_novel_worker_${nextItem.id}`.replace(/[^a-zA-Z0-9_]/g, '');
+
+        console.log(`[Queue Scheduler] ♻️ 기존 자식 팝업 슬롯 재사용 (이름: ${targetWindowName} -> 신규: ${newWindowName})`);
+        // activeWorkers 정리 및 교체
+        activeWorkers.delete(targetSlotId);
+        activeWorkers.set(nextItem.id, recycledPopup);
+
+        try {
+            // [CORS 우회 우주 표준 기법] 기존 window.name을 타겟으로 window.open을 호출하면
+            // 새 창을 띄우지 않고 동일 팝업창 내에서 URL 리다이렉션이 성공하며, 팝업 차단막도 우회합니다!
+            const width = 400;
+            const height = 600;
+            const left = window.screen.width - width - 50;
+            const top = 100;
+            
+            const updatedPopup = window.open(
+                nextItem.episodeUrl,
+                targetWindowName,
+                `width=${width},height=${height},left=${left},top=${top},noopener=false,scrollbars=yes,resizable=yes`
+            );
+            
+            if (updatedPopup) {
+                // 통신 식별자 갱신
+                updatedPopup.name = newWindowName;
+                activeWorkers.set(nextItem.id, updatedPopup);
+            }
+        } catch (err) {
+            console.error('[Queue Scheduler] 릴레이 window.open 우회 실패, 일반 리다이렉션 시도:', err);
+            try {
+                recycledPopup.location.href = nextItem.episodeUrl;
+                recycledPopup.name = newWindowName;
+                activeWorkers.set(nextItem.id, recycledPopup);
+            } catch (hrefErr) {
+                console.error('[Queue Scheduler] 팝업 릴레이 강제 실패:', hrefErr);
+            }
+        }
     } else {
-      // 팝업 차단 등으로 창 생성 실패 시 즉시 failed 처리
-      updateQueueItem(nextItem.id, { 
-        status: 'failed', 
-        errorMsg: '브라우저 팝업 차단막에 의해 창 생성에 실패했습니다.' 
-      });
+        // 가용 팝업이 없을 때만 물리적 open 수행 (최초 진입 시 2회만 동작)
+        const popupRef = openEpisodePopup(nextItem.episodeUrl, nextItem.id);
+        if (popupRef) {
+            activeWorkers.set(nextItem.id, popupRef);
+        } else {
+            // 팝업 차단 등으로 창 생성 실패 시 즉시 failed 처리
+            updateQueueItem(nextItem.id, { 
+                status: 'failed', 
+                errorMsg: '브라우저 팝업 차단막에 의해 창 생성에 실패했습니다.' 
+            });
+        }
     }
 
   } catch (err) {

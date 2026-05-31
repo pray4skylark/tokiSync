@@ -9,6 +9,9 @@ export const CFG_NOVEL_MODE = "TOKI_NOVEL_MODE";
 export const CFG_NOVEL_FORMAT = "TOKI_NOVEL_FORMAT";
 export const CFG_REMOTE_RULE_URL = "TOKI_REMOTE_RULE_URL";
 export const CFG_CUSTOM_RULES = "TOKI_CUSTOM_RULES";
+export const CFG_SCAN_SPEED = "TOKI_SCAN_SPEED";
+export const CFG_LOCAL_NAME_TEMPLATE = "TOKI_LOCAL_NAME_TEMPLATE";
+export const CFG_LOCAL_EPISODE_PADDING = "TOKI_LOCAL_EPISODE_PADDING";
 
 /**
  * Get current configuration
@@ -50,7 +53,10 @@ export function getConfig() {
         novelMode: GM_getValue(CFG_NOVEL_MODE, "perChapter"), // default: chapter-by-chapter
         novelFormat: GM_getValue(CFG_NOVEL_FORMAT, "epub"), // default: EPUB
         remoteRuleUrl: remoteRuleUrl,
-        customRules: GM_getValue(CFG_CUSTOM_RULES, "[]")
+        customRules: GM_getValue(CFG_CUSTOM_RULES, "[]"),
+        scanSpeed: parseFloat(GM_getValue(CFG_SCAN_SPEED, "1.0")),
+        localNameTemplate: GM_getValue(CFG_LOCAL_NAME_TEMPLATE, "{number} - {title}"),
+        localEpisodePadding: GM_getValue(CFG_LOCAL_EPISODE_PADDING, "4")
     };
 }
 
@@ -114,6 +120,30 @@ export function showConfigModal(popupDoc = document) {
             </div>
 
             <div class="toki-control-group">
+                <label class="toki-label">로컬 파일명 템플릿</label>
+                <input type="text" id="toki-cfg-nametemplate" class="toki-input" 
+                       placeholder="{number} - {title}" value="${config.localNameTemplate}">
+                <div class="toki-hint" style="font-size: 11px; color: #888; margin-top: 4px;">
+                    로컬 저장 시 파일명 포맷입니다. 
+                    (치환자: <b>{number}</b>=패딩번호, <b>{rawNumber}</b>=원본번호, <b>{series}</b>=작품명, <b>{title}</b>=회차제목)<br>
+                    ※ 구글 드라이브 업로드 시에는 호환성을 위해 템플릿이 적용되지 않고 기존 포맷으로 고정됩니다.
+                </div>
+            </div>
+
+            <div class="toki-control-group">
+                <label class="toki-label">로컬 화수 패딩 자릿수</label>
+                <select id="toki-cfg-localpadding" class="toki-select">
+                    <option value="0">패딩 없음 (1, 2, 10)</option>
+                    <option value="2">2자리 패딩 (01, 02, 10)</option>
+                    <option value="3">3자리 패딩 (001, 002, 010)</option>
+                    <option value="4">4자리 패딩 (0001, 0002, 0010)</option>
+                </select>
+                <div class="toki-hint" style="font-size: 11px; color: #888; margin-top: 4px;">
+                    템플릿 내 <b>{number}</b> 치환자에 적용될 패딩 자릿수입니다.
+                </div>
+            </div>
+
+            <div class="toki-control-group">
                 <label class="toki-label">다운로드 속도</label>
                 <select id="toki-cfg-sleepmode" class="toki-select">
                     <option value="agile">빠름 (1-3초)</option>
@@ -122,6 +152,18 @@ export function showConfigModal(popupDoc = document) {
                     <option value="slow">느림 (5-15초)</option>
                     <option value="very_slow">매우 느림 (10-30초)</option>
                 </select>
+            </div>
+
+            <div class="toki-control-group">
+                <label class="toki-label">이미지 스캔 속도 배율
+                    <span id="toki-scan-speed-val">${config.scanSpeed.toFixed(1)}×</span>
+                </label>
+                <input type="range" id="toki-cfg-scanspeed" 
+                       min="0.5" max="5.0" step="0.5" value="${config.scanSpeed}"
+                       class="toki-range" style="width: 100%;">
+                <div class="toki-hint" style="font-size: 11px; color: #888; margin-top: 4px;">
+                    0.5×(빠름/불안정) ─ 1.0×(기본) ─ 3.0×(안정) ─ 5.0×(확실)
+                </div>
             </div>
 
             <div class="toki-control-group">
@@ -174,9 +216,20 @@ export function showConfigModal(popupDoc = document) {
     // -- Logic --
     const policySelect = doc.getElementById('toki-cfg-policy');
     if(policySelect) policySelect.value = config.policy;
+
+    const localPaddingSelect = doc.getElementById('toki-cfg-localpadding');
+    if(localPaddingSelect) localPaddingSelect.value = config.localEpisodePadding;
     
     const sleepModeSelect = doc.getElementById('toki-cfg-sleepmode');
     if(sleepModeSelect) sleepModeSelect.value = config.sleepMode;
+
+    const scanSpeedSlider = doc.getElementById('toki-cfg-scanspeed');
+    if (scanSpeedSlider) {
+        scanSpeedSlider.oninput = (e) => {
+            const valSpan = doc.getElementById('toki-scan-speed-val');
+            if (valSpan) valSpan.innerText = `${parseFloat(e.target.value).toFixed(1)}×`;
+        };
+    }
 
     const smartSkipSelect = doc.getElementById('toki-cfg-smartskip');
     if(smartSkipSelect) smartSkipSelect.value = config.smartSkipRatio;
@@ -195,6 +248,9 @@ export function showConfigModal(popupDoc = document) {
         const newApiKey = doc.getElementById('toki-cfg-apikey').value.trim();
         const newPolicy = doc.getElementById('toki-cfg-policy').value;
         const newSleepMode = doc.getElementById('toki-cfg-sleepmode').value;
+        const newScanSpeed = doc.getElementById('toki-cfg-scanspeed').value;
+        const newNameTemplate = doc.getElementById('toki-cfg-nametemplate').value.trim() || "{number} - {title}";
+        const newLocalPadding = doc.getElementById('toki-cfg-localpadding').value;
         const newSmartSkip = doc.getElementById('toki-cfg-smartskip').value;
         const newNovelMode = doc.getElementById('toki-cfg-novel-mode').value;
         const newNovelFormat = doc.getElementById('toki-cfg-novel-format').value;
@@ -234,6 +290,9 @@ export function showConfigModal(popupDoc = document) {
         setConfig(CFG_API_KEY, newApiKey);
         setConfig(CFG_POLICY_KEY, newPolicy);
         setConfig(CFG_SLEEP_MODE, newSleepMode);
+        setConfig(CFG_SCAN_SPEED, newScanSpeed);
+        setConfig(CFG_LOCAL_NAME_TEMPLATE, newNameTemplate);
+        setConfig(CFG_LOCAL_EPISODE_PADDING, newLocalPadding);
         setConfig(CFG_SMART_SKIP_RATIO, newSmartSkip);
         setConfig(CFG_NOVEL_MODE, newNovelMode);
         setConfig(CFG_NOVEL_FORMAT, newNovelFormat);

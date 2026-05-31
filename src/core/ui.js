@@ -10,6 +10,7 @@ import { RuleManager } from './parsers/RuleManager.js';
 import { GenericParser } from './parsers/GenericParser.js';
 import { extractEpisodeData } from './extractor.js';
 import styles from './ui.css';
+import { getQueue, getQueueStats, getQueuePaused, setQueuePaused, removeQueueItem, removeCompletedAndFailedItems, stopAllWorkers, runSchedulerOnce, clearQueue } from './queue.js';
 
 export class LogBox {
     static instance = null;
@@ -27,20 +28,6 @@ export class LogBox {
         // -- Register Tampermonkey User Menu Commands --
         if (typeof GM_registerMenuCommand !== 'undefined') {
             try {
-                GM_registerMenuCommand("🧩 파싱 규칙 편집기 (Tree Editor)", () => {
-                    this.openDashboard();
-                    setTimeout(() => {
-                        const doc = this.popupWindow?.document;
-                        if (doc) new TreeRuleEditor().show(doc);
-                    }, 300);
-                });
-                GM_registerMenuCommand("📝 간편 규칙 편집기 (Form Editor)", () => {
-                    this.openDashboard();
-                    setTimeout(() => {
-                        const doc = this.popupWindow?.document;
-                        if (doc) new FormRuleEditor().show(doc);
-                    }, 300);
-                });
                 GM_registerMenuCommand("⚡ TokiSync 통합 대시보드 열기", () => {
                     this.openDashboard();
                 });
@@ -172,12 +159,7 @@ export class LogBox {
         const progressContainer = doc.getElementById('toki-logbox-progress');
         if (!progressContainer) return;
 
-        if (typeof window.tokiQueue === 'undefined') {
-            progressContainer.style.display = 'none';
-            return;
-        }
-
-        const queue = window.tokiQueue.getQueue();
+        const queue = getQueue();
         const listEl = doc.getElementById('toki-progress-workers-list');
         const queueListEl = doc.getElementById('toki-progress-queue-list');
         const queueSection = doc.getElementById('toki-progress-queue-section');
@@ -204,14 +186,14 @@ export class LogBox {
         progressContainer.style.display = 'block';
         if (queueSection) queueSection.style.display = 'block';
 
-        const stats = window.tokiQueue.getQueueStats();
+        const stats = getQueueStats();
         const overallPercent = stats.total > 0 ? Math.round(((stats.completed + stats.failed) / stats.total) * 100) : 0;
 
         // 전체 진행도 갱신
         const textEl = doc.getElementById('toki-progress-overall-text');
         const barEl = doc.getElementById('toki-progress-overall-bar');
         const pauseBtn = doc.getElementById('toki-btn-queue-pause');
-        const isPaused = window.tokiQueue.getQueuePaused();
+        const isPaused = getQueuePaused();
         
         if (textEl) {
             const pauseText = isPaused ? ' ⏸️ [일시 정지됨]' : '';
@@ -297,21 +279,6 @@ export class LogBox {
                     </div>
                 `;
             }).join('');
-
-            // 이벤트 바인딩 (한 번만 적용)
-            if (!queueListEl.dataset.hasListener) {
-                queueListEl.dataset.hasListener = 'true';
-                queueListEl.addEventListener('click', (e) => {
-                    const deleteBtn = e.target.closest('.toki-queue-item-delete');
-                    if (deleteBtn) {
-                        const itemId = deleteBtn.getAttribute('data-id');
-                        if (confirm('선택한 에피소드를 대기열에서 제거하시겠습니까?')) {
-                            window.tokiQueue.removeQueueItem(itemId);
-                            this.updateProgressUI();
-                        }
-                    }
-                });
-            }
         }
     }
 
@@ -453,6 +420,8 @@ export class MenuModal {
             <div id="toki-dashboard-header">
                 <span id="toki-dashboard-title">⚡ TokiSync 통합 대시보드</span>
                 <div id="toki-dashboard-header-controls">
+                    <button class="toki-btn-ghost" id="toki-btn-show-progress" title="수집 진행 상황 및 대기열">📊 진행 상황</button>
+                    <button class="toki-btn-ghost" id="toki-btn-show-logs" title="실시간 수집 로그 모니터">📋 로그</button>
                     <button class="toki-btn-ghost" id="toki-btn-viewer-link" title="Open Viewer">🌐 Viewer</button>
                     <button class="toki-btn-ghost" id="toki-btn-menu-close" title="Close">❌ 닫기</button>
                 </div>
@@ -499,25 +468,30 @@ export class MenuModal {
 
                 <!-- 2. Settings Tab -->
                 <div class="toki-tab-content" id="toki-tab-settings">
-                    <div class="toki-section-title toki-mt-0">Download Settings</div>
+                    <div class="toki-section-title toki-mt-0">Cloud & Storage</div>
+                    <div class="toki-control-group">
+                        <label class="toki-label">GAS Script ID</label>
+                        <input type="text" id="toki-sel-gas-id" class="toki-input" placeholder="AKfycb...">
+                    </div>
+
+                    <div class="toki-control-group">
+                        <label class="toki-label">Google Drive Folder ID</label>
+                        <input type="text" id="toki-sel-folder-id" class="toki-input" placeholder="Folder ID">
+                    </div>
+
+                    <div class="toki-control-group">
+                        <label class="toki-label">API Key (보안)</label>
+                        <input type="password" id="toki-sel-apikey" class="toki-input" placeholder="API Key">
+                    </div>
+
+                    <div class="toki-section-title">Download Policies</div>
                     <div class="toki-control-group">
                         <label class="toki-label">저장 정책</label>
                         <select id="toki-sel-policy" class="toki-select">
-                            <option value="individual">개별 파일</option>
-                            <option value="zipOfCbzs">챕터 묶음</option>
-                            <option value="native">자동 분류</option>
-                            <option value="drive">드라이브</option>
-                        </select>
-                    </div>
-                    
-                    <div class="toki-control-group">
-                        <label class="toki-label">다운로드 속도</label>
-                        <select id="toki-sel-speed" class="toki-select">
-                            <option value="agile">빠름</option>
-                            <option value="cautious">신중</option>
-                            <option value="thorough">철저</option>
-                            <option value="slow">느림</option>
-                            <option value="very_slow">매우 느림</option>
+                            <option value="individual">개별 파일 (Individual)</option>
+                            <option value="zipOfCbzs">챕터 묶음 (ZIP of CBZs)</option>
+                            <option value="native">자동 분류 (Native)</option>
+                            <option value="drive">드라이브 업로드 (GoogleDrive)</option>
                         </select>
                     </div>
 
@@ -530,7 +504,48 @@ export class MenuModal {
                         </button>
                     </div>
 
-                    <div class="toki-section-title">Novel Settings</div>
+                    <div class="toki-control-group">
+                        <label class="toki-label">로컬 파일명 템플릿</label>
+                        <input type="text" id="toki-sel-nametemplate" class="toki-input" placeholder="{number} - {title}">
+                        <div class="toki-hint" style="font-size: 11px; color: #888; margin-top: 4px;">
+                            로컬 저장 시 파일명 포맷입니다. 
+                            (치환자: <b>{number}</b>=패딩번호, <b>{rawNumber}</b>=원본번호, <b>{series}</b>=작품명, <b>{title}</b>=회차제목)<br>
+                            ※ 구글 드라이브 업로드 시에는 기존 포맷으로 고정됩니다.
+                        </div>
+                    </div>
+
+                    <div class="toki-control-group">
+                        <label class="toki-label">로컬 화수 패딩 자릿수</label>
+                        <select id="toki-sel-localpadding" class="toki-select">
+                            <option value="0">패딩 없음 (1, 2, 10)</option>
+                            <option value="2">2자리 패딩 (01, 02, 10)</option>
+                            <option value="3">3자리 패딩 (001, 002, 010)</option>
+                            <option value="4">4자리 패딩 (0001, 0002, 0010)</option>
+                        </select>
+                    </div>
+
+                    <div class="toki-control-group">
+                        <label class="toki-label">다운로드 속도</label>
+                        <select id="toki-sel-speed" class="toki-select">
+                            <option value="agile">빠름 (1-3초)</option>
+                            <option value="cautious">신중 (2-5초)</option>
+                            <option value="thorough">철저 (3-8초)</option>
+                            <option value="slow">느림 (5-15초)</option>
+                            <option value="very_slow">매우 느림 (10-30초)</option>
+                        </select>
+                    </div>
+
+                    <div class="toki-control-group">
+                        <label class="toki-label">이미지 스캔 속도 배율
+                            <span id="toki-scan-speed-val" style="font-weight: bold; color: var(--toki-primary, #6366f1);">1.0×</span>
+                        </label>
+                        <input type="range" id="toki-sel-scanspeed" min="0.5" max="5.0" step="0.5" value="1.0" class="toki-range" style="width: 100%;">
+                        <div class="toki-hint" style="font-size: 11px; color: #888; margin-top: 4px;">
+                            0.5×(빠름/불안정) ─ 1.0×(기본) ─ 3.0×(안정) ─ 5.0×(확실)
+                        </div>
+                    </div>
+
+                    <div class="toki-section-title">Format & Rules</div>
                     <div class="toki-form-grid">
                         <div class="toki-control-group">
                             <label class="toki-label">소설 포맷</label>
@@ -540,27 +555,39 @@ export class MenuModal {
                             </select>
                         </div>
                         <div class="toki-control-group">
-                            <label class="toki-label">Smart Skip</label>
-                            <select id="toki-sel-smartskip" class="toki-select">
-                                <option value="90">90% (민감)</option>
-                                <option value="70">70% (보통)</option>
-                                <option value="50">50% (기본)</option>
+                            <label class="toki-label">소설 패키징</label>
+                            <select id="toki-sel-novel-mode" class="toki-select">
+                                <option value="perChapter">개별 회차</option>
+                                <option value="singleVolume">범위 합본</option>
                             </select>
                         </div>
                     </div>
 
                     <div class="toki-control-group">
-                        <label class="toki-label">소설 패키징</label>
-                        <select id="toki-sel-novel-mode" class="toki-select">
-                            <option value="perChapter">회차별 개별 저장</option>
-                            <option value="singleVolume">범위 합본 저장</option>
+                        <label class="toki-label">Smart Skip 민감도</label>
+                        <select id="toki-sel-smartskip" class="toki-select">
+                            <option value="90">90% (매우 민감)</option>
+                            <option value="80">80% (민감)</option>
+                            <option value="70">70% (보통)</option>
+                            <option value="50">50% (기본)</option>
                         </select>
                     </div>
 
-                    <div class="toki-section-title">Configuration</div>
-                    <button class="toki-btn-action toki-btn-secondary toki-btn-slate" id="toki-btn-advanced">
-                        🛠️ 상세 주소 및 API 키 설정 (Advanced)
-                    </button>
+                    <div class="toki-control-group">
+                        <label class="toki-label">원격 파싱 룰 URL (JSON)</label>
+                        <input type="text" id="toki-sel-remote-rule" class="toki-input" placeholder="https://example.com/rules.json">
+                    </div>
+
+                    <div class="toki-control-group">
+                        <label class="toki-label">커스텀 파싱 룰 (JSON Array)</label>
+                        <textarea id="toki-sel-custom-rule" class="toki-textarea toki-textarea-code" placeholder="[{...}]" style="min-height: 100px;"></textarea>
+                    </div>
+
+                    <div class="toki-control-group toki-mt-24 toki-mb-24">
+                        <button class="toki-btn-action toki-btn-gradient-green" id="toki-btn-save-settings" style="height: 48px;">
+                            <span>💾 설정 저장하기</span>
+                        </button>
+                    </div>
                 </div>
 
                 <!-- 3. History Tab -->
@@ -581,7 +608,7 @@ export class MenuModal {
                         </button>
                     </div>
                     <p class="toki-text-xs toki-text-center toki-line-16">
-                        구글 드라이브의 데이터를 기반으로 목록에 완료 표시(✅)를 업데이트합니다.
+                        구글 드라이브와의 연결을 확인하고 동기화 이력을 체크합니다.
                     </p>
                 </div>
 
@@ -615,44 +642,62 @@ export class MenuModal {
                     </div>
                 </div>
             </div>
+        </div>
 
-            <hr class="toki-divider">
-
-            <!-- 📊 실시간 진행 상황 및 큐 모니터 (상시 고정) -->
-            <div id="toki-logbox-progress" style="display: block;">
-                <div id="toki-progress-header">
-                    <span id="toki-progress-overall-text">진행률: 0% (0 / 0)</span>
-                    <div id="toki-progress-overall-controls">
-                        <span id="toki-btn-queue-clear" title="완료/실패 큐 정리" class="toki-cursor-pointer toki-progress-btn">🧹</span>
-                        <span id="toki-btn-queue-pause" title="일시 정지" class="toki-cursor-pointer toki-progress-btn">⏸️</span>
-                        <span id="toki-btn-queue-stop" title="수집 중단" class="toki-cursor-pointer toki-progress-btn">⏹️</span>
-                    </div>
+        <!-- 📊 수집 진행 상황 및 대기열 모달 -->
+        <div id="toki-modal-progress" class="toki-dashboard-modal-overlay" style="display: none;">
+            <div class="toki-dashboard-modal">
+                <div class="toki-dashboard-modal-header">
+                    <span class="toki-dashboard-modal-title">📊 수집 진행 상황 & 대기열</span>
+                    <button class="toki-dashboard-modal-close" id="toki-btn-modal-progress-close" title="닫기">&times;</button>
                 </div>
-                <div class="toki-progress-bar-container">
-                    <div id="toki-progress-overall-bar" class="toki-progress-overall-bar-fill"></div>
-                </div>
-                <div id="toki-progress-workers-list">
-                    <!-- 활성 팝업(Worker) 동적 렌더링 -->
-                </div>
-                <div id="toki-progress-queue-section" style="display: none;">
-                    <div id="toki-queue-section-header">
-                        <span>📋 수집 대기열 목록</span>
-                    </div>
-                    <div id="toki-progress-queue-list">
-                        <!-- 대기열 목록 동적 렌더링 -->
+                <div class="toki-dashboard-modal-content">
+                    <div id="toki-logbox-progress" style="display: block;">
+                        <div id="toki-progress-header">
+                            <span id="toki-progress-overall-text">진행률: 0% (0 / 0)</span>
+                            <div id="toki-progress-overall-controls">
+                                <span id="toki-btn-queue-expand" title="대기열 크게 보기" class="toki-cursor-pointer toki-progress-btn">↕️</span>
+                                <span id="toki-btn-queue-clear" title="완료/실패 큐 정리" class="toki-cursor-pointer toki-progress-btn">🧹</span>
+                                <span id="toki-btn-queue-reset" title="대기열 전체 삭제 (초기화)" class="toki-cursor-pointer toki-progress-btn">🗑️</span>
+                                <span id="toki-btn-queue-pause" title="일시 정지" class="toki-cursor-pointer toki-progress-btn">⏸️</span>
+                                <span id="toki-btn-queue-stop" title="수집 중단" class="toki-cursor-pointer toki-progress-btn">⏹️</span>
+                            </div>
+                        </div>
+                        <div class="toki-progress-bar-container">
+                            <div id="toki-progress-overall-bar" class="toki-progress-overall-bar-fill"></div>
+                        </div>
+                        <div id="toki-progress-workers-list">
+                            <!-- 활성 팝업(Worker) 동적 렌더링 -->
+                        </div>
+                        <div id="toki-progress-queue-section" style="display: none;">
+                            <div id="toki-queue-section-header">
+                                <span>📋 수집 대기열 목록</span>
+                            </div>
+                            <div id="toki-progress-queue-list">
+                                <!-- 대기열 목록 동적 렌더링 -->
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
+        </div>
 
-            <hr class="toki-divider">
-
-            <!-- 📝 실시간 로그 박스 모니터 (상시 고정) -->
-            <div id="toki-dashboard-log-section">
-                <div id="toki-log-header">
-                    <span>📋 실시간 수집 로그 모니터</span>
-                    <span id="toki-btn-log-clear" title="Clear Logs" class="toki-cursor-pointer" style="font-size: 12px; color: var(--toki-color-warning, #e6a23c); cursor: pointer;">🚫 비우기</span>
+        <!-- 📋 실시간 로그 모달 -->
+        <div id="toki-modal-logs" class="toki-dashboard-modal-overlay" style="display: none;">
+            <div class="toki-dashboard-modal">
+                <div class="toki-dashboard-modal-header">
+                    <span class="toki-dashboard-modal-title">📋 실시간 수집 로그 모니터</span>
+                    <button class="toki-dashboard-modal-close" id="toki-btn-modal-logs-close" title="닫기">&times;</button>
                 </div>
-                <ul id="toki-logbox-content"></ul>
+                <div class="toki-dashboard-modal-content">
+                    <div id="toki-dashboard-log-section" style="display: flex;">
+                        <div id="toki-log-header">
+                            <span>📋 실시간 수집 로그 모니터</span>
+                            <span id="toki-btn-log-clear" title="Clear Logs" class="toki-cursor-pointer" style="font-size: 12px; color: var(--toki-color-warning, #e6a23c); cursor: pointer;">🚫 비우기</span>
+                        </div>
+                        <ul id="toki-logbox-content"></ul>
+                    </div>
+                </div>
             </div>
         </div>
         `;
@@ -723,15 +768,42 @@ export class MenuModal {
         }
 
         // 4. Settings Tab Events
+        const selGasId = doc.getElementById('toki-sel-gas-id');
+        const selFolderId = doc.getElementById('toki-sel-folder-id');
+        const selApiKey = doc.getElementById('toki-sel-apikey');
         const selPolicy = doc.getElementById('toki-sel-policy');
+        const selNameTemplate = doc.getElementById('toki-sel-nametemplate');
+        const selLocalPadding = doc.getElementById('toki-sel-localpadding');
         const selSpeed = doc.getElementById('toki-sel-speed');
+        const selScanSpeed = doc.getElementById('toki-sel-scanspeed');
+        const selNovelFormat = doc.getElementById('toki-sel-novel-format');
         const selNovelTerm = doc.getElementById('toki-sel-novel-mode');
+        const selSmartSkip = doc.getElementById('toki-sel-smartskip');
+        const selRemoteRule = doc.getElementById('toki-sel-remote-rule');
+        const selCustomRule = doc.getElementById('toki-sel-custom-rule');
 
         if (this.handlers.getConfig) {
             const cfg = this.handlers.getConfig();
-            if (cfg.policy && selPolicy) selPolicy.value = cfg.policy;
-            if (cfg.sleepMode && selSpeed) selSpeed.value = cfg.sleepMode;
-            if (cfg.novelMode && selNovelTerm) selNovelTerm.value = cfg.novelMode;
+            if (selGasId) selGasId.value = cfg.gasId || '';
+            if (selFolderId) selFolderId.value = cfg.folderId || '';
+            if (selApiKey) selApiKey.value = cfg.apiKey || '';
+            if (selPolicy) {
+                selPolicy.value = cfg.policy || 'individual';
+                this.updateNativeHelper(doc, selPolicy.value);
+            }
+            if (selNameTemplate) selNameTemplate.value = cfg.localNameTemplate || '';
+            if (selLocalPadding) selLocalPadding.value = cfg.localEpisodePadding !== undefined ? String(cfg.localEpisodePadding) : '4';
+            if (selSpeed) selSpeed.value = cfg.sleepMode || 'agile';
+            if (selScanSpeed) {
+                selScanSpeed.value = cfg.scanSpeed !== undefined ? String(cfg.scanSpeed) : '1.0';
+                const valSpan = doc.getElementById('toki-scan-speed-val');
+                if (valSpan) valSpan.innerText = `${parseFloat(selScanSpeed.value).toFixed(1)}×`;
+            }
+            if (selNovelFormat) selNovelFormat.value = cfg.novelFormat || 'epub';
+            if (selNovelTerm) selNovelTerm.value = cfg.novelMode || 'perChapter';
+            if (selSmartSkip) selSmartSkip.value = cfg.smartSkipRatio !== undefined ? String(cfg.smartSkipRatio) : '50';
+            if (selRemoteRule) selRemoteRule.value = cfg.remoteRuleUrl || '';
+            if (selCustomRule) selCustomRule.value = cfg.customRules || '';
         }
 
         if (selPolicy) {
@@ -765,23 +837,75 @@ export class MenuModal {
             };
         }
 
-        if (selSpeed) {
-            selSpeed.onchange = () => {
-                if (this.handlers.setConfig) this.handlers.setConfig('TOKI_SLEEP_MODE', selSpeed.value);
-            };
-        }
+        // 9. Queue List Item & Modal Controls Event Delegation (우주 무결 안전 장치)
+        const progressModalOverlay = doc.getElementById('toki-modal-progress');
+        if (progressModalOverlay) {
+            progressModalOverlay.addEventListener('click', (e) => {
+                // 9-1. 개별 삭제 ❌
+                const deleteBtn = e.target.closest('.toki-queue-item-delete');
+                if (deleteBtn) {
+                    const itemId = deleteBtn.getAttribute('data-id');
+                    if (popupWindow.confirm('선택한 에피소드를 대기열에서 제거하시겠습니까?')) {
+                        removeQueueItem(itemId);
+                        LogBox.getInstance().updateProgressUI();
+                        runSchedulerOnce();
+                    }
+                    return;
+                }
 
-        if (selNovelTerm) {
-            selNovelTerm.onchange = () => {
-                if (this.handlers.setConfig) this.handlers.setConfig('TOKI_NOVEL_MODE', selNovelTerm.value);
-            };
-        }
+                // 9-2. 대기열 전체 삭제 (초기화) 🗑️
+                const resetBtn = e.target.closest('#toki-btn-queue-reset');
+                if (resetBtn) {
+                    if (popupWindow.confirm('🗑️ 대기열의 모든 에피소드를 즉시 완전히 삭제하시겠습니까?\n(진행 중인 작업도 모두 강제 중단됩니다)')) {
+                        stopAllWorkers();
+                        clearQueue();
+                        LogBox.getInstance().updateProgressUI();
+                    }
+                    return;
+                }
 
-        const advancedBtn = doc.getElementById('toki-btn-advanced');
-        if (advancedBtn) {
-            advancedBtn.onclick = () => {
-                if (this.handlers.openSettings) this.handlers.openSettings(doc);
-            };
+                // 9-3. 완료/실패 정리 🧹
+                const clearBtn = e.target.closest('#toki-btn-queue-clear');
+                if (clearBtn) {
+                    if (popupWindow.confirm('🧹 완료/실패 항목을 정리하시겠습니까?')) {
+                        removeCompletedAndFailedItems();
+                        LogBox.getInstance().updateProgressUI();
+                        runSchedulerOnce();
+                    }
+                    return;
+                }
+
+                // 9-4. 일시 정지 ⏸️
+                const pauseBtn = e.target.closest('#toki-btn-queue-pause');
+                if (pauseBtn) {
+                    const isPaused = getQueuePaused();
+                    setQueuePaused(!isPaused);
+                    LogBox.getInstance().updateProgressUI();
+                    if (isPaused) {
+                        runSchedulerOnce();
+                    }
+                    return;
+                }
+
+                // 9-5. 수집 중단 ⏹️
+                const stopBtn = e.target.closest('#toki-btn-queue-stop');
+                if (stopBtn) {
+                    if (popupWindow.confirm('⚠️ 모든 배치 작업을 중단하시겠습니까?')) {
+                        stopAllWorkers();
+                        LogBox.getInstance().updateProgressUI();
+                    }
+                    return;
+                }
+
+                // 9-6. 크게 보기 ↕️
+                const expandBtn = e.target.closest('#toki-btn-queue-expand');
+                if (expandBtn) {
+                    const isMaximized = progressModalOverlay.classList.toggle('toki-queue-maximized');
+                    expandBtn.textContent = isMaximized ? '🔽' : '↕️';
+                    expandBtn.title = isMaximized ? '대기열 원래대로 보기' : '대기열 크게 보기';
+                    return;
+                }
+            });
         }
 
         // 5. History Tab Events
@@ -832,41 +956,52 @@ export class MenuModal {
             };
         }
 
-        // 7. Queue Control Events
-        const queueClearBtn = doc.getElementById('toki-btn-queue-clear');
-        if (queueClearBtn) {
-            queueClearBtn.onclick = () => {
-                if (typeof window.tokiQueue !== 'undefined') {
-                    if (confirm('🧹 완료/실패 항목을 정리하시겠습니까?')) {
-                        window.tokiQueue.removeCompletedAndFailedItems();
-                        LogBox.getInstance().updateProgressUI();
-                    }
+        // 7. Dashboard Modal Toggle Events
+        const showProgressBtn = doc.getElementById('toki-btn-show-progress');
+        const progressModal = doc.getElementById('toki-modal-progress');
+        const closeProgressBtn = doc.getElementById('toki-btn-modal-progress-close');
+        
+        if (showProgressBtn && progressModal) {
+            showProgressBtn.onclick = () => {
+                progressModal.style.display = 'flex';
+            };
+        }
+        if (closeProgressBtn && progressModal) {
+            closeProgressBtn.onclick = () => {
+                progressModal.style.display = 'none';
+            };
+        }
+        if (progressModal) {
+            progressModal.onclick = (e) => {
+                if (e.target === progressModal) {
+                    progressModal.style.display = 'none';
                 }
             };
         }
 
-        const queuePauseBtn = doc.getElementById('toki-btn-queue-pause');
-        if (queuePauseBtn) {
-            queuePauseBtn.onclick = () => {
-                if (typeof window.tokiQueue !== 'undefined') {
-                    const isPaused = window.tokiQueue.getQueuePaused();
-                    window.tokiQueue.setQueuePaused(!isPaused);
-                    LogBox.getInstance().updateProgressUI();
+        const showLogsBtn = doc.getElementById('toki-btn-show-logs');
+        const logsModal = doc.getElementById('toki-modal-logs');
+        const closeLogsBtn = doc.getElementById('toki-btn-modal-logs-close');
+
+        if (showLogsBtn && logsModal) {
+            showLogsBtn.onclick = () => {
+                logsModal.style.display = 'flex';
+            };
+        }
+        if (closeLogsBtn && logsModal) {
+            closeLogsBtn.onclick = () => {
+                logsModal.style.display = 'none';
+            };
+        }
+        if (logsModal) {
+            logsModal.onclick = (e) => {
+                if (e.target === logsModal) {
+                    logsModal.style.display = 'none';
                 }
             };
         }
 
-        const queueStopBtn = doc.getElementById('toki-btn-queue-stop');
-        if (queueStopBtn) {
-            queueStopBtn.onclick = () => {
-                if (typeof window.tokiQueue !== 'undefined') {
-                    if (confirm('⚠️ 모든 배치 작업을 중단하시겠습니까?')) {
-                        window.tokiQueue.stopAllWorkers();
-                        LogBox.getInstance().updateProgressUI();
-                    }
-                }
-            };
-        }
+
     }
 
     show() {
@@ -905,7 +1040,8 @@ export class MenuModal {
  * @param {string[]} historyList Array of episode IDs (e.g. ["0001", "0002"])
  */
 export async function markDownloadedItems(historyList) {
-    if (!historyList || historyList.length === 0) return;
+    // [v1.21.7] 현 시점에서 필요하지 않은 회차 목록 완료 체크 표시(마킹) 렌더링 기능을 전면 제외하여 리소스 최적화
+    return;
 
     // Use Set for fast lookup
     const historySet = new Set(historyList.map(id => id.toString())); // Ensure string comparison

@@ -7,6 +7,7 @@ import { fetchNovelTextViaApi } from './novel-decryptor.js';
 import { registerIpcListener, sendToWorker } from './ipc-broker.js';
 import { updateQueueItem, WORKER_STAGE, activeWorkers, getQueue, runSchedulerOnce } from './queue.js';
 import { LogBox } from './ui.js';
+import { getConfig } from './config.js';
 
 // Reference for the single worker popup (used in sequential mode)
 let activeWorkerRef = null;
@@ -69,7 +70,10 @@ async function fetchMediaViaWorkerSingleAttempt(episodeUrl, targetType = 'novel'
                         destination: config.destination || 'local',
                         novelFormat: config.novelFormat || 'epub',
                         matchedRule: config.matchedRule || {},
-                        protocolDomain: config.protocolDomain || window.location.origin
+                        protocolDomain: config.protocolDomain || window.location.origin,
+                        scanSpeedMultiplier: config.scanSpeedMultiplier || 1.0,
+                        localNameTemplate: config.localNameTemplate || "{number} - {title}",
+                        localEpisodePadding: config.localEpisodePadding || "4"
                     });
                 }
             }
@@ -269,7 +273,7 @@ export function initBatchWorkerController() {
                 const closedCount = (batchClosedCounts.get(id) || 0) + 1;
                 batchClosedCounts.set(id, closedCount);
 
-                if (closedCount >= 3) {
+                if (closedCount >= 5) {
                     console.warn(`[WorkerController] ⚠️ [배치] 자식 팝업 수동 종료 확정: ${id}`);
                     activeWorkers.delete(id);
                     batchClosedCounts.delete(id);
@@ -298,11 +302,29 @@ export function initBatchWorkerController() {
 
         // 1. WORKER_READY: 자식 워커 핸드셰이킹 수신
         if (type === 'WORKER_READY') {
+            const { targetUrl } = payload || {};
             let matchedId = null;
+
+            // 1차: activeWorkers의 window 참조 비교
             for (const [id, popupRef] of activeWorkers.entries()) {
                 if (popupRef === sourceEvent.source) {
                     matchedId = id;
                     break;
+                }
+            }
+
+            // 2차: URL 기반 매칭 폴백 (리다이렉션으로 주소가 완전히 틀어졌을 때 복구)
+            if (!matchedId && targetUrl) {
+                const queue = getQueue();
+                const matchedItem = queue.find(item => 
+                    (item.status === 'pending' || item.status === 'processing') && 
+                    item.episodeUrl === targetUrl
+                );
+                if (matchedItem) {
+                    matchedId = matchedItem.id;
+                    // 최신 Window 참조로 activeWorkers 즉시 복원 갱신
+                    activeWorkers.set(matchedId, sourceEvent.source);
+                    console.log(`[WorkerController] ♻️ URL 매칭 성공 ➡️ Window 참조 복원 갱신 (ID: ${matchedId})`);
                 }
             }
 
@@ -324,23 +346,28 @@ export function initBatchWorkerController() {
                         destination: item.destination || 'local',
                         novelFormat: item.novelFormat || 'epub',
                         matchedRule: item.matchedRule || {},
-                        protocolDomain: item.protocolDomain || window.location.origin
+                        protocolDomain: item.protocolDomain || window.location.origin,
+                        scanSpeedMultiplier: getConfig().scanSpeed,
+                        localNameTemplate: getConfig().localNameTemplate || "{number} - {title}",
+                        localEpisodePadding: getConfig().localEpisodePadding || "4"
                     });
                 }
             } else {
-                console.warn('[WorkerController] [배치] WORKER_READY 수신했으나 매칭되는 activeWorkers 항목을 찾지 못했습니다.');
+                console.warn('[WorkerController] [배치] WORKER_READY 수신했으나 매칭되는 activeWorkers 항목을 찾지 못했습니다.', targetUrl);
             }
         }
 
         // 2. CAPTCHA_DETECTED: WAF/보안 방어막 대기 상태
         if (type === 'CAPTCHA_DETECTED') {
-            let matchedId = null;
-            for (const [id, popupRef] of activeWorkers.entries()) {
-                if (popupRef === sourceEvent.source) {
-                    matchedId = id;
-                    break;
+            const { queueId } = payload || {};
+            let matchedId = queueId;
+
+            if (!matchedId) {
+                for (const [id, popupRef] of activeWorkers.entries()) {
+                    if (popupRef === sourceEvent.source) { matchedId = id; break; }
                 }
             }
+
             if (matchedId) {
                 console.warn(`[WorkerController] ⚠️ [배치] WAF 캡차 차단막 감지 (ID: ${matchedId})`);
                 const queue = getQueue();
@@ -353,12 +380,12 @@ export function initBatchWorkerController() {
 
         // 3. WORKER_PROGRESS: 자식 워커 실시간 진행률 UI 반영
         if (type === 'WORKER_PROGRESS') {
-            const { percent, stage } = payload;
-            let matchedId = null;
-            for (const [id, popupRef] of activeWorkers.entries()) {
-                if (popupRef === sourceEvent.source) {
-                    matchedId = id;
-                    break;
+            const { percent, stage, queueId } = payload || {};
+            let matchedId = queueId;
+
+            if (!matchedId) {
+                for (const [id, popupRef] of activeWorkers.entries()) {
+                    if (popupRef === sourceEvent.source) { matchedId = id; break; }
                 }
             }
 
@@ -377,17 +404,19 @@ export function initBatchWorkerController() {
                     else if (stage === WORKER_STAGE.COMPLETED) stageText = '완료';
 
                     logger.log(`[수집 진행] [${item.episodeTitle}] -> ${stageText} (${Math.round(percent)}%)`, 'Downloader');
+                    logger.updateProgressUI();
                 }
             }
         }
 
         // 4. TASK_COMPLETED: 자식 워커 수집 및 드라이브 저장 정상 완료
         if (type === 'TASK_COMPLETED') {
-            let matchedId = null;
-            for (const [id, popupRef] of activeWorkers.entries()) {
-                if (popupRef === sourceEvent.source) {
-                    matchedId = id;
-                    break;
+            const { queueId } = payload || {};
+            let matchedId = queueId;
+
+            if (!matchedId) {
+                for (const [id, popupRef] of activeWorkers.entries()) {
+                    if (popupRef === sourceEvent.source) { matchedId = id; break; }
                 }
             }
 
@@ -396,11 +425,19 @@ export function initBatchWorkerController() {
                 
                 const popupRef = activeWorkers.get(matchedId);
                 if (popupRef && !popupRef.closed) {
-                    popupRef.close();
+                    // [최종 패치] 대기열에 pending 상태의 작업이 남아 있으면 창을 닫지 않고 릴레이용 보존!
+                    const queue = getQueue();
+                    const pendingExists = queue.some(i => i.status === 'pending');
+                    if (!pendingExists) {
+                        popupRef.close();
+                        activeWorkers.delete(matchedId);
+                    }
+                } else {
+                    activeWorkers.delete(matchedId);
                 }
-                activeWorkers.delete(matchedId);
                 
                 updateQueueItem(matchedId, { status: 'completed', progressPercent: 100, stage: WORKER_STAGE.COMPLETED });
+                logger.updateProgressUI();
 
                 // 다음 대기 항목 릴레이 스케줄링
                 runSchedulerOnce();
@@ -409,12 +446,12 @@ export function initBatchWorkerController() {
 
         // 5. TASK_FAILED: 예외 및 복구 불능 실패 보고
         if (type === 'TASK_FAILED') {
-            const { errorMsg } = payload;
-            let matchedId = null;
-            for (const [id, popupRef] of activeWorkers.entries()) {
-                if (popupRef === sourceEvent.source) {
-                    matchedId = id;
-                    break;
+            const { errorMsg, queueId } = payload || {};
+            let matchedId = queueId;
+
+            if (!matchedId) {
+                for (const [id, popupRef] of activeWorkers.entries()) {
+                    if (popupRef === sourceEvent.source) { matchedId = id; break; }
                 }
             }
 
@@ -423,9 +460,16 @@ export function initBatchWorkerController() {
                 
                 const popupRef = activeWorkers.get(matchedId);
                 if (popupRef && !popupRef.closed) {
-                    popupRef.close();
+                    // [최종 패치] 대기열에 남은 작업이 없으면 닫고, 있으면 릴레이용으로 킵!
+                    const queue = getQueue();
+                    const pendingExists = queue.some(i => i.status === 'pending');
+                    if (!pendingExists) {
+                        popupRef.close();
+                        activeWorkers.delete(matchedId);
+                    }
+                } else {
+                    activeWorkers.delete(matchedId);
                 }
-                activeWorkers.delete(matchedId);
 
                 const queue = getQueue();
                 const item = queue.find(i => i.id === matchedId);
@@ -436,6 +480,7 @@ export function initBatchWorkerController() {
                         retryCount: nextRetry,
                         errorMsg: errorMsg || '자식 워커가 에러를 보고함'
                     });
+                    logger.updateProgressUI();
                 }
 
                 // 다음 대기 항목 릴레이 스케줄링

@@ -1261,3 +1261,125 @@
     margin-bottom: 12px;
     color: var(--toki-text-muted);
 }
+
+/* --- 대시보드 커스텀 모달 레이아웃 (v1.21.6 추가) --- */
+.toki-dashboard-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(15, 23, 42, 0.75);
+    backdrop-filter: blur(8px);
+    z-index: 10005;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: tokiFadeIn 0.25s ease-out;
+}
+
+.toki-dashboard-modal {
+    width: 90%;
+    max-width: 680px;
+    background: var(--toki-bg, #1a1a2e);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    border-radius: 24px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: tokiSlideUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    color: #e0e0e0;
+}
+
+.toki-dashboard-modal-header {
+    padding: 18px 24px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.toki-dashboard-modal-title {
+    font-size: 15px;
+    font-weight: 800;
+    color: var(--toki-primary, #6366f1);
+}
+
+.toki-dashboard-modal-close {
+    background: transparent;
+    border: none;
+    font-size: 24px;
+    font-weight: 700;
+    color: #94a3b8;
+    cursor: pointer;
+    line-height: 1;
+    transition: all 0.2s ease;
+}
+
+.toki-dashboard-modal-close:hover {
+    color: #ef4444;
+    transform: scale(1.1);
+}
+
+.toki-dashboard-modal-content {
+    padding: 20px;
+    overflow-y: auto;
+    max-height: 75vh;
+}
+
+/* 진행상황 모달 내 레이아웃 오버라이드 */
+#toki-modal-progress #toki-logbox-progress {
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+    backdrop-filter: none !important;
+}
+#toki-modal-progress #toki-progress-queue-list {
+    max-height: 220px;
+}
+
+/* 로그 모달 내 레이아웃 오버라이드 */
+#toki-modal-logs #toki-dashboard-log-section {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: transparent !important;
+    height: 400px !important;
+}
+#toki-modal-logs #toki-logbox-content {
+    height: 350px !important;
+    max-height: 350px !important;
+}
+
+/* 대기열 모달 최대화 시의 너비 및 리스트 세로 높이 확장 */
+.toki-dashboard-modal-overlay.toki-queue-maximized .toki-dashboard-modal {
+    max-width: 850px !important;
+}
+.toki-dashboard-modal-overlay.toki-queue-maximized #toki-progress-queue-list {
+    max-height: 480px !important;
+    height: 480px !important;
+}
+
+/* 탭 본문 영역 세로 스크롤 활성화 (v1.21.8) */
+.toki-modal-body {
+    flex: 1;
+    overflow-y: auto !important;
+    max-height: calc(100vh - 120px);
+    padding-bottom: 40px;
+}
+
+/* Custom Scrollbar for Modal Body */
+.toki-modal-body::-webkit-scrollbar {
+    width: 6px;
+}
+.toki-modal-body::-webkit-scrollbar-track {
+    background: transparent;
+}
+.toki-modal-body::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.12);
+    border-radius: 999px;
+}
+.toki-modal-body::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.25);
+}

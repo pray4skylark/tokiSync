@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.21.5] - 2026-06-01
+
+### 🛠️ 템퍼몽키 런타임 검증 에러 및 팝업창 confirm 격리 차단 해소
+- **TM Header 규격 준수 (`@match` ➡️ `@include` 전환)**: 포트 번호가 들어가는 로컬 호스트 테스트용 주소(`http://localhost:*/*` 및 `http://127.0.0.1:*/*`)가 정식 Match Pattern 규격을 위반해 템퍼몽키에서 "유효하지 않은 유저스크립트" 에러로 거부되던 현상을 우회 해결하기 위해 유연한 `@include`로 전환했습니다.
+- **팝업창 격리 보안 우회 (`confirm` ➡️ `popupWindow.confirm` 전환)**: 독립된 자식 대시보드 팝업창에서 confirm 다이얼로그 호출 시 브라우저가 포커스 불일치 및 크로스 윈도우 통제에 의해 다이얼로그 창을 침묵 차단(Silent Rejection)하던 보안 제약을 우회하기 위해, 이벤트 위임 내 모든 confirm 호출의 창 객체를 명시적 바인딩으로 수정했습니다.
+
 ## [v1.21.3] - 2026-05-29
 
 ### 🛠️ 리팩토링 검증 오류 수정 및 레거시 파서/워커 코드 제거

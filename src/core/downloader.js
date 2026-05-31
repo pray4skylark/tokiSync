@@ -55,17 +55,20 @@ export async function processItem(item, builder, siteInfo, iframe, parser, serie
                 destination: destination,
                 novelFormat: config.novelFormat || 'epub',
                 matchedRule: parser.rule,
-                protocolDomain: parser.protocolDomain
+                protocolDomain: parser.protocolDomain,
+                scanSpeedMultiplier: config.scanSpeed,
+                localNameTemplate: config.localNameTemplate,
+                localEpisodePadding: config.localEpisodePadding
             });
 
             if (result === true) {
-                logger.log(`✅ [자립형 워커] 소설 수집 및 드라이브/로컬 저장 성공: ${item.title}`, 'Downloader');
+                logger.log(`... [자립형 워커] 소설 수집 및 드라이브/로컬 저장 성공: ${item.title}`, 'Downloader');
                 await sleep(policy.min, policy.max);
                 return true; // Self-contained completed
             } else if (typeof result === 'string') {
                 // Plan C Fallback (API Decryption) - runs locally in parent
                 builder.addChapter(item.title, result);
-                logger.log(`✅ [Plan C API 폴백] 추출 성공: ${item.title}`, 'Downloader');
+                logger.log(`... [Plan C API 폴백] 추출 성공: ${item.title}`, 'Downloader');
                 await sleep(policy.min, policy.max);
                 return false; // Requires parent to save
             } else {
@@ -85,7 +88,10 @@ export async function processItem(item, builder, siteInfo, iframe, parser, serie
                 folderId: item.folderId || config.folderId || '',
                 destination: destination,
                 matchedRule: parser.rule,
-                protocolDomain: parser.protocolDomain
+                protocolDomain: parser.protocolDomain,
+                scanSpeedMultiplier: config.scanSpeed,
+                localNameTemplate: config.localNameTemplate,
+                localEpisodePadding: config.localEpisodePadding
             });
 
             if (success) {
@@ -657,8 +663,24 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                 }
                 */
 
-                // Final Filename: "0001 - Title"
-                const fullFilename = `${item.num} - ${chapterTitle}`;
+                // Final Filename: Dynamic based on Template or Drive fallback
+                let fullFilename;
+                if (destination !== 'drive') {
+                    const paddingVal = parseInt(config.localEpisodePadding, 10);
+                    const paddedNum = paddingVal > 0 
+                        ? (item.num || '').toString().padStart(paddingVal, '0') 
+                        : (item.num || '').toString();
+
+                    const template = config.localNameTemplate || "{number} - {title}";
+                    fullFilename = template
+                        .replace(/{number}/g, paddedNum)
+                        .replace(/{rawNumber}/g, (item.num || '').toString())
+                        .replace(/{series}/g, seriesTitle || rootFolder || '')
+                        .replace(/{title}/g, chapterTitle || '');
+                } else {
+                    const paddedNum = (item.num || '').toString().padStart(4, '0');
+                    fullFilename = `${paddedNum} - ${chapterTitle}`;
+                }
 
                 // [v1.6.0] Kavita Metadata Insertion
                 const innerZip = await currentBuilder.build({ 
