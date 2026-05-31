@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.21.3
+// @version      1.21.5
 // @description  Toki series sites -> Google Drive syncing tool (Bundled)
 // @author       pray4skylark
 // @updateURL    https://pray4skylark.github.io/tokiSync/tokiSync.user.js
@@ -17,8 +17,8 @@
 // @match        https://script.google.com/*
 // @match        https://*.github.io/tokiSync/*
 // @match        https://pray4skylark.github.io/tokiSync/*
-// @match        http://localhost:*/*
-// @match        http://127.0.0.1:*/*
+// @include      http://localhost:*/*
+// @include      http://127.0.0.1:*/*
 // @icon         https://github.com/user-attachments/assets/99f5bb36-4ef8-40cc-8ae5-e3bf1c7952ad
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
@@ -50,20 +50,29 @@
 
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
 /* harmony export */   $8: function() { return /* binding */ initQueueScheduler; },
+/* harmony export */   EB: function() { return /* binding */ setQueuePaused; },
 /* harmony export */   G8: function() { return /* binding */ getQueueItemId; },
 /* harmony export */   Gg: function() { return /* binding */ updateQueueItem; },
+/* harmony export */   HO: function() { return /* binding */ stopAllWorkers; },
 /* harmony export */   IS: function() { return /* binding */ getQueue; },
+/* harmony export */   US: function() { return /* binding */ removeCompletedAndFailedItems; },
 /* harmony export */   WB: function() { return /* binding */ WORKER_STAGE; },
 /* harmony export */   d$: function() { return /* binding */ removeQueueItem; },
 /* harmony export */   gi: function() { return /* binding */ runSchedulerOnce; },
 /* harmony export */   id: function() { return /* binding */ addEpisodesToQueue; },
-/* harmony export */   mR: function() { return /* binding */ activeWorkers; }
+/* harmony export */   kZ: function() { return /* binding */ getQueuePaused; },
+/* harmony export */   lg: function() { return /* binding */ clearQueue; },
+/* harmony export */   mR: function() { return /* binding */ activeWorkers; },
+/* harmony export */   zX: function() { return /* binding */ getQueueStats; }
 /* harmony export */ });
-/* unused harmony exports transitionQueueItemsForRelay, updateQueueItemProgress, clearQueue, removeCompletedItems, removeCompletedAndFailedItems, getQueueStats, getQueuePaused, setQueuePaused, stopAllWorkers */
+/* unused harmony exports transitionQueueItemsForRelay, updateQueueItemProgress, removeCompletedItems */
+/* harmony import */ var _ui_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(989);
 /**
  * tokiSync v1.21.0 - Persistent Multi-Queue Batch Core
  * 영속성 디스크 큐 및 이벤트 기반 세마포어 스케줄러 엔진
  */
+
+
 
 const WORKER_STAGE = {
   INIT: 'STAGE_INIT',             // 초기화 및 Handshake 대기 중
@@ -103,11 +112,12 @@ const saveRawQueue = (queue) => {
   try {
     if (typeof GM_setValue !== 'undefined') {
       GM_setValue(STORAGE_KEY, queue);
-      return;
-    }
-    if (typeof localStorage !== 'undefined') {
+    } else if (typeof localStorage !== 'undefined') {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(queue));
     }
+    try {
+      _ui_js__WEBPACK_IMPORTED_MODULE_0__.LogBox.getInstance().updateProgressUI();
+    } catch (uiErr) {}
   } catch (e) {
     console.error('[TokiSync Queue] Failed to save queue to storage:', e);
   }
@@ -477,19 +487,73 @@ const runSchedulerOnce = async () => {
     await sleepJitter(1500, 3000);
 
     // 5. 팝업 실행 및 상태 갱신
-    console.log(`[Queue Scheduler] 🚀 팝업 기동: ${nextItem.episodeTitle} (${nextItem.episodeUrl})`);
+    console.log(`[Queue Scheduler] 🚀 팝업 릴레이 기동: ${nextItem.episodeTitle} (${nextItem.episodeUrl})`);
     updateQueueItem(nextItem.id, { status: 'processing' });
     
-    // 실제 팝업 기동 가교 함수 호출
-    const popupRef = openEpisodePopup(nextItem.episodeUrl, nextItem.id);
-    if (popupRef) {
-      activeWorkers.set(nextItem.id, popupRef);
+    // 유효한 기존 팝업 채널 재사용 탐색
+    let recycledPopup = null;
+    let targetSlotId = null;
+
+    // 2개의 슬롯 중 비어있거나 완료된 팝업 슬롯을 탐색하여 재사용
+    for (const [id, popupRef] of activeWorkers.entries()) {
+        const item = queue.find(i => i.id === id);
+        if (popupRef && !popupRef.closed && (!item || item.status === 'completed' || item.status === 'failed')) {
+            recycledPopup = popupRef;
+            targetSlotId = id;
+            break;
+        }
+    }
+
+    if (recycledPopup) {
+        const targetWindowName = `tokisync_novel_worker_${targetSlotId}`.replace(/[^a-zA-Z0-9_]/g, '');
+        const newWindowName = `tokisync_novel_worker_${nextItem.id}`.replace(/[^a-zA-Z0-9_]/g, '');
+
+        console.log(`[Queue Scheduler] ♻️ 기존 자식 팝업 슬롯 재사용 (이름: ${targetWindowName} -> 신규: ${newWindowName})`);
+        // activeWorkers 정리 및 교체
+        activeWorkers.delete(targetSlotId);
+        activeWorkers.set(nextItem.id, recycledPopup);
+
+        try {
+            // [CORS 우회 우주 표준 기법] 기존 window.name을 타겟으로 window.open을 호출하면
+            // 새 창을 띄우지 않고 동일 팝업창 내에서 URL 리다이렉션이 성공하며, 팝업 차단막도 우회합니다!
+            const width = 400;
+            const height = 600;
+            const left = window.screen.width - width - 50;
+            const top = 100;
+            
+            const updatedPopup = window.open(
+                nextItem.episodeUrl,
+                targetWindowName,
+                `width=${width},height=${height},left=${left},top=${top},noopener=false,scrollbars=yes,resizable=yes`
+            );
+            
+            if (updatedPopup) {
+                // 통신 식별자 갱신
+                updatedPopup.name = newWindowName;
+                activeWorkers.set(nextItem.id, updatedPopup);
+            }
+        } catch (err) {
+            console.error('[Queue Scheduler] 릴레이 window.open 우회 실패, 일반 리다이렉션 시도:', err);
+            try {
+                recycledPopup.location.href = nextItem.episodeUrl;
+                recycledPopup.name = newWindowName;
+                activeWorkers.set(nextItem.id, recycledPopup);
+            } catch (hrefErr) {
+                console.error('[Queue Scheduler] 팝업 릴레이 강제 실패:', hrefErr);
+            }
+        }
     } else {
-      // 팝업 차단 등으로 창 생성 실패 시 즉시 failed 처리
-      updateQueueItem(nextItem.id, { 
-        status: 'failed', 
-        errorMsg: '브라우저 팝업 차단막에 의해 창 생성에 실패했습니다.' 
-      });
+        // 가용 팝업이 없을 때만 물리적 open 수행 (최초 진입 시 2회만 동작)
+        const popupRef = openEpisodePopup(nextItem.episodeUrl, nextItem.id);
+        if (popupRef) {
+            activeWorkers.set(nextItem.id, popupRef);
+        } else {
+            // 팝업 차단 등으로 창 생성 실패 시 즉시 failed 처리
+            updateQueueItem(nextItem.id, { 
+                status: 'failed', 
+                errorMsg: '브라우저 팝업 차단막에 의해 창 생성에 실패했습니다.' 
+            });
+        }
     }
 
   } catch (err) {
@@ -2412,10 +2476,12 @@ class RuleManager {
 /* harmony import */ var _ipc_broker_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(941);
 /* harmony import */ var _queue_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(302);
 /* harmony import */ var _ui_js__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(989);
+/* harmony import */ var _config_js__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(899);
 /**
  * tokiSync - Unified Worker Controller
  * Manages single popup lifecycle and IPC routing for sequential download mode.
  */
+
 
 
 
@@ -2483,7 +2549,10 @@ async function fetchMediaViaWorkerSingleAttempt(episodeUrl, targetType = 'novel'
                         destination: config.destination || 'local',
                         novelFormat: config.novelFormat || 'epub',
                         matchedRule: config.matchedRule || {},
-                        protocolDomain: config.protocolDomain || window.location.origin
+                        protocolDomain: config.protocolDomain || window.location.origin,
+                        scanSpeedMultiplier: config.scanSpeedMultiplier || 1.0,
+                        localNameTemplate: config.localNameTemplate || "{number} - {title}",
+                        localEpisodePadding: config.localEpisodePadding || "4"
                     });
                 }
             }
@@ -2683,7 +2752,7 @@ function initBatchWorkerController() {
                 const closedCount = (batchClosedCounts.get(id) || 0) + 1;
                 batchClosedCounts.set(id, closedCount);
 
-                if (closedCount >= 3) {
+                if (closedCount >= 5) {
                     console.warn(`[WorkerController] ⚠️ [배치] 자식 팝업 수동 종료 확정: ${id}`);
                     _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.delete(id);
                     batchClosedCounts.delete(id);
@@ -2712,11 +2781,29 @@ function initBatchWorkerController() {
 
         // 1. WORKER_READY: 자식 워커 핸드셰이킹 수신
         if (type === 'WORKER_READY') {
+            const { targetUrl } = payload || {};
             let matchedId = null;
+
+            // 1차: activeWorkers의 window 참조 비교
             for (const [id, popupRef] of _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.entries()) {
                 if (popupRef === sourceEvent.source) {
                     matchedId = id;
                     break;
+                }
+            }
+
+            // 2차: URL 기반 매칭 폴백 (리다이렉션으로 주소가 완전히 틀어졌을 때 복구)
+            if (!matchedId && targetUrl) {
+                const queue = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getQueue */ .IS)();
+                const matchedItem = queue.find(item => 
+                    (item.status === 'pending' || item.status === 'processing') && 
+                    item.episodeUrl === targetUrl
+                );
+                if (matchedItem) {
+                    matchedId = matchedItem.id;
+                    // 최신 Window 참조로 activeWorkers 즉시 복원 갱신
+                    _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.set(matchedId, sourceEvent.source);
+                    console.log(`[WorkerController] ♻️ URL 매칭 성공 ➡️ Window 참조 복원 갱신 (ID: ${matchedId})`);
                 }
             }
 
@@ -2738,23 +2825,28 @@ function initBatchWorkerController() {
                         destination: item.destination || 'local',
                         novelFormat: item.novelFormat || 'epub',
                         matchedRule: item.matchedRule || {},
-                        protocolDomain: item.protocolDomain || window.location.origin
+                        protocolDomain: item.protocolDomain || window.location.origin,
+                        scanSpeedMultiplier: (0,_config_js__WEBPACK_IMPORTED_MODULE_4__/* .getConfig */ .zj)().scanSpeed,
+                        localNameTemplate: (0,_config_js__WEBPACK_IMPORTED_MODULE_4__/* .getConfig */ .zj)().localNameTemplate || "{number} - {title}",
+                        localEpisodePadding: (0,_config_js__WEBPACK_IMPORTED_MODULE_4__/* .getConfig */ .zj)().localEpisodePadding || "4"
                     });
                 }
             } else {
-                console.warn('[WorkerController] [배치] WORKER_READY 수신했으나 매칭되는 activeWorkers 항목을 찾지 못했습니다.');
+                console.warn('[WorkerController] [배치] WORKER_READY 수신했으나 매칭되는 activeWorkers 항목을 찾지 못했습니다.', targetUrl);
             }
         }
 
         // 2. CAPTCHA_DETECTED: WAF/보안 방어막 대기 상태
         if (type === 'CAPTCHA_DETECTED') {
-            let matchedId = null;
-            for (const [id, popupRef] of _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.entries()) {
-                if (popupRef === sourceEvent.source) {
-                    matchedId = id;
-                    break;
+            const { queueId } = payload || {};
+            let matchedId = queueId;
+
+            if (!matchedId) {
+                for (const [id, popupRef] of _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.entries()) {
+                    if (popupRef === sourceEvent.source) { matchedId = id; break; }
                 }
             }
+
             if (matchedId) {
                 console.warn(`[WorkerController] ⚠️ [배치] WAF 캡차 차단막 감지 (ID: ${matchedId})`);
                 const queue = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getQueue */ .IS)();
@@ -2767,12 +2859,12 @@ function initBatchWorkerController() {
 
         // 3. WORKER_PROGRESS: 자식 워커 실시간 진행률 UI 반영
         if (type === 'WORKER_PROGRESS') {
-            const { percent, stage } = payload;
-            let matchedId = null;
-            for (const [id, popupRef] of _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.entries()) {
-                if (popupRef === sourceEvent.source) {
-                    matchedId = id;
-                    break;
+            const { percent, stage, queueId } = payload || {};
+            let matchedId = queueId;
+
+            if (!matchedId) {
+                for (const [id, popupRef] of _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.entries()) {
+                    if (popupRef === sourceEvent.source) { matchedId = id; break; }
                 }
             }
 
@@ -2791,17 +2883,19 @@ function initBatchWorkerController() {
                     else if (stage === _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.COMPLETED) stageText = '완료';
 
                     logger.log(`[수집 진행] [${item.episodeTitle}] -> ${stageText} (${Math.round(percent)}%)`, 'Downloader');
+                    logger.updateProgressUI();
                 }
             }
         }
 
         // 4. TASK_COMPLETED: 자식 워커 수집 및 드라이브 저장 정상 완료
         if (type === 'TASK_COMPLETED') {
-            let matchedId = null;
-            for (const [id, popupRef] of _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.entries()) {
-                if (popupRef === sourceEvent.source) {
-                    matchedId = id;
-                    break;
+            const { queueId } = payload || {};
+            let matchedId = queueId;
+
+            if (!matchedId) {
+                for (const [id, popupRef] of _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.entries()) {
+                    if (popupRef === sourceEvent.source) { matchedId = id; break; }
                 }
             }
 
@@ -2810,11 +2904,19 @@ function initBatchWorkerController() {
                 
                 const popupRef = _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.get(matchedId);
                 if (popupRef && !popupRef.closed) {
-                    popupRef.close();
+                    // [최종 패치] 대기열에 pending 상태의 작업이 남아 있으면 창을 닫지 않고 릴레이용 보존!
+                    const queue = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getQueue */ .IS)();
+                    const pendingExists = queue.some(i => i.status === 'pending');
+                    if (!pendingExists) {
+                        popupRef.close();
+                        _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.delete(matchedId);
+                    }
+                } else {
+                    _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.delete(matchedId);
                 }
-                _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.delete(matchedId);
                 
                 (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .updateQueueItem */ .Gg)(matchedId, { status: 'completed', progressPercent: 100, stage: _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.COMPLETED });
+                logger.updateProgressUI();
 
                 // 다음 대기 항목 릴레이 스케줄링
                 (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .runSchedulerOnce */ .gi)();
@@ -2823,12 +2925,12 @@ function initBatchWorkerController() {
 
         // 5. TASK_FAILED: 예외 및 복구 불능 실패 보고
         if (type === 'TASK_FAILED') {
-            const { errorMsg } = payload;
-            let matchedId = null;
-            for (const [id, popupRef] of _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.entries()) {
-                if (popupRef === sourceEvent.source) {
-                    matchedId = id;
-                    break;
+            const { errorMsg, queueId } = payload || {};
+            let matchedId = queueId;
+
+            if (!matchedId) {
+                for (const [id, popupRef] of _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.entries()) {
+                    if (popupRef === sourceEvent.source) { matchedId = id; break; }
                 }
             }
 
@@ -2837,9 +2939,16 @@ function initBatchWorkerController() {
                 
                 const popupRef = _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.get(matchedId);
                 if (popupRef && !popupRef.closed) {
-                    popupRef.close();
+                    // [최종 패치] 대기열에 남은 작업이 없으면 닫고, 있으면 릴레이용으로 킵!
+                    const queue = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getQueue */ .IS)();
+                    const pendingExists = queue.some(i => i.status === 'pending');
+                    if (!pendingExists) {
+                        popupRef.close();
+                        _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.delete(matchedId);
+                    }
+                } else {
+                    _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.delete(matchedId);
                 }
-                _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.delete(matchedId);
 
                 const queue = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getQueue */ .IS)();
                 const item = queue.find(i => i.id === matchedId);
@@ -2850,6 +2959,7 @@ function initBatchWorkerController() {
                         retryCount: nextRetry,
                         errorMsg: errorMsg || '자식 워커가 에러를 보고함'
                     });
+                    logger.updateProgressUI();
                 }
 
                 // 다음 대기 항목 릴레이 스케줄링
@@ -3055,7 +3165,7 @@ async function fetchNovelTextViaApi(episodeUrl, config = {}, _isRetry = false) {
 /* harmony export */   rn: function() { return /* binding */ CFG_REMOTE_RULE_URL; },
 /* harmony export */   zj: function() { return /* binding */ getConfig; }
 /* harmony export */ });
-/* unused harmony exports CFG_URL_KEY, CFG_ID_KEY, CFG_FOLDER_ID, CFG_POLICY_KEY, CFG_API_KEY, CFG_SLEEP_MODE, CFG_SMART_SKIP_RATIO, CFG_NOVEL_MODE, CFG_NOVEL_FORMAT */
+/* unused harmony exports CFG_URL_KEY, CFG_ID_KEY, CFG_FOLDER_ID, CFG_POLICY_KEY, CFG_API_KEY, CFG_SLEEP_MODE, CFG_SMART_SKIP_RATIO, CFG_NOVEL_MODE, CFG_NOVEL_FORMAT, CFG_SCAN_SPEED, CFG_LOCAL_NAME_TEMPLATE, CFG_LOCAL_EPISODE_PADDING */
 const CFG_URL_KEY = "TOKI_GAS_URL"; // legacy
 const CFG_ID_KEY = "TOKI_GAS_ID";
 const CFG_FOLDER_ID = "TOKI_FOLDER_ID";
@@ -3067,6 +3177,9 @@ const CFG_NOVEL_MODE = "TOKI_NOVEL_MODE";
 const CFG_NOVEL_FORMAT = "TOKI_NOVEL_FORMAT";
 const CFG_REMOTE_RULE_URL = "TOKI_REMOTE_RULE_URL";
 const CFG_CUSTOM_RULES = "TOKI_CUSTOM_RULES";
+const CFG_SCAN_SPEED = "TOKI_SCAN_SPEED";
+const CFG_LOCAL_NAME_TEMPLATE = "TOKI_LOCAL_NAME_TEMPLATE";
+const CFG_LOCAL_EPISODE_PADDING = "TOKI_LOCAL_EPISODE_PADDING";
 
 /**
  * Get current configuration
@@ -3108,7 +3221,10 @@ function getConfig() {
         novelMode: GM_getValue(CFG_NOVEL_MODE, "perChapter"), // default: chapter-by-chapter
         novelFormat: GM_getValue(CFG_NOVEL_FORMAT, "epub"), // default: EPUB
         remoteRuleUrl: remoteRuleUrl,
-        customRules: GM_getValue(CFG_CUSTOM_RULES, "[]")
+        customRules: GM_getValue(CFG_CUSTOM_RULES, "[]"),
+        scanSpeed: parseFloat(GM_getValue(CFG_SCAN_SPEED, "1.0")),
+        localNameTemplate: GM_getValue(CFG_LOCAL_NAME_TEMPLATE, "{number} - {title}"),
+        localEpisodePadding: GM_getValue(CFG_LOCAL_EPISODE_PADDING, "4")
     };
 }
 
@@ -3172,6 +3288,30 @@ function showConfigModal(popupDoc = document) {
             </div>
 
             <div class="toki-control-group">
+                <label class="toki-label">로컬 파일명 템플릿</label>
+                <input type="text" id="toki-cfg-nametemplate" class="toki-input" 
+                       placeholder="{number} - {title}" value="${config.localNameTemplate}">
+                <div class="toki-hint" style="font-size: 11px; color: #888; margin-top: 4px;">
+                    로컬 저장 시 파일명 포맷입니다. 
+                    (치환자: <b>{number}</b>=패딩번호, <b>{rawNumber}</b>=원본번호, <b>{series}</b>=작품명, <b>{title}</b>=회차제목)<br>
+                    ※ 구글 드라이브 업로드 시에는 호환성을 위해 템플릿이 적용되지 않고 기존 포맷으로 고정됩니다.
+                </div>
+            </div>
+
+            <div class="toki-control-group">
+                <label class="toki-label">로컬 화수 패딩 자릿수</label>
+                <select id="toki-cfg-localpadding" class="toki-select">
+                    <option value="0">패딩 없음 (1, 2, 10)</option>
+                    <option value="2">2자리 패딩 (01, 02, 10)</option>
+                    <option value="3">3자리 패딩 (001, 002, 010)</option>
+                    <option value="4">4자리 패딩 (0001, 0002, 0010)</option>
+                </select>
+                <div class="toki-hint" style="font-size: 11px; color: #888; margin-top: 4px;">
+                    템플릿 내 <b>{number}</b> 치환자에 적용될 패딩 자릿수입니다.
+                </div>
+            </div>
+
+            <div class="toki-control-group">
                 <label class="toki-label">다운로드 속도</label>
                 <select id="toki-cfg-sleepmode" class="toki-select">
                     <option value="agile">빠름 (1-3초)</option>
@@ -3180,6 +3320,18 @@ function showConfigModal(popupDoc = document) {
                     <option value="slow">느림 (5-15초)</option>
                     <option value="very_slow">매우 느림 (10-30초)</option>
                 </select>
+            </div>
+
+            <div class="toki-control-group">
+                <label class="toki-label">이미지 스캔 속도 배율
+                    <span id="toki-scan-speed-val">${config.scanSpeed.toFixed(1)}×</span>
+                </label>
+                <input type="range" id="toki-cfg-scanspeed" 
+                       min="0.5" max="5.0" step="0.5" value="${config.scanSpeed}"
+                       class="toki-range" style="width: 100%;">
+                <div class="toki-hint" style="font-size: 11px; color: #888; margin-top: 4px;">
+                    0.5×(빠름/불안정) ─ 1.0×(기본) ─ 3.0×(안정) ─ 5.0×(확실)
+                </div>
             </div>
 
             <div class="toki-control-group">
@@ -3232,9 +3384,20 @@ function showConfigModal(popupDoc = document) {
     // -- Logic --
     const policySelect = doc.getElementById('toki-cfg-policy');
     if(policySelect) policySelect.value = config.policy;
+
+    const localPaddingSelect = doc.getElementById('toki-cfg-localpadding');
+    if(localPaddingSelect) localPaddingSelect.value = config.localEpisodePadding;
     
     const sleepModeSelect = doc.getElementById('toki-cfg-sleepmode');
     if(sleepModeSelect) sleepModeSelect.value = config.sleepMode;
+
+    const scanSpeedSlider = doc.getElementById('toki-cfg-scanspeed');
+    if (scanSpeedSlider) {
+        scanSpeedSlider.oninput = (e) => {
+            const valSpan = doc.getElementById('toki-scan-speed-val');
+            if (valSpan) valSpan.innerText = `${parseFloat(e.target.value).toFixed(1)}×`;
+        };
+    }
 
     const smartSkipSelect = doc.getElementById('toki-cfg-smartskip');
     if(smartSkipSelect) smartSkipSelect.value = config.smartSkipRatio;
@@ -3253,6 +3416,9 @@ function showConfigModal(popupDoc = document) {
         const newApiKey = doc.getElementById('toki-cfg-apikey').value.trim();
         const newPolicy = doc.getElementById('toki-cfg-policy').value;
         const newSleepMode = doc.getElementById('toki-cfg-sleepmode').value;
+        const newScanSpeed = doc.getElementById('toki-cfg-scanspeed').value;
+        const newNameTemplate = doc.getElementById('toki-cfg-nametemplate').value.trim() || "{number} - {title}";
+        const newLocalPadding = doc.getElementById('toki-cfg-localpadding').value;
         const newSmartSkip = doc.getElementById('toki-cfg-smartskip').value;
         const newNovelMode = doc.getElementById('toki-cfg-novel-mode').value;
         const newNovelFormat = doc.getElementById('toki-cfg-novel-format').value;
@@ -3292,6 +3458,9 @@ function showConfigModal(popupDoc = document) {
         setConfig(CFG_API_KEY, newApiKey);
         setConfig(CFG_POLICY_KEY, newPolicy);
         setConfig(CFG_SLEEP_MODE, newSleepMode);
+        setConfig(CFG_SCAN_SPEED, newScanSpeed);
+        setConfig(CFG_LOCAL_NAME_TEMPLATE, newNameTemplate);
+        setConfig(CFG_LOCAL_EPISODE_PADDING, newLocalPadding);
         setConfig(CFG_SMART_SKIP_RATIO, newSmartSkip);
         setConfig(CFG_NOVEL_MODE, newNovelMode);
         setConfig(CFG_NOVEL_FORMAT, newNovelFormat);
@@ -3524,7 +3693,7 @@ async function waitForContent(targetWindow, maxWaitMs = 8000, viewerCfg = {}) {
     _ui_js__WEBPACK_IMPORTED_MODULE_1__.LogBox.getInstance().warn(`DOM 폴링 타임아웃 ${maxWaitMs}ms — 콘텐츠 미감지, 멈춰서 물 평가`, 'DOM:Poll');
 }
 
-async function scrollToLoad(iframeDoc, stallTimeoutMs = 20000, viewerCfg = {}) {
+async function scrollToLoad(iframeDoc, stallTimeoutMs = 20000, viewerCfg = {}, multiplier = 1.0) {
     const win = iframeDoc.defaultView || iframeDoc.parentWindow;
     if (!win) return;
 
@@ -3569,8 +3738,8 @@ async function scrollToLoad(iframeDoc, stallTimeoutMs = 20000, viewerCfg = {}) {
                 if (isHidden) win.dispatchEvent(new Event('scroll'));
             }
 
-            // 둔갑 및 이미지 실시간 완착 대기 루프 (최대 4초)
-            const SINGLE_PAGE_TIMEOUT = 4000;
+            // 둔갑 및 이미지 실시간 완착 대기 루프 (최대 4초 * 배율)
+            const SINGLE_PAGE_TIMEOUT = Math.round(4000 * multiplier);
             const POLL_INTERVAL = 200;
             let elapsed = 0;
 
@@ -3606,7 +3775,7 @@ async function scrollToLoad(iframeDoc, stallTimeoutMs = 20000, viewerCfg = {}) {
                 logger.log(`✅ [Scroll] 페이지 [${displayIdx} / ${pageElements.length}] 이미지 완착 성공!`, 'DOM:Scroll');
             }
 
-            await sleep(100); // 지연 로딩 방어용 완충 딜레이
+            await sleep(Math.round(100 * multiplier)); // 지연 로딩 방어용 완충 딜레이
         }
     } 
     // ── [케이스 2: 부모 컨테이너가 없거나 자식이 없는 경우 (구형/일반 뷰어 안전 폴백)] ──
@@ -3651,7 +3820,7 @@ async function scrollToLoad(iframeDoc, stallTimeoutMs = 20000, viewerCfg = {}) {
             img.scrollIntoView({ behavior, block: 'center' });
             if (isHidden) win.dispatchEvent(new Event('scroll'));
 
-            const SINGLE_IMAGE_TIMEOUT = 4000;
+            const SINGLE_IMAGE_TIMEOUT = Math.round(4000 * multiplier);
             const POLL_INTERVAL = 200;
             let elapsed = 0;
 
@@ -3661,7 +3830,7 @@ async function scrollToLoad(iframeDoc, stallTimeoutMs = 20000, viewerCfg = {}) {
                 await sleep(POLL_INTERVAL);
                 elapsed += POLL_INTERVAL;
             }
-            await sleep(100);
+            await sleep(Math.round(100 * multiplier));
         }
     }
 
@@ -4203,11 +4372,10 @@ __webpack_require__.d(__webpack_exports__, {
   LogBox: function() { return /* binding */ LogBox; },
   fo: function() { return /* binding */ MenuModal; },
   ze: function() { return /* binding */ Notifier; },
-  AC: function() { return /* binding */ TreeRuleEditor; },
   hV: function() { return /* binding */ markDownloadedItems; }
 });
 
-// UNUSED EXPORTS: FormRuleEditor
+// UNUSED EXPORTS: FormRuleEditor, TreeRuleEditor
 
 // EXTERNAL MODULE: ./src/core/parsers/ParserFactory.js
 var ParserFactory = __webpack_require__(969);
@@ -4218,12 +4386,15 @@ var GenericParser = __webpack_require__(443);
 // EXTERNAL MODULE: ./src/core/extractor.js
 var extractor = __webpack_require__(929);
 ;// ./src/core/ui.css
-var ui_namespaceObject = "@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');\n\n:root {\n    --toki-primary: #2563eb;\n    --toki-primary-dark: #1d4ed8;\n    --toki-accent: #facc15;\n    --toki-bg: rgba(248, 250, 252, 0.9);\n    --toki-text: #1e293b;\n    --toki-text-muted: #64748b;\n    --toki-border: rgba(255, 255, 255, 0.6);\n    --toki-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);\n    --toki-font: 'Inter', -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif;\n}\n\n/* LogBox Styles */\n#toki-logbox {\n    position: fixed;\n    bottom: 100px;\n    right: 30px;\n    width: 480px;\n    height: auto;\n    min-height: 250px;\n    max-height: 500px;\n    background: var(--toki-bg);\n    color: var(--toki-text);\n    font-family: 'Cascadia Code', Consolas, monospace;\n    font-size: 12px;\n    border: 1px solid var(--toki-border);\n    border-radius: 16px;\n    z-index: 9999;\n    display: none;\n    flex-direction: column;\n    box-shadow: var(--toki-shadow);\n    backdrop-filter: blur(20px);\n    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);\n}\n\n#toki-logbox-header {\n    padding: 12px 16px;\n    background: rgba(255, 255, 255, 0.4);\n    border-bottom: 1px solid rgba(0, 0, 0, 0.05);\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    border-top-left-radius: 16px;\n    border-top-right-radius: 16px;\n    cursor: move;\n}\n\n#toki-logbox-title {\n    font-weight: 700;\n    font-size: 13px;\n    letter-spacing: -0.01em;\n}\n\n#toki-logbox-controls span {\n    cursor: pointer;\n    margin-left: 12px;\n    color: var(--toki-text-muted);\n    font-size: 14px;\n    transition: transform 0.2s, color 0.2s;\n    display: inline-block;\n}\n\n#toki-logbox-controls span:hover {\n    color: var(--toki-primary);\n    transform: scale(1.15);\n}\n\n#toki-logbox-content {\n    flex: 1;\n    overflow-y: auto;\n    padding: 12px;\n    margin: 0;\n    list-style: none;\n}\n\n#toki-logbox-content li {\n    margin-bottom: 4px;\n    word-break: break-all;\n    padding: 4px 8px;\n    border-radius: 6px;\n    line-height: 1.4;\n    color: #f1f5f9; /* 밝은 회백색 지정으로 가독성 극대화 */\n}\n\n#toki-logbox-content li.critical {\n    color: #be123c;\n    font-weight: 700;\n    background: rgba(225, 29, 72, 0.1);\n    border-left: 3px solid #e11d48;\n}\n\n#toki-logbox-content li.error { color: #e11d48; }\n#toki-logbox-content li.warn { color: #d97706; }\n#toki-logbox-content li.success { color: #059669; font-weight: 600; }\n#toki-logbox-content li.info { color: #38bdf8; font-weight: 500; }\n\n/* Modal Styles */\n.toki-modal-overlay {\n    position: fixed;\n    top: 0;\n    left: 0;\n    width: 100%;\n    height: 100%;\n    background: rgba(15, 23, 42, 0.2);\n    backdrop-filter: blur(12px);\n    z-index: 9999;\n    display: flex;\n    justify-content: center;\n    align-items: center;\n    opacity: 0;\n    animation: tokiFadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;\n}\n\n.toki-modal {\n    width: 520px;\n    max-width: 95%;\n    background: var(--toki-bg);\n    border: 1px solid var(--toki-border);\n    border-radius: 28px;\n    box-shadow: var(--toki-shadow);\n    overflow: hidden;\n    display: flex;\n    flex-direction: column;\n    transform: translateY(30px) scale(0.95);\n    animation: tokiSlideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;\n    backdrop-filter: blur(30px);\n    color: var(--toki-text);\n    font-family: var(--toki-font);\n}\n\n.toki-modal-header {\n    padding: 24px 32px;\n    background: rgba(255, 255, 255, 0.4);\n    border-bottom: 1px solid rgba(0, 0, 0, 0.05);\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n}\n\n.toki-modal-title {\n    font-size: 24px;\n    font-weight: 800;\n    color: #0f172a;\n    display: flex;\n    align-items: center;\n    gap: 12px;\n    letter-spacing: -0.03em;\n}\n\n.toki-modal-close {\n    background: rgba(0, 0, 0, 0.05);\n    border: none;\n    color: var(--toki-text-muted);\n    width: 36px;\n    height: 36px;\n    border-radius: 50%;\n    cursor: pointer;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);\n    font-size: 20px;\n}\n\n.toki-modal-close:hover {\n    background: #ef4444;\n    color: #fff;\n    transform: rotate(90deg);\n}\n\n.toki-btn-ghost {\n    background: rgba(0, 0, 0, 0.05);\n    border: none;\n    color: var(--toki-text-muted);\n    padding: 6px 14px;\n    border-radius: 12px;\n    cursor: pointer;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    transition: all 0.2s;\n    font-size: 13px;\n    font-weight: 600;\n    gap: 6px;\n}\n\n.toki-btn-ghost:hover {\n    background: rgba(0, 0, 0, 0.08);\n    color: var(--toki-text);\n}\n\n/* Tabs */\n.toki-tabs {\n    display: flex;\n    background: rgba(255, 255, 255, 0.3);\n    padding: 8px;\n    gap: 6px;\n    border-bottom: 1px solid rgba(0, 0, 0, 0.05);\n}\n\n.toki-tab-btn {\n    flex: 1;\n    padding: 12px;\n    background: none;\n    border: none;\n    color: var(--toki-text-muted);\n    font-size: 14px;\n    font-weight: 700;\n    cursor: pointer;\n    transition: all 0.3s;\n    border-radius: 14px;\n    display: flex;\n    justify-content: center;\n    align-items: center;\n    gap: 8px;\n}\n\n.toki-tab-btn:hover {\n    color: var(--toki-text);\n    background: rgba(255, 255, 255, 0.6);\n}\n\n.toki-tab-btn.active {\n    background: #fff;\n    color: var(--toki-primary);\n    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);\n}\n\n.toki-tab-content {\n    display: none;\n    padding: 32px;\n    animation: tokiTabFadeIn 0.4s ease-out;\n}\n\n.toki-tab-content.active { display: block; }\n\n/* Components */\n.toki-section-title {\n    font-size: 11px;\n    font-weight: 800;\n    color: var(--toki-primary);\n    text-transform: uppercase;\n    letter-spacing: 0.1em;\n    margin: 24px 0 12px 4px;\n    opacity: 0.8;\n}\n\n.toki-control-group {\n    margin-bottom: 20px;\n    position: relative;\n}\n\n.toki-label {\n    display: block;\n    font-size: 13px;\n    font-weight: 700;\n    color: var(--toki-text-muted);\n    margin-bottom: 8px;\n    margin-left: 4px;\n}\n\n.toki-input, .toki-select, .toki-textarea {\n    width: 100%;\n    padding: 14px 18px;\n    background: rgba(255, 255, 255, 0.8);\n    border: 1px solid rgba(0, 0, 0, 0.08);\n    border-radius: 16px;\n    color: var(--toki-text) !important;\n    font-size: 15px;\n    font-weight: 600;\n    appearance: none;\n    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);\n    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);\n}\n\n.toki-input:hover, .toki-select:hover, .toki-textarea:hover {\n    border-color: var(--toki-primary);\n    background-color: #fff;\n    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.08);\n}\n\n.toki-input:focus, .toki-select:focus, .toki-textarea:focus {\n    outline: none;\n    border-color: var(--toki-primary);\n    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);\n    background-color: #fff;\n}\n\n.toki-textarea {\n    resize: vertical;\n    line-height: 1.5;\n}\n\n.toki-select {\n    cursor: pointer;\n    background-image: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2364748b'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E\");\n    background-repeat: no-repeat;\n    background-position: right 16px center;\n    background-size: 16px;\n}\n\n.toki-btn-action {\n    width: 100%;\n    height: 56px;\n    background: var(--toki-primary);\n    color: #fff !important;\n    border: none;\n    border-radius: 18px;\n    font-size: 16px;\n    font-weight: 700;\n    cursor: pointer;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    gap: 12px;\n    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);\n    box-shadow: 0 8px 15px rgba(37, 99, 235, 0.2);\n}\n\n.toki-btn-action:hover {\n    transform: translateY(-3px);\n    box-shadow: 0 12px 20px rgba(37, 99, 235, 0.35);\n    filter: brightness(1.05);\n}\n\n.toki-btn-secondary {\n    background: rgba(255, 255, 255, 0.8);\n    color: #475569 !important;\n    border: 1px solid rgba(0, 0, 0, 0.05);\n    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);\n}\n\n.toki-btn-secondary:hover {\n    background: #fff;\n    color: var(--toki-text) !important;\n}\n\n/* Status & Indicators */\n.toki-status-dot {\n    width: 8px;\n    height: 8px;\n    border-radius: 50%;\n    display: inline-block;\n    margin-right: 6px;\n}\n\n.toki-status-online {\n    background: #10b981;\n    box-shadow: 0 0 8px #10b981;\n}\n\n.toki-downloaded {\n    background: rgba(16, 185, 129, 0.08) !important;\n    border-left: 4px solid #10b981 !important;\n    opacity: 0.75;\n    transition: all 0.3s ease;\n}\n\n.toki-downloaded:hover {\n    opacity: 1;\n    background: rgba(16, 185, 129, 0.15) !important;\n}\n\n/* FAB */\n.toki-fab {\n    position: fixed;\n    bottom: 30px;\n    right: 30px;\n    width: 64px;\n    height: 64px;\n    background: linear-gradient(135deg, #2563eb, #0ea5e9);\n    border-radius: 20px;\n    box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.4);\n    display: flex;\n    justify-content: center;\n    align-items: center;\n    cursor: pointer;\n    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);\n    z-index: 9998;\n}\n\n.toki-fab:hover {\n    transform: translateY(-5px) rotate(5deg);\n    box-shadow: 0 20px 25px -5px rgba(37, 99, 235, 0.5);\n}\n\n.toki-fab svg {\n    width: 28px;\n    height: 28px;\n    fill: #fff;\n}\n\n/* Tree Editor */\n.toki-tree-modal {\n    width: 1100px !important;\n    height: 85vh !important;\n}\n\n.toki-tree-container {\n    display: flex;\n    flex: 1;\n    overflow: hidden;\n    gap: 24px;\n    padding: 24px;\n    background: rgba(255, 255, 255, 0.2);\n}\n\n.toki-tree-view {\n    flex: 1.5;\n    overflow-y: auto;\n    background: rgba(255, 255, 255, 0.5);\n    border-radius: 16px;\n    padding: 20px;\n    border: 1px solid rgba(0, 0, 0, 0.05);\n    font-family: monospace;\n    font-size: 13px;\n}\n\n.toki-tree-node {\n    margin-left: 20px;\n    position: relative;\n    border-left: 1px dashed rgba(0, 0, 0, 0.1);\n    padding-left: 12px;\n}\n\n.toki-tree-item {\n    display: flex;\n    align-items: center;\n    gap: 8px;\n    padding: 6px 10px;\n    border-radius: 8px;\n    transition: all 0.2s;\n}\n\n.toki-tree-item:hover {\n    background: rgba(37, 99, 235, 0.05);\n}\n\n.toki-tree-key {\n    color: #2563eb;\n    font-weight: 700;\n    cursor: pointer;\n    min-width: 90px;\n}\n\n.toki-tree-val {\n    color: #1e293b;\n    background: transparent;\n    border: none;\n    border-bottom: 1px solid transparent;\n    width: 100%;\n}\n\n.toki-tree-val:focus {\n    border-bottom-color: #2563eb;\n    outline: none;\n    background: rgba(37, 99, 235, 0.05);\n}\n\n.toki-tree-toggle {\n    cursor: pointer;\n    user-select: none;\n    width: 18px;\n    text-align: center;\n    color: #94a3b8;\n    font-weight: 700;\n}\n\n.toki-tree-toggle:hover {\n    color: var(--toki-primary);\n}\n\n.toki-tree-right-panel {\n    flex: 1;\n    display: flex;\n    flex-direction: column;\n    gap: 20px;\n    background: rgba(255, 255, 255, 0.4);\n    padding: 20px;\n    border-radius: 16px;\n}\n\n.toki-tree-json-preview {\n    flex: 1;\n    background: #0f172a;\n    color: #e2e8f0;\n    padding: 20px;\n    border-radius: 16px;\n    font-size: 12px;\n    font-family: monospace;\n    border: 1px solid rgba(255, 255, 255, 0.1);\n    resize: none;\n}\n\n.toki-btn-rule {\n    background: transparent;\n    border: 1px solid #ddd;\n    padding: 6px 12px;\n    border-radius: 8px;\n    font-size: 12px;\n    cursor: pointer;\n    transition: all 0.2s;\n}\n\n.toki-btn-rule:hover {\n    background: #f8fafc;\n    border-color: #94a3b8;\n}\n\n/* Animations */\n@keyframes tokiFadeIn {\n    from { opacity: 0; }\n    to { opacity: 1; }\n}\n\n@keyframes tokiTabFadeIn {\n    from { opacity: 0; transform: translateX(10px); }\n    to { opacity: 1; transform: translateX(0); }\n}\n\n@keyframes tokiSlideUp {\n    from { opacity: 0; transform: translateY(30px) scale(0.95); }\n    to { opacity: 1; transform: translateY(0) scale(1); }\n}\n\n/* --- Structural Layouts for Inline Replacement --- */\n\n/* Horizontal Button Row (e.g., Download buttons) */\n.toki-btn-group-row {\n    display: flex;\n    gap: 12px;\n    align-items: center;\n}\n.toki-btn-group-row .toki-btn-action {\n    height: 52px;\n    flex: 1;\n}\n.toki-btn-group-row .toki-flex-1-4 {\n    flex: 1.4;\n}\n\n/* Vertical Button Stack (e.g., Tool buttons) */\n.toki-btn-group-stack {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n}\n.toki-btn-group-stack .toki-btn-action {\n    height: 44px;\n    justify-content: flex-start;\n    padding-left: 20px;\n}\n\n/* 2-Column Form Grid */\n.toki-form-grid {\n    display: grid;\n    grid-template-columns: 1fr 1fr;\n    gap: 16px;\n}\n\n/* Utility Shortcuts */\n.toki-flex-between { display: flex; justify-content: space-between; align-items: center; }\n.toki-divider { border: 0; border-top: 1px solid rgba(0,0,0,0.05); margin: 24px 0; }\n.toki-mt-0 { margin-top: 0 !important; }\n.toki-mt-8 { margin-top: 8px !important; }\n.toki-mt-32 { margin-top: 32px !important; }\n.toki-ml-4 { margin-left: 4px !important; }\n.toki-mb-5 { margin-bottom: 5px !important; }\n.toki-mb-10 { margin-bottom: 10px !important; }\n.toki-mb-24 { margin-bottom: 24px !important; }\n.toki-flex-1 { flex: 1; }\n.toki-flex-row { display: flex; gap: 4px; align-items: center; }\n.toki-flex-row-8 { display: flex; gap: 8px; align-items: center; }\n.toki-flex-row-10 { display: flex; gap: 10px; align-items: center; }\n\n/* Text Utilities */\n.toki-text-xs { font-size: 11px; color: #94a3b8; }\n.toki-text-sm { font-size: 12px; }\n.toki-text-base { font-size: 14px; }\n.toki-text-lg { font-size: 20px; font-weight: 700; }\n.toki-text-success { color: #4ade80 !important; }\n.toki-text-danger { color: #ff5555 !important; }\n.toki-text-primary { color: var(--toki-primary) !important; }\n.toki-text-center { text-align: center; }\n.toki-line-16 { line-height: 1.6; }\n\n/* Specialized Components */\n.toki-modal-main { padding: 32px; width: 520px; max-height: 85vh; overflow-y: auto; }\n.toki-btn-gradient-green { \n    background: linear-gradient(135deg, #10b981, #059669) !important; \n    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2) !important;\n}\n.toki-btn-indigo { background: #6366f1 !important; }\n.toki-btn-lavender { background: #6a5acd !important; font-weight: bold !important; }\n.toki-btn-slate { background: rgba(0,0,0,0.02) !important; border-style: dashed !important; border-radius: 20px !important; }\n.toki-hidden { display: none !important; }\n\n/* Helper Boxes */\n.toki-helper-box-blue {\n    margin: -10px 0 20px 0; padding: 14px; \n    background: rgba(37, 99, 235, 0.05); border: 1px solid rgba(37, 99, 235, 0.1); \n    border-radius: 18px;\n}\n\n/* Captcha Overlay */\n.toki-captcha-overlay {\n    position: fixed; top: 0; left: 0; width: 100%; height: 100%;\n    background: rgba(0,0,0,0.8); z-index: 10001;\n    display: flex; flex-direction: column; align-items: center; justify-content: center;\n    color: white; font-family: var(--toki-font);\n}\n.toki-captcha-frame {\n    width: 80%; height: 60%; background: white; \n    border-radius: 20px; overflow: hidden; \n    margin-bottom: 20px; box-shadow: 0 20px 50px rgba(0,0,0,0.5);\n}\n\n/* Component: Helper Description Text */\n.toki-helper-desc { line-height: 1.5; font-weight: 500; }\n\n/* Component: Small Button (e.g., Test Native) */\n.toki-btn-sm { height: 36px !important; font-size: 12px !important; border-radius: 12px !important; }\n\n/* Component: Sync Button (height 48px) */\n.toki-btn-sync { height: 48px !important; }\n\n/* Component: Modal Header without border */\n.toki-modal-header-borderless { border: none !important; }\n\n/* Component: Code Textarea */\n.toki-textarea-code { min-height: 120px; font-family: monospace; }\n\n/* Visibility Toggles */\n.toki-visible-flex { display: flex !important; }\n.toki-visible-block { display: block !important; }\n.toki-hidden { display: none !important; }\n\n/* Status Badges & Indicators */\n.toki-badge {\n    margin-left: 5px;\n    font-size: 12px;\n    vertical-align: middle;\n}\n\n.toki-downloaded {\n    opacity: 0.6;\n    background-color: rgba(74, 222, 128, 0.05) !important;\n    transition: opacity 0.3s ease;\n}\n.toki-downloaded:hover {\n    opacity: 1;\n}\n\n.toki-tree-modal {\n    z-index: 10002 !important;\n}\n\n/* Iframe Elements */\n.toki-downloader-iframe {\n    width: 100%;\n    height: 600px;\n    opacity: 0.1;\n    pointer-events: none;\n    border: none;\n    margin-top: 40px;\n}\n\n.toki-captcha-iframe {\n    width: 100%;\n    height: 100%;\n    border: none;\n}\n\n/* Info Card & History Styles */\n.toki-info-card {\n    background: rgba(255, 255, 255, 0.4);\n    border: 1px solid rgba(0, 0, 0, 0.05);\n    border-radius: 12px;\n    padding: 12px 16px;\n    margin-bottom: 20px;\n}\n\n.toki-info-row {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    padding: 6px 0;\n}\n\n.toki-info-row:not(:last-child) {\n    border-bottom: 1px dashed rgba(0, 0, 0, 0.05);\n}\n\n.toki-info-label {\n    font-size: 13px;\n    color: var(--toki-text-muted);\n    font-weight: 500;\n}\n\n.toki-info-val {\n    font-size: 13px;\n    color: var(--toki-text);\n    font-weight: 700;\n    display: flex;\n    align-items: center;\n    gap: 6px;\n}\n\n/* --- Multi-Queue Progress Monitor Panel (v1.21.0) --- */\n#toki-logbox-progress {\n    padding: 14px 18px;\n    background: rgba(255, 255, 255, 0.25);\n    border-bottom: 1px solid rgba(0, 0, 0, 0.05);\n    backdrop-filter: blur(10px);\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n}\n\n#toki-progress-header {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n}\n\n#toki-progress-overall-text {\n    font-size: 12px;\n    font-weight: 800;\n    color: var(--toki-primary);\n    letter-spacing: -0.02em;\n    background: linear-gradient(135deg, #4f46e5, #06b6d4);\n    -webkit-background-clip: text;\n    -webkit-text-fill-color: transparent;\n}\n\n}\n\n#toki-progress-overall-controls {\n    display: flex;\n    gap: 8px;\n    align-items: center;\n}\n\n.toki-progress-btn {\n    font-size: 13px;\n    cursor: pointer;\n    transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), filter 0.2s ease, opacity 0.2s ease;\n    user-select: none;\n    opacity: 0.85;\n}\n\n.toki-progress-btn:hover {\n    transform: scale(1.25);\n    opacity: 1;\n    filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.6));\n}\n\n#toki-btn-queue-stop:hover {\n    filter: drop-shadow(0 0 6px #ef4444);\n}\n\n.toki-progress-bar-paused {\n    background: linear-gradient(90deg, #9ca3af 0%, #6b7280 50%, #4b5563 100%) !important;\n    box-shadow: 0 1px 3px rgba(107, 114, 128, 0.4) !important;\n    animation: tokiPulsePaused 2s infinite ease-in-out;\n}\n\n@keyframes tokiPulsePaused {\n    0%, 100% { opacity: 1; }\n    50% { opacity: 0.65; }\n}\n\n.toki-empty-queue-msg {\n    display: flex;\n    flex-direction: column;\n    align-items: center;\n    justify-content: center;\n    padding: 24px 16px;\n    background: rgba(255, 255, 255, 0.04);\n    border: 1px dashed rgba(0, 0, 0, 0.08);\n    border-radius: 12px;\n    text-align: center;\n    gap: 6px;\n    margin: 8px 0;\n    backdrop-filter: blur(5px);\n}\n\n.toki-empty-queue-msg span {\n    font-size: 13px;\n    font-weight: 700;\n    color: var(--toki-primary, #6366f1);\n    opacity: 0.85;\n}\n\n.toki-empty-queue-msg p {\n    font-size: 11px;\n    color: #4b5563;\n    opacity: 0.75;\n    margin: 0;\n    line-height: 1.4;\n}\n\n.toki-progress-bar-container {\n    width: 100%;\n    height: 8px;\n    background: rgba(0, 0, 0, 0.06);\n    border-radius: 999px;\n    overflow: hidden;\n    position: relative;\n    border: 1px solid rgba(255, 255, 255, 0.5);\n    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);\n}\n\n.toki-progress-bar-fill {\n    height: 100%;\n    width: 0%;\n    background: linear-gradient(90deg, #6366f1 0%, #3b82f6 50%, #06b6d4 100%);\n    border-radius: 999px;\n    transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);\n    box-shadow: 0 1px 3px rgba(99, 102, 241, 0.4);\n}\n\n#toki-progress-workers-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n    margin-top: 6px;\n    max-height: 160px;\n    overflow-y: auto;\n    padding-right: 4px;\n}\n\n/* Custom Scrollbar for Workers List */\n#toki-progress-workers-list::-webkit-scrollbar {\n    width: 4px;\n}\n#toki-progress-workers-list::-webkit-scrollbar-track {\n    background: transparent;\n}\n#toki-progress-workers-list::-webkit-scrollbar-thumb {\n    background: rgba(0, 0, 0, 0.1);\n    border-radius: 999px;\n}\n\n.toki-worker-progress-item {\n    background: rgba(255, 255, 255, 0.35);\n    border: 1px solid rgba(255, 255, 255, 0.5);\n    border-radius: 10px;\n    padding: 8px 12px;\n    display: flex;\n    flex-direction: column;\n    gap: 6px;\n    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);\n    transition: all 0.2s ease;\n}\n\n.toki-worker-progress-item:hover {\n    background: rgba(255, 255, 255, 0.55);\n    border-color: rgba(37, 99, 235, 0.15);\n    transform: translateY(-1px);\n    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.04);\n}\n\n.toki-worker-stage {\n    font-size: 11px;\n    font-weight: 700;\n    color: var(--toki-text-muted);\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n}\n\n.toki-worker-bar-container {\n    width: 100%;\n    height: 5px;\n    background: rgba(0, 0, 0, 0.04);\n    border-radius: 999px;\n    overflow: hidden;\n}\n\n.toki-worker-bar-fill {\n    height: 100%;\n    background: linear-gradient(90deg, #10b981 0%, #34d399 100%);\n    border-radius: 999px;\n    transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1);\n}\n\n/* --- 📋 Realtime Queue List & Badges (v1.21.0) --- */\n#toki-progress-queue-section {\n    margin-top: 10px;\n    border-top: 1px solid rgba(0, 0, 0, 0.06);\n    padding-top: 8px;\n    display: flex;\n    flex-direction: column;\n    gap: 6px;\n}\n\n#toki-queue-section-header {\n    font-size: 11px;\n    font-weight: 700;\n    color: var(--toki-text-muted);\n    opacity: 0.85;\n}\n\n#toki-progress-queue-list {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n    max-height: 120px;\n    overflow-y: auto;\n    padding-right: 2px;\n}\n\n#toki-progress-queue-list::-webkit-scrollbar {\n    width: 4px;\n}\n#toki-progress-queue-list::-webkit-scrollbar-track {\n    background: transparent;\n}\n#toki-progress-queue-list::-webkit-scrollbar-thumb {\n    background: rgba(0, 0, 0, 0.08);\n    border-radius: 999px;\n}\n\n.toki-queue-list-item {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    padding: 5px 8px;\n    background: rgba(255, 255, 255, 0.25);\n    border: 1px solid rgba(255, 255, 255, 0.4);\n    border-radius: 6px;\n    font-size: 11px;\n    transition: all 0.2s ease;\n}\n\n.toki-queue-list-item:hover {\n    background: rgba(255, 255, 255, 0.45);\n    transform: translateX(1px);\n}\n\n.toki-queue-item-meta {\n    display: flex;\n    align-items: center;\n    gap: 8px;\n    flex: 1;\n    min-width: 0;\n}\n\n.toki-queue-item-title {\n    color: var(--toki-text);\n    font-weight: 500;\n    white-space: nowrap;\n    overflow: hidden;\n    text-overflow: ellipsis;\n}\n\n.toki-queue-item-delete {\n    font-size: 10px;\n    cursor: pointer;\n    opacity: 0.6;\n    transition: all 0.15s ease;\n    padding: 2px;\n}\n\n.toki-queue-item-delete:hover {\n    opacity: 1;\n    transform: scale(1.2);\n}\n\n/* 세련된 HSL 상태 배지 */\n.toki-badge {\n    padding: 2px 6px;\n    border-radius: 4px;\n    font-size: 9px;\n    font-weight: 700;\n    white-space: nowrap;\n    text-transform: uppercase;\n}\n\n/* 대기 (🟡 HSL Tailored Yellow) */\n.toki-badge-pending {\n    background: hsl(45, 93%, 94%);\n    color: hsl(45, 90%, 35%);\n    border: 1px solid hsl(45, 93%, 85%);\n}\n\n/* 진행 (🟢 HSL Tailored Emerald) */\n.toki-badge-processing {\n    background: hsl(150, 84%, 93%);\n    color: hsl(150, 84%, 25%);\n    border: 1px solid hsl(150, 84%, 82%);\n}\n\n/* 완료 (🔵 HSL Tailored Sapphire) */\n.toki-badge-completed {\n    background: hsl(220, 95%, 94%);\n    color: hsl(220, 90%, 40%);\n    border: 1px solid hsl(220, 95%, 86%);\n}\n\n/* 실패 (🔴 HSL Tailored Ruby) */\n.toki-badge-failed {\n    background: hsl(0, 93%, 94%);\n    color: hsl(0, 90%, 45%);\n    border: 1px solid hsl(0, 93%, 86%);\n}\n\n/* --- FormRuleEditor: Hybrid Two-Track Parser GUI (v1.21.0) --- */\n.toki-form-editor-modal {\n    width: 1200px !important;\n    height: 90vh !important;\n    max-height: 90vh !important;\n    border-radius: 24px !important;\n}\n\n.toki-form-editor-container {\n    display: flex;\n    flex: 1;\n    overflow: hidden;\n    gap: 20px;\n    padding: 20px;\n    background: rgba(255, 255, 255, 0.15);\n}\n\n.toki-form-editor-left {\n    flex: 1.2;\n    overflow-y: auto;\n    display: flex;\n    flex-direction: column;\n    gap: 16px;\n    padding-right: 8px;\n}\n\n.toki-form-editor-left::-webkit-scrollbar {\n    width: 6px;\n}\n.toki-form-editor-left::-webkit-scrollbar-track {\n    background: transparent;\n}\n.toki-form-editor-left::-webkit-scrollbar-thumb {\n    background: rgba(0, 0, 0, 0.08);\n    border-radius: 999px;\n}\n\n.toki-form-editor-right {\n    flex: 1;\n    display: flex;\n    flex-direction: column;\n    gap: 16px;\n    background: rgba(255, 255, 255, 0.4);\n    padding: 20px;\n    border-radius: 18px;\n    border: 1px solid rgba(255, 255, 255, 0.5);\n    overflow: hidden;\n}\n\n.toki-form-card {\n    background: rgba(255, 255, 255, 0.45);\n    border: 1px solid rgba(0, 0, 0, 0.04);\n    border-radius: 16px;\n    padding: 16px 20px;\n    display: flex;\n    flex-direction: column;\n    gap: 12px;\n    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.01);\n    transition: all 0.2s ease;\n}\n\n.toki-form-card:hover {\n    background: rgba(255, 255, 255, 0.65);\n    border-color: rgba(37, 99, 235, 0.1);\n    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.02);\n}\n\n.toki-form-card-title {\n    font-size: 13px;\n    font-weight: 800;\n    color: var(--toki-primary);\n    text-transform: uppercase;\n    letter-spacing: 0.02em;\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    border-bottom: 1px solid rgba(0, 0, 0, 0.03);\n    padding-bottom: 8px;\n}\n\n.toki-form-row {\n    display: flex;\n    flex-direction: column;\n    gap: 6px;\n}\n\n.toki-form-row-header {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n}\n\n.toki-form-row-label {\n    font-size: 12px;\n    font-weight: 700;\n    color: var(--toki-text-muted);\n}\n\n.toki-input-compact {\n    padding: 10px 14px;\n    background: rgba(255, 255, 255, 0.7);\n    border: 1px solid rgba(0, 0, 0, 0.06);\n    border-radius: 10px;\n    font-size: 13px;\n    font-family: inherit;\n    transition: all 0.2s ease;\n}\n\n.toki-input-compact:focus {\n    outline: none;\n    border-color: var(--toki-primary);\n    background: #fff;\n    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);\n}\n\n.toki-badge-match {\n    font-size: 10px;\n    font-weight: 800;\n    padding: 2px 6px;\n    border-radius: 6px;\n    transition: all 0.2s ease;\n}\n\n.toki-badge-match.ok {\n    background: rgba(16, 185, 129, 0.1);\n    color: #10b981;\n}\n\n.toki-badge-match.zero {\n    background: rgba(245, 158, 11, 0.1);\n    color: #f59e0b;\n}\n\n.toki-badge-match.error {\n    background: rgba(239, 68, 68, 0.1);\n    color: #ef4444;\n}\n\n.toki-form-dropper-btn {\n    cursor: pointer;\n    font-size: 14px;\n    transition: transform 0.2s;\n    user-select: none;\n}\n.toki-form-dropper-btn:hover {\n    transform: scale(1.2);\n}\n\n/* --- 📱 Compact Responsive LogBox for Popups & Small Screens (v1.21.0 추가) --- */\n@media (max-width: 500px) {\n    #toki-logbox {\n        width: 100% !important;\n        height: 100% !important;\n        max-height: 100% !important;\n        bottom: 0 !important;\n        right: 0 !important;\n        left: 0 !important;\n        top: 0 !important;\n        border-radius: 0 !important;\n        border: none !important;\n        box-shadow: none !important;\n    }\n    /* 팝업에서는 전체 화면을 채우므로 드래그 헤더 무효화 및 모바일 친화형 축소 */\n    #toki-logbox-header {\n        cursor: default !important;\n        padding: 8px 12px !important;\n        border-top-left-radius: 0 !important;\n        border-top-right-radius: 0 !important;\n    }\n    #toki-logbox-content {\n        padding: 8px !important;\n        display: block !important; /* 팝업 상세로그 강제 개방 */\n        height: calc(100% - 35px) !important; /* 헤더를 제외한 영역 100% 점유 */\n        max-height: calc(100% - 35px) !important;\n    }\n    /* 팝업 내 불필요한 컨트롤 및 큐 진행률 카드 영역 강제 은닉 (사용자 피드백 반영) */\n    #toki-btn-audio, #toki-btn-report, #toki-logbox-progress {\n        display: none !important;\n    }\n}\n\n\n\n\n/* --- Dashboard Popup Specific Layout --- */\n#toki-dashboard-popup {\n    display: flex;\n    flex-direction: column;\n    width: 100vw;\n    height: 100vh;\n    margin: 0;\n    background: var(--toki-bg);\n    border: none;\n    border-radius: 0;\n    box-shadow: none;\n    overflow: hidden;\n}\n\n#toki-dashboard-header {\n    padding: 24px 32px;\n    background: rgba(255, 255, 255, 0.4);\n    border-bottom: 1px solid rgba(0, 0, 0, 0.05);\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n}\n\n#toki-dashboard-title {\n    font-size: 24px;\n    font-weight: 800;\n    color: #0f172a;\n    display: flex;\n    align-items: center;\n    gap: 12px;\n    letter-spacing: -0.03em;\n}\n\n#toki-dashboard-header-controls {\n    display: flex;\n    gap: 12px;\n    align-items: center;\n}\n\n#toki-dashboard-log-section {\n    padding: 16px 20px;\n    background: rgba(0, 0, 0, 0.05);\n    border-radius: 12px;\n    margin: 0 20px 20px 20px;\n    display: flex;\n    flex-direction: column;\n    height: 250px; /* 실시간 로그창 영역 높이 명시 */\n    overflow: hidden;\n}\n\n#toki-dashboard-log-section #toki-logbox-content {\n    flex: 1;\n    overflow-y: auto; /* 내부 스크롤 강제 */\n    padding: 12px;\n    margin: 0;\n    list-style: none;\n    background: rgba(0, 0, 0, 0.2); /* 로그 시인성 제고를 위한 세련된 다크 패널 */\n    border-radius: 8px;\n    border: 1px solid rgba(255, 255, 255, 0.03);\n}\n\n#toki-log-header {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    font-weight: 700;\n    margin-bottom: 12px;\n    color: var(--toki-text-muted);\n}\n";
+var ui_namespaceObject = "@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');\n\n:root {\n    --toki-primary: #2563eb;\n    --toki-primary-dark: #1d4ed8;\n    --toki-accent: #facc15;\n    --toki-bg: rgba(248, 250, 252, 0.9);\n    --toki-text: #1e293b;\n    --toki-text-muted: #64748b;\n    --toki-border: rgba(255, 255, 255, 0.6);\n    --toki-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);\n    --toki-font: 'Inter', -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif;\n}\n\n/* LogBox Styles */\n#toki-logbox {\n    position: fixed;\n    bottom: 100px;\n    right: 30px;\n    width: 480px;\n    height: auto;\n    min-height: 250px;\n    max-height: 500px;\n    background: var(--toki-bg);\n    color: var(--toki-text);\n    font-family: 'Cascadia Code', Consolas, monospace;\n    font-size: 12px;\n    border: 1px solid var(--toki-border);\n    border-radius: 16px;\n    z-index: 9999;\n    display: none;\n    flex-direction: column;\n    box-shadow: var(--toki-shadow);\n    backdrop-filter: blur(20px);\n    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);\n}\n\n#toki-logbox-header {\n    padding: 12px 16px;\n    background: rgba(255, 255, 255, 0.4);\n    border-bottom: 1px solid rgba(0, 0, 0, 0.05);\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    border-top-left-radius: 16px;\n    border-top-right-radius: 16px;\n    cursor: move;\n}\n\n#toki-logbox-title {\n    font-weight: 700;\n    font-size: 13px;\n    letter-spacing: -0.01em;\n}\n\n#toki-logbox-controls span {\n    cursor: pointer;\n    margin-left: 12px;\n    color: var(--toki-text-muted);\n    font-size: 14px;\n    transition: transform 0.2s, color 0.2s;\n    display: inline-block;\n}\n\n#toki-logbox-controls span:hover {\n    color: var(--toki-primary);\n    transform: scale(1.15);\n}\n\n#toki-logbox-content {\n    flex: 1;\n    overflow-y: auto;\n    padding: 12px;\n    margin: 0;\n    list-style: none;\n}\n\n#toki-logbox-content li {\n    margin-bottom: 4px;\n    word-break: break-all;\n    padding: 4px 8px;\n    border-radius: 6px;\n    line-height: 1.4;\n    color: #f1f5f9; /* 밝은 회백색 지정으로 가독성 극대화 */\n}\n\n#toki-logbox-content li.critical {\n    color: #be123c;\n    font-weight: 700;\n    background: rgba(225, 29, 72, 0.1);\n    border-left: 3px solid #e11d48;\n}\n\n#toki-logbox-content li.error { color: #e11d48; }\n#toki-logbox-content li.warn { color: #d97706; }\n#toki-logbox-content li.success { color: #059669; font-weight: 600; }\n#toki-logbox-content li.info { color: #38bdf8; font-weight: 500; }\n\n/* Modal Styles */\n.toki-modal-overlay {\n    position: fixed;\n    top: 0;\n    left: 0;\n    width: 100%;\n    height: 100%;\n    background: rgba(15, 23, 42, 0.2);\n    backdrop-filter: blur(12px);\n    z-index: 9999;\n    display: flex;\n    justify-content: center;\n    align-items: center;\n    opacity: 0;\n    animation: tokiFadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;\n}\n\n.toki-modal {\n    width: 520px;\n    max-width: 95%;\n    background: var(--toki-bg);\n    border: 1px solid var(--toki-border);\n    border-radius: 28px;\n    box-shadow: var(--toki-shadow);\n    overflow: hidden;\n    display: flex;\n    flex-direction: column;\n    transform: translateY(30px) scale(0.95);\n    animation: tokiSlideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;\n    backdrop-filter: blur(30px);\n    color: var(--toki-text);\n    font-family: var(--toki-font);\n}\n\n.toki-modal-header {\n    padding: 24px 32px;\n    background: rgba(255, 255, 255, 0.4);\n    border-bottom: 1px solid rgba(0, 0, 0, 0.05);\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n}\n\n.toki-modal-title {\n    font-size: 24px;\n    font-weight: 800;\n    color: #0f172a;\n    display: flex;\n    align-items: center;\n    gap: 12px;\n    letter-spacing: -0.03em;\n}\n\n.toki-modal-close {\n    background: rgba(0, 0, 0, 0.05);\n    border: none;\n    color: var(--toki-text-muted);\n    width: 36px;\n    height: 36px;\n    border-radius: 50%;\n    cursor: pointer;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);\n    font-size: 20px;\n}\n\n.toki-modal-close:hover {\n    background: #ef4444;\n    color: #fff;\n    transform: rotate(90deg);\n}\n\n.toki-btn-ghost {\n    background: rgba(0, 0, 0, 0.05);\n    border: none;\n    color: var(--toki-text-muted);\n    padding: 6px 14px;\n    border-radius: 12px;\n    cursor: pointer;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    transition: all 0.2s;\n    font-size: 13px;\n    font-weight: 600;\n    gap: 6px;\n}\n\n.toki-btn-ghost:hover {\n    background: rgba(0, 0, 0, 0.08);\n    color: var(--toki-text);\n}\n\n/* Tabs */\n.toki-tabs {\n    display: flex;\n    background: rgba(255, 255, 255, 0.3);\n    padding: 8px;\n    gap: 6px;\n    border-bottom: 1px solid rgba(0, 0, 0, 0.05);\n}\n\n.toki-tab-btn {\n    flex: 1;\n    padding: 12px;\n    background: none;\n    border: none;\n    color: var(--toki-text-muted);\n    font-size: 14px;\n    font-weight: 700;\n    cursor: pointer;\n    transition: all 0.3s;\n    border-radius: 14px;\n    display: flex;\n    justify-content: center;\n    align-items: center;\n    gap: 8px;\n}\n\n.toki-tab-btn:hover {\n    color: var(--toki-text);\n    background: rgba(255, 255, 255, 0.6);\n}\n\n.toki-tab-btn.active {\n    background: #fff;\n    color: var(--toki-primary);\n    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);\n}\n\n.toki-tab-content {\n    display: none;\n    padding: 32px;\n    animation: tokiTabFadeIn 0.4s ease-out;\n}\n\n.toki-tab-content.active { display: block; }\n\n/* Components */\n.toki-section-title {\n    font-size: 11px;\n    font-weight: 800;\n    color: var(--toki-primary);\n    text-transform: uppercase;\n    letter-spacing: 0.1em;\n    margin: 24px 0 12px 4px;\n    opacity: 0.8;\n}\n\n.toki-control-group {\n    margin-bottom: 20px;\n    position: relative;\n}\n\n.toki-label {\n    display: block;\n    font-size: 13px;\n    font-weight: 700;\n    color: var(--toki-text-muted);\n    margin-bottom: 8px;\n    margin-left: 4px;\n}\n\n.toki-input, .toki-select, .toki-textarea {\n    width: 100%;\n    padding: 14px 18px;\n    background: rgba(255, 255, 255, 0.8);\n    border: 1px solid rgba(0, 0, 0, 0.08);\n    border-radius: 16px;\n    color: var(--toki-text) !important;\n    font-size: 15px;\n    font-weight: 600;\n    appearance: none;\n    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);\n    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);\n}\n\n.toki-input:hover, .toki-select:hover, .toki-textarea:hover {\n    border-color: var(--toki-primary);\n    background-color: #fff;\n    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.08);\n}\n\n.toki-input:focus, .toki-select:focus, .toki-textarea:focus {\n    outline: none;\n    border-color: var(--toki-primary);\n    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);\n    background-color: #fff;\n}\n\n.toki-textarea {\n    resize: vertical;\n    line-height: 1.5;\n}\n\n.toki-select {\n    cursor: pointer;\n    background-image: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2364748b'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E\");\n    background-repeat: no-repeat;\n    background-position: right 16px center;\n    background-size: 16px;\n}\n\n.toki-btn-action {\n    width: 100%;\n    height: 56px;\n    background: var(--toki-primary);\n    color: #fff !important;\n    border: none;\n    border-radius: 18px;\n    font-size: 16px;\n    font-weight: 700;\n    cursor: pointer;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    gap: 12px;\n    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);\n    box-shadow: 0 8px 15px rgba(37, 99, 235, 0.2);\n}\n\n.toki-btn-action:hover {\n    transform: translateY(-3px);\n    box-shadow: 0 12px 20px rgba(37, 99, 235, 0.35);\n    filter: brightness(1.05);\n}\n\n.toki-btn-secondary {\n    background: rgba(255, 255, 255, 0.8);\n    color: #475569 !important;\n    border: 1px solid rgba(0, 0, 0, 0.05);\n    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);\n}\n\n.toki-btn-secondary:hover {\n    background: #fff;\n    color: var(--toki-text) !important;\n}\n\n/* Status & Indicators */\n.toki-status-dot {\n    width: 8px;\n    height: 8px;\n    border-radius: 50%;\n    display: inline-block;\n    margin-right: 6px;\n}\n\n.toki-status-online {\n    background: #10b981;\n    box-shadow: 0 0 8px #10b981;\n}\n\n.toki-downloaded {\n    background: rgba(16, 185, 129, 0.08) !important;\n    border-left: 4px solid #10b981 !important;\n    opacity: 0.75;\n    transition: all 0.3s ease;\n}\n\n.toki-downloaded:hover {\n    opacity: 1;\n    background: rgba(16, 185, 129, 0.15) !important;\n}\n\n/* FAB */\n.toki-fab {\n    position: fixed;\n    bottom: 30px;\n    right: 30px;\n    width: 64px;\n    height: 64px;\n    background: linear-gradient(135deg, #2563eb, #0ea5e9);\n    border-radius: 20px;\n    box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.4);\n    display: flex;\n    justify-content: center;\n    align-items: center;\n    cursor: pointer;\n    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);\n    z-index: 9998;\n}\n\n.toki-fab:hover {\n    transform: translateY(-5px) rotate(5deg);\n    box-shadow: 0 20px 25px -5px rgba(37, 99, 235, 0.5);\n}\n\n.toki-fab svg {\n    width: 28px;\n    height: 28px;\n    fill: #fff;\n}\n\n/* Tree Editor */\n.toki-tree-modal {\n    width: 1100px !important;\n    height: 85vh !important;\n}\n\n.toki-tree-container {\n    display: flex;\n    flex: 1;\n    overflow: hidden;\n    gap: 24px;\n    padding: 24px;\n    background: rgba(255, 255, 255, 0.2);\n}\n\n.toki-tree-view {\n    flex: 1.5;\n    overflow-y: auto;\n    background: rgba(255, 255, 255, 0.5);\n    border-radius: 16px;\n    padding: 20px;\n    border: 1px solid rgba(0, 0, 0, 0.05);\n    font-family: monospace;\n    font-size: 13px;\n}\n\n.toki-tree-node {\n    margin-left: 20px;\n    position: relative;\n    border-left: 1px dashed rgba(0, 0, 0, 0.1);\n    padding-left: 12px;\n}\n\n.toki-tree-item {\n    display: flex;\n    align-items: center;\n    gap: 8px;\n    padding: 6px 10px;\n    border-radius: 8px;\n    transition: all 0.2s;\n}\n\n.toki-tree-item:hover {\n    background: rgba(37, 99, 235, 0.05);\n}\n\n.toki-tree-key {\n    color: #2563eb;\n    font-weight: 700;\n    cursor: pointer;\n    min-width: 90px;\n}\n\n.toki-tree-val {\n    color: #1e293b;\n    background: transparent;\n    border: none;\n    border-bottom: 1px solid transparent;\n    width: 100%;\n}\n\n.toki-tree-val:focus {\n    border-bottom-color: #2563eb;\n    outline: none;\n    background: rgba(37, 99, 235, 0.05);\n}\n\n.toki-tree-toggle {\n    cursor: pointer;\n    user-select: none;\n    width: 18px;\n    text-align: center;\n    color: #94a3b8;\n    font-weight: 700;\n}\n\n.toki-tree-toggle:hover {\n    color: var(--toki-primary);\n}\n\n.toki-tree-right-panel {\n    flex: 1;\n    display: flex;\n    flex-direction: column;\n    gap: 20px;\n    background: rgba(255, 255, 255, 0.4);\n    padding: 20px;\n    border-radius: 16px;\n}\n\n.toki-tree-json-preview {\n    flex: 1;\n    background: #0f172a;\n    color: #e2e8f0;\n    padding: 20px;\n    border-radius: 16px;\n    font-size: 12px;\n    font-family: monospace;\n    border: 1px solid rgba(255, 255, 255, 0.1);\n    resize: none;\n}\n\n.toki-btn-rule {\n    background: transparent;\n    border: 1px solid #ddd;\n    padding: 6px 12px;\n    border-radius: 8px;\n    font-size: 12px;\n    cursor: pointer;\n    transition: all 0.2s;\n}\n\n.toki-btn-rule:hover {\n    background: #f8fafc;\n    border-color: #94a3b8;\n}\n\n/* Animations */\n@keyframes tokiFadeIn {\n    from { opacity: 0; }\n    to { opacity: 1; }\n}\n\n@keyframes tokiTabFadeIn {\n    from { opacity: 0; transform: translateX(10px); }\n    to { opacity: 1; transform: translateX(0); }\n}\n\n@keyframes tokiSlideUp {\n    from { opacity: 0; transform: translateY(30px) scale(0.95); }\n    to { opacity: 1; transform: translateY(0) scale(1); }\n}\n\n/* --- Structural Layouts for Inline Replacement --- */\n\n/* Horizontal Button Row (e.g., Download buttons) */\n.toki-btn-group-row {\n    display: flex;\n    gap: 12px;\n    align-items: center;\n}\n.toki-btn-group-row .toki-btn-action {\n    height: 52px;\n    flex: 1;\n}\n.toki-btn-group-row .toki-flex-1-4 {\n    flex: 1.4;\n}\n\n/* Vertical Button Stack (e.g., Tool buttons) */\n.toki-btn-group-stack {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n}\n.toki-btn-group-stack .toki-btn-action {\n    height: 44px;\n    justify-content: flex-start;\n    padding-left: 20px;\n}\n\n/* 2-Column Form Grid */\n.toki-form-grid {\n    display: grid;\n    grid-template-columns: 1fr 1fr;\n    gap: 16px;\n}\n\n/* Utility Shortcuts */\n.toki-flex-between { display: flex; justify-content: space-between; align-items: center; }\n.toki-divider { border: 0; border-top: 1px solid rgba(0,0,0,0.05); margin: 24px 0; }\n.toki-mt-0 { margin-top: 0 !important; }\n.toki-mt-8 { margin-top: 8px !important; }\n.toki-mt-32 { margin-top: 32px !important; }\n.toki-ml-4 { margin-left: 4px !important; }\n.toki-mb-5 { margin-bottom: 5px !important; }\n.toki-mb-10 { margin-bottom: 10px !important; }\n.toki-mb-24 { margin-bottom: 24px !important; }\n.toki-flex-1 { flex: 1; }\n.toki-flex-row { display: flex; gap: 4px; align-items: center; }\n.toki-flex-row-8 { display: flex; gap: 8px; align-items: center; }\n.toki-flex-row-10 { display: flex; gap: 10px; align-items: center; }\n\n/* Text Utilities */\n.toki-text-xs { font-size: 11px; color: #94a3b8; }\n.toki-text-sm { font-size: 12px; }\n.toki-text-base { font-size: 14px; }\n.toki-text-lg { font-size: 20px; font-weight: 700; }\n.toki-text-success { color: #4ade80 !important; }\n.toki-text-danger { color: #ff5555 !important; }\n.toki-text-primary { color: var(--toki-primary) !important; }\n.toki-text-center { text-align: center; }\n.toki-line-16 { line-height: 1.6; }\n\n/* Specialized Components */\n.toki-modal-main { padding: 32px; width: 520px; max-height: 85vh; overflow-y: auto; }\n.toki-btn-gradient-green { \n    background: linear-gradient(135deg, #10b981, #059669) !important; \n    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2) !important;\n}\n.toki-btn-indigo { background: #6366f1 !important; }\n.toki-btn-lavender { background: #6a5acd !important; font-weight: bold !important; }\n.toki-btn-slate { background: rgba(0,0,0,0.02) !important; border-style: dashed !important; border-radius: 20px !important; }\n.toki-hidden { display: none !important; }\n\n/* Helper Boxes */\n.toki-helper-box-blue {\n    margin: -10px 0 20px 0; padding: 14px; \n    background: rgba(37, 99, 235, 0.05); border: 1px solid rgba(37, 99, 235, 0.1); \n    border-radius: 18px;\n}\n\n/* Captcha Overlay */\n.toki-captcha-overlay {\n    position: fixed; top: 0; left: 0; width: 100%; height: 100%;\n    background: rgba(0,0,0,0.8); z-index: 10001;\n    display: flex; flex-direction: column; align-items: center; justify-content: center;\n    color: white; font-family: var(--toki-font);\n}\n.toki-captcha-frame {\n    width: 80%; height: 60%; background: white; \n    border-radius: 20px; overflow: hidden; \n    margin-bottom: 20px; box-shadow: 0 20px 50px rgba(0,0,0,0.5);\n}\n\n/* Component: Helper Description Text */\n.toki-helper-desc { line-height: 1.5; font-weight: 500; }\n\n/* Component: Small Button (e.g., Test Native) */\n.toki-btn-sm { height: 36px !important; font-size: 12px !important; border-radius: 12px !important; }\n\n/* Component: Sync Button (height 48px) */\n.toki-btn-sync { height: 48px !important; }\n\n/* Component: Modal Header without border */\n.toki-modal-header-borderless { border: none !important; }\n\n/* Component: Code Textarea */\n.toki-textarea-code { min-height: 120px; font-family: monospace; }\n\n/* Visibility Toggles */\n.toki-visible-flex { display: flex !important; }\n.toki-visible-block { display: block !important; }\n.toki-hidden { display: none !important; }\n\n/* Status Badges & Indicators */\n.toki-badge {\n    margin-left: 5px;\n    font-size: 12px;\n    vertical-align: middle;\n}\n\n.toki-downloaded {\n    opacity: 0.6;\n    background-color: rgba(74, 222, 128, 0.05) !important;\n    transition: opacity 0.3s ease;\n}\n.toki-downloaded:hover {\n    opacity: 1;\n}\n\n.toki-tree-modal {\n    z-index: 10002 !important;\n}\n\n/* Iframe Elements */\n.toki-downloader-iframe {\n    width: 100%;\n    height: 600px;\n    opacity: 0.1;\n    pointer-events: none;\n    border: none;\n    margin-top: 40px;\n}\n\n.toki-captcha-iframe {\n    width: 100%;\n    height: 100%;\n    border: none;\n}\n\n/* Info Card & History Styles */\n.toki-info-card {\n    background: rgba(255, 255, 255, 0.4);\n    border: 1px solid rgba(0, 0, 0, 0.05);\n    border-radius: 12px;\n    padding: 12px 16px;\n    margin-bottom: 20px;\n}\n\n.toki-info-row {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    padding: 6px 0;\n}\n\n.toki-info-row:not(:last-child) {\n    border-bottom: 1px dashed rgba(0, 0, 0, 0.05);\n}\n\n.toki-info-label {\n    font-size: 13px;\n    color: var(--toki-text-muted);\n    font-weight: 500;\n}\n\n.toki-info-val {\n    font-size: 13px;\n    color: var(--toki-text);\n    font-weight: 700;\n    display: flex;\n    align-items: center;\n    gap: 6px;\n}\n\n/* --- Multi-Queue Progress Monitor Panel (v1.21.0) --- */\n#toki-logbox-progress {\n    padding: 14px 18px;\n    background: rgba(255, 255, 255, 0.25);\n    border-bottom: 1px solid rgba(0, 0, 0, 0.05);\n    backdrop-filter: blur(10px);\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n}\n\n#toki-progress-header {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n}\n\n#toki-progress-overall-text {\n    font-size: 12px;\n    font-weight: 800;\n    color: var(--toki-primary);\n    letter-spacing: -0.02em;\n    background: linear-gradient(135deg, #4f46e5, #06b6d4);\n    -webkit-background-clip: text;\n    -webkit-text-fill-color: transparent;\n}\n\n}\n\n#toki-progress-overall-controls {\n    display: flex;\n    gap: 8px;\n    align-items: center;\n}\n\n.toki-progress-btn {\n    font-size: 13px;\n    cursor: pointer;\n    transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), filter 0.2s ease, opacity 0.2s ease;\n    user-select: none;\n    opacity: 0.85;\n}\n\n.toki-progress-btn:hover {\n    transform: scale(1.25);\n    opacity: 1;\n    filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.6));\n}\n\n#toki-btn-queue-stop:hover {\n    filter: drop-shadow(0 0 6px #ef4444);\n}\n\n.toki-progress-bar-paused {\n    background: linear-gradient(90deg, #9ca3af 0%, #6b7280 50%, #4b5563 100%) !important;\n    box-shadow: 0 1px 3px rgba(107, 114, 128, 0.4) !important;\n    animation: tokiPulsePaused 2s infinite ease-in-out;\n}\n\n@keyframes tokiPulsePaused {\n    0%, 100% { opacity: 1; }\n    50% { opacity: 0.65; }\n}\n\n.toki-empty-queue-msg {\n    display: flex;\n    flex-direction: column;\n    align-items: center;\n    justify-content: center;\n    padding: 24px 16px;\n    background: rgba(255, 255, 255, 0.04);\n    border: 1px dashed rgba(0, 0, 0, 0.08);\n    border-radius: 12px;\n    text-align: center;\n    gap: 6px;\n    margin: 8px 0;\n    backdrop-filter: blur(5px);\n}\n\n.toki-empty-queue-msg span {\n    font-size: 13px;\n    font-weight: 700;\n    color: var(--toki-primary, #6366f1);\n    opacity: 0.85;\n}\n\n.toki-empty-queue-msg p {\n    font-size: 11px;\n    color: #4b5563;\n    opacity: 0.75;\n    margin: 0;\n    line-height: 1.4;\n}\n\n.toki-progress-bar-container {\n    width: 100%;\n    height: 8px;\n    background: rgba(0, 0, 0, 0.06);\n    border-radius: 999px;\n    overflow: hidden;\n    position: relative;\n    border: 1px solid rgba(255, 255, 255, 0.5);\n    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);\n}\n\n.toki-progress-bar-fill {\n    height: 100%;\n    width: 0%;\n    background: linear-gradient(90deg, #6366f1 0%, #3b82f6 50%, #06b6d4 100%);\n    border-radius: 999px;\n    transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);\n    box-shadow: 0 1px 3px rgba(99, 102, 241, 0.4);\n}\n\n#toki-progress-workers-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n    margin-top: 6px;\n    max-height: 160px;\n    overflow-y: auto;\n    padding-right: 4px;\n}\n\n/* Custom Scrollbar for Workers List */\n#toki-progress-workers-list::-webkit-scrollbar {\n    width: 4px;\n}\n#toki-progress-workers-list::-webkit-scrollbar-track {\n    background: transparent;\n}\n#toki-progress-workers-list::-webkit-scrollbar-thumb {\n    background: rgba(0, 0, 0, 0.1);\n    border-radius: 999px;\n}\n\n.toki-worker-progress-item {\n    background: rgba(255, 255, 255, 0.35);\n    border: 1px solid rgba(255, 255, 255, 0.5);\n    border-radius: 10px;\n    padding: 8px 12px;\n    display: flex;\n    flex-direction: column;\n    gap: 6px;\n    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);\n    transition: all 0.2s ease;\n}\n\n.toki-worker-progress-item:hover {\n    background: rgba(255, 255, 255, 0.55);\n    border-color: rgba(37, 99, 235, 0.15);\n    transform: translateY(-1px);\n    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.04);\n}\n\n.toki-worker-stage {\n    font-size: 11px;\n    font-weight: 700;\n    color: var(--toki-text-muted);\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n}\n\n.toki-worker-bar-container {\n    width: 100%;\n    height: 5px;\n    background: rgba(0, 0, 0, 0.04);\n    border-radius: 999px;\n    overflow: hidden;\n}\n\n.toki-worker-bar-fill {\n    height: 100%;\n    background: linear-gradient(90deg, #10b981 0%, #34d399 100%);\n    border-radius: 999px;\n    transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1);\n}\n\n/* --- 📋 Realtime Queue List & Badges (v1.21.0) --- */\n#toki-progress-queue-section {\n    margin-top: 10px;\n    border-top: 1px solid rgba(0, 0, 0, 0.06);\n    padding-top: 8px;\n    display: flex;\n    flex-direction: column;\n    gap: 6px;\n}\n\n#toki-queue-section-header {\n    font-size: 11px;\n    font-weight: 700;\n    color: var(--toki-text-muted);\n    opacity: 0.85;\n}\n\n#toki-progress-queue-list {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n    max-height: 120px;\n    overflow-y: auto;\n    padding-right: 2px;\n}\n\n#toki-progress-queue-list::-webkit-scrollbar {\n    width: 4px;\n}\n#toki-progress-queue-list::-webkit-scrollbar-track {\n    background: transparent;\n}\n#toki-progress-queue-list::-webkit-scrollbar-thumb {\n    background: rgba(0, 0, 0, 0.08);\n    border-radius: 999px;\n}\n\n.toki-queue-list-item {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    padding: 5px 8px;\n    background: rgba(255, 255, 255, 0.25);\n    border: 1px solid rgba(255, 255, 255, 0.4);\n    border-radius: 6px;\n    font-size: 11px;\n    transition: all 0.2s ease;\n}\n\n.toki-queue-list-item:hover {\n    background: rgba(255, 255, 255, 0.45);\n    transform: translateX(1px);\n}\n\n.toki-queue-item-meta {\n    display: flex;\n    align-items: center;\n    gap: 8px;\n    flex: 1;\n    min-width: 0;\n}\n\n.toki-queue-item-title {\n    color: var(--toki-text);\n    font-weight: 500;\n    white-space: nowrap;\n    overflow: hidden;\n    text-overflow: ellipsis;\n}\n\n.toki-queue-item-delete {\n    font-size: 10px;\n    cursor: pointer;\n    opacity: 0.6;\n    transition: all 0.15s ease;\n    padding: 2px;\n}\n\n.toki-queue-item-delete:hover {\n    opacity: 1;\n    transform: scale(1.2);\n}\n\n/* 세련된 HSL 상태 배지 */\n.toki-badge {\n    padding: 2px 6px;\n    border-radius: 4px;\n    font-size: 9px;\n    font-weight: 700;\n    white-space: nowrap;\n    text-transform: uppercase;\n}\n\n/* 대기 (🟡 HSL Tailored Yellow) */\n.toki-badge-pending {\n    background: hsl(45, 93%, 94%);\n    color: hsl(45, 90%, 35%);\n    border: 1px solid hsl(45, 93%, 85%);\n}\n\n/* 진행 (🟢 HSL Tailored Emerald) */\n.toki-badge-processing {\n    background: hsl(150, 84%, 93%);\n    color: hsl(150, 84%, 25%);\n    border: 1px solid hsl(150, 84%, 82%);\n}\n\n/* 완료 (🔵 HSL Tailored Sapphire) */\n.toki-badge-completed {\n    background: hsl(220, 95%, 94%);\n    color: hsl(220, 90%, 40%);\n    border: 1px solid hsl(220, 95%, 86%);\n}\n\n/* 실패 (🔴 HSL Tailored Ruby) */\n.toki-badge-failed {\n    background: hsl(0, 93%, 94%);\n    color: hsl(0, 90%, 45%);\n    border: 1px solid hsl(0, 93%, 86%);\n}\n\n/* --- FormRuleEditor: Hybrid Two-Track Parser GUI (v1.21.0) --- */\n.toki-form-editor-modal {\n    width: 1200px !important;\n    height: 90vh !important;\n    max-height: 90vh !important;\n    border-radius: 24px !important;\n}\n\n.toki-form-editor-container {\n    display: flex;\n    flex: 1;\n    overflow: hidden;\n    gap: 20px;\n    padding: 20px;\n    background: rgba(255, 255, 255, 0.15);\n}\n\n.toki-form-editor-left {\n    flex: 1.2;\n    overflow-y: auto;\n    display: flex;\n    flex-direction: column;\n    gap: 16px;\n    padding-right: 8px;\n}\n\n.toki-form-editor-left::-webkit-scrollbar {\n    width: 6px;\n}\n.toki-form-editor-left::-webkit-scrollbar-track {\n    background: transparent;\n}\n.toki-form-editor-left::-webkit-scrollbar-thumb {\n    background: rgba(0, 0, 0, 0.08);\n    border-radius: 999px;\n}\n\n.toki-form-editor-right {\n    flex: 1;\n    display: flex;\n    flex-direction: column;\n    gap: 16px;\n    background: rgba(255, 255, 255, 0.4);\n    padding: 20px;\n    border-radius: 18px;\n    border: 1px solid rgba(255, 255, 255, 0.5);\n    overflow: hidden;\n}\n\n.toki-form-card {\n    background: rgba(255, 255, 255, 0.45);\n    border: 1px solid rgba(0, 0, 0, 0.04);\n    border-radius: 16px;\n    padding: 16px 20px;\n    display: flex;\n    flex-direction: column;\n    gap: 12px;\n    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.01);\n    transition: all 0.2s ease;\n}\n\n.toki-form-card:hover {\n    background: rgba(255, 255, 255, 0.65);\n    border-color: rgba(37, 99, 235, 0.1);\n    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.02);\n}\n\n.toki-form-card-title {\n    font-size: 13px;\n    font-weight: 800;\n    color: var(--toki-primary);\n    text-transform: uppercase;\n    letter-spacing: 0.02em;\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    border-bottom: 1px solid rgba(0, 0, 0, 0.03);\n    padding-bottom: 8px;\n}\n\n.toki-form-row {\n    display: flex;\n    flex-direction: column;\n    gap: 6px;\n}\n\n.toki-form-row-header {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n}\n\n.toki-form-row-label {\n    font-size: 12px;\n    font-weight: 700;\n    color: var(--toki-text-muted);\n}\n\n.toki-input-compact {\n    padding: 10px 14px;\n    background: rgba(255, 255, 255, 0.7);\n    border: 1px solid rgba(0, 0, 0, 0.06);\n    border-radius: 10px;\n    font-size: 13px;\n    font-family: inherit;\n    transition: all 0.2s ease;\n}\n\n.toki-input-compact:focus {\n    outline: none;\n    border-color: var(--toki-primary);\n    background: #fff;\n    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);\n}\n\n.toki-badge-match {\n    font-size: 10px;\n    font-weight: 800;\n    padding: 2px 6px;\n    border-radius: 6px;\n    transition: all 0.2s ease;\n}\n\n.toki-badge-match.ok {\n    background: rgba(16, 185, 129, 0.1);\n    color: #10b981;\n}\n\n.toki-badge-match.zero {\n    background: rgba(245, 158, 11, 0.1);\n    color: #f59e0b;\n}\n\n.toki-badge-match.error {\n    background: rgba(239, 68, 68, 0.1);\n    color: #ef4444;\n}\n\n.toki-form-dropper-btn {\n    cursor: pointer;\n    font-size: 14px;\n    transition: transform 0.2s;\n    user-select: none;\n}\n.toki-form-dropper-btn:hover {\n    transform: scale(1.2);\n}\n\n/* --- 📱 Compact Responsive LogBox for Popups & Small Screens (v1.21.0 추가) --- */\n@media (max-width: 500px) {\n    #toki-logbox {\n        width: 100% !important;\n        height: 100% !important;\n        max-height: 100% !important;\n        bottom: 0 !important;\n        right: 0 !important;\n        left: 0 !important;\n        top: 0 !important;\n        border-radius: 0 !important;\n        border: none !important;\n        box-shadow: none !important;\n    }\n    /* 팝업에서는 전체 화면을 채우므로 드래그 헤더 무효화 및 모바일 친화형 축소 */\n    #toki-logbox-header {\n        cursor: default !important;\n        padding: 8px 12px !important;\n        border-top-left-radius: 0 !important;\n        border-top-right-radius: 0 !important;\n    }\n    #toki-logbox-content {\n        padding: 8px !important;\n        display: block !important; /* 팝업 상세로그 강제 개방 */\n        height: calc(100% - 35px) !important; /* 헤더를 제외한 영역 100% 점유 */\n        max-height: calc(100% - 35px) !important;\n    }\n    /* 팝업 내 불필요한 컨트롤 및 큐 진행률 카드 영역 강제 은닉 (사용자 피드백 반영) */\n    #toki-btn-audio, #toki-btn-report, #toki-logbox-progress {\n        display: none !important;\n    }\n}\n\n\n\n\n/* --- Dashboard Popup Specific Layout --- */\n#toki-dashboard-popup {\n    display: flex;\n    flex-direction: column;\n    width: 100vw;\n    height: 100vh;\n    margin: 0;\n    background: var(--toki-bg);\n    border: none;\n    border-radius: 0;\n    box-shadow: none;\n    overflow: hidden;\n}\n\n#toki-dashboard-header {\n    padding: 24px 32px;\n    background: rgba(255, 255, 255, 0.4);\n    border-bottom: 1px solid rgba(0, 0, 0, 0.05);\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n}\n\n#toki-dashboard-title {\n    font-size: 24px;\n    font-weight: 800;\n    color: #0f172a;\n    display: flex;\n    align-items: center;\n    gap: 12px;\n    letter-spacing: -0.03em;\n}\n\n#toki-dashboard-header-controls {\n    display: flex;\n    gap: 12px;\n    align-items: center;\n}\n\n#toki-dashboard-log-section {\n    padding: 16px 20px;\n    background: rgba(0, 0, 0, 0.05);\n    border-radius: 12px;\n    margin: 0 20px 20px 20px;\n    display: flex;\n    flex-direction: column;\n    height: 250px; /* 실시간 로그창 영역 높이 명시 */\n    overflow: hidden;\n}\n\n#toki-dashboard-log-section #toki-logbox-content {\n    flex: 1;\n    overflow-y: auto; /* 내부 스크롤 강제 */\n    padding: 12px;\n    margin: 0;\n    list-style: none;\n    background: rgba(0, 0, 0, 0.2); /* 로그 시인성 제고를 위한 세련된 다크 패널 */\n    border-radius: 8px;\n    border: 1px solid rgba(255, 255, 255, 0.03);\n}\n\n#toki-log-header {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    font-weight: 700;\n    margin-bottom: 12px;\n    color: var(--toki-text-muted);\n}\n\n/* --- 대시보드 커스텀 모달 레이아웃 (v1.21.6 추가) --- */\n.toki-dashboard-modal-overlay {\n    position: fixed;\n    top: 0;\n    left: 0;\n    width: 100vw;\n    height: 100vh;\n    background: rgba(15, 23, 42, 0.75);\n    backdrop-filter: blur(8px);\n    z-index: 10005;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    animation: tokiFadeIn 0.25s ease-out;\n}\n\n.toki-dashboard-modal {\n    width: 90%;\n    max-width: 680px;\n    background: var(--toki-bg, #1a1a2e);\n    border: 1px solid rgba(255, 255, 255, 0.08);\n    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);\n    border-radius: 24px;\n    display: flex;\n    flex-direction: column;\n    overflow: hidden;\n    animation: tokiSlideUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);\n    color: #e0e0e0;\n}\n\n.toki-dashboard-modal-header {\n    padding: 18px 24px;\n    border-bottom: 1px solid rgba(255, 255, 255, 0.05);\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    background: rgba(255, 255, 255, 0.02);\n}\n\n.toki-dashboard-modal-title {\n    font-size: 15px;\n    font-weight: 800;\n    color: var(--toki-primary, #6366f1);\n}\n\n.toki-dashboard-modal-close {\n    background: transparent;\n    border: none;\n    font-size: 24px;\n    font-weight: 700;\n    color: #94a3b8;\n    cursor: pointer;\n    line-height: 1;\n    transition: all 0.2s ease;\n}\n\n.toki-dashboard-modal-close:hover {\n    color: #ef4444;\n    transform: scale(1.1);\n}\n\n.toki-dashboard-modal-content {\n    padding: 20px;\n    overflow-y: auto;\n    max-height: 75vh;\n}\n\n/* 진행상황 모달 내 레이아웃 오버라이드 */\n#toki-modal-progress #toki-logbox-progress {\n    background: transparent !important;\n    border: none !important;\n    padding: 0 !important;\n    backdrop-filter: none !important;\n}\n#toki-modal-progress #toki-progress-queue-list {\n    max-height: 220px;\n}\n\n/* 로그 모달 내 레이아웃 오버라이드 */\n#toki-modal-logs #toki-dashboard-log-section {\n    margin: 0 !important;\n    padding: 0 !important;\n    background: transparent !important;\n    height: 400px !important;\n}\n#toki-modal-logs #toki-logbox-content {\n    height: 350px !important;\n    max-height: 350px !important;\n}\n\n/* 대기열 모달 최대화 시의 너비 및 리스트 세로 높이 확장 */\n.toki-dashboard-modal-overlay.toki-queue-maximized .toki-dashboard-modal {\n    max-width: 850px !important;\n}\n.toki-dashboard-modal-overlay.toki-queue-maximized #toki-progress-queue-list {\n    max-height: 480px !important;\n    height: 480px !important;\n}\n\n/* 탭 본문 영역 세로 스크롤 활성화 (v1.21.8) */\n.toki-modal-body {\n    flex: 1;\n    overflow-y: auto !important;\n    max-height: calc(100vh - 120px);\n    padding-bottom: 40px;\n}\n\n/* Custom Scrollbar for Modal Body */\n.toki-modal-body::-webkit-scrollbar {\n    width: 6px;\n}\n.toki-modal-body::-webkit-scrollbar-track {\n    background: transparent;\n}\n.toki-modal-body::-webkit-scrollbar-thumb {\n    background: rgba(0, 0, 0, 0.12);\n    border-radius: 999px;\n}\n.toki-modal-body::-webkit-scrollbar-thumb:hover {\n    background: rgba(0, 0, 0, 0.25);\n}\n";
+// EXTERNAL MODULE: ./src/core/queue.js
+var core_queue = __webpack_require__(302);
 ;// ./src/core/ui.js
 /**
  * UI Module for TokiSync
  * Handles Logging Overlay and OS Notifications
  */
+
 
 
 
@@ -4249,20 +4420,6 @@ class LogBox {
         // -- Register Tampermonkey User Menu Commands --
         if (typeof GM_registerMenuCommand !== 'undefined') {
             try {
-                GM_registerMenuCommand("🧩 파싱 규칙 편집기 (Tree Editor)", () => {
-                    this.openDashboard();
-                    setTimeout(() => {
-                        const doc = this.popupWindow?.document;
-                        if (doc) new TreeRuleEditor().show(doc);
-                    }, 300);
-                });
-                GM_registerMenuCommand("📝 간편 규칙 편집기 (Form Editor)", () => {
-                    this.openDashboard();
-                    setTimeout(() => {
-                        const doc = this.popupWindow?.document;
-                        if (doc) new FormRuleEditor().show(doc);
-                    }, 300);
-                });
                 GM_registerMenuCommand("⚡ TokiSync 통합 대시보드 열기", () => {
                     this.openDashboard();
                 });
@@ -4394,12 +4551,7 @@ class LogBox {
         const progressContainer = doc.getElementById('toki-logbox-progress');
         if (!progressContainer) return;
 
-        if (typeof window.tokiQueue === 'undefined') {
-            progressContainer.style.display = 'none';
-            return;
-        }
-
-        const queue = window.tokiQueue.getQueue();
+        const queue = (0,core_queue/* getQueue */.IS)();
         const listEl = doc.getElementById('toki-progress-workers-list');
         const queueListEl = doc.getElementById('toki-progress-queue-list');
         const queueSection = doc.getElementById('toki-progress-queue-section');
@@ -4426,14 +4578,14 @@ class LogBox {
         progressContainer.style.display = 'block';
         if (queueSection) queueSection.style.display = 'block';
 
-        const stats = window.tokiQueue.getQueueStats();
+        const stats = (0,core_queue/* getQueueStats */.zX)();
         const overallPercent = stats.total > 0 ? Math.round(((stats.completed + stats.failed) / stats.total) * 100) : 0;
 
         // 전체 진행도 갱신
         const textEl = doc.getElementById('toki-progress-overall-text');
         const barEl = doc.getElementById('toki-progress-overall-bar');
         const pauseBtn = doc.getElementById('toki-btn-queue-pause');
-        const isPaused = window.tokiQueue.getQueuePaused();
+        const isPaused = (0,core_queue/* getQueuePaused */.kZ)();
         
         if (textEl) {
             const pauseText = isPaused ? ' ⏸️ [일시 정지됨]' : '';
@@ -4519,21 +4671,6 @@ class LogBox {
                     </div>
                 `;
             }).join('');
-
-            // 이벤트 바인딩 (한 번만 적용)
-            if (!queueListEl.dataset.hasListener) {
-                queueListEl.dataset.hasListener = 'true';
-                queueListEl.addEventListener('click', (e) => {
-                    const deleteBtn = e.target.closest('.toki-queue-item-delete');
-                    if (deleteBtn) {
-                        const itemId = deleteBtn.getAttribute('data-id');
-                        if (confirm('선택한 에피소드를 대기열에서 제거하시겠습니까?')) {
-                            window.tokiQueue.removeQueueItem(itemId);
-                            this.updateProgressUI();
-                        }
-                    }
-                });
-            }
         }
     }
 
@@ -4675,6 +4812,8 @@ class MenuModal {
             <div id="toki-dashboard-header">
                 <span id="toki-dashboard-title">⚡ TokiSync 통합 대시보드</span>
                 <div id="toki-dashboard-header-controls">
+                    <button class="toki-btn-ghost" id="toki-btn-show-progress" title="수집 진행 상황 및 대기열">📊 진행 상황</button>
+                    <button class="toki-btn-ghost" id="toki-btn-show-logs" title="실시간 수집 로그 모니터">📋 로그</button>
                     <button class="toki-btn-ghost" id="toki-btn-viewer-link" title="Open Viewer">🌐 Viewer</button>
                     <button class="toki-btn-ghost" id="toki-btn-menu-close" title="Close">❌ 닫기</button>
                 </div>
@@ -4721,25 +4860,30 @@ class MenuModal {
 
                 <!-- 2. Settings Tab -->
                 <div class="toki-tab-content" id="toki-tab-settings">
-                    <div class="toki-section-title toki-mt-0">Download Settings</div>
+                    <div class="toki-section-title toki-mt-0">Cloud & Storage</div>
+                    <div class="toki-control-group">
+                        <label class="toki-label">GAS Script ID</label>
+                        <input type="text" id="toki-sel-gas-id" class="toki-input" placeholder="AKfycb...">
+                    </div>
+
+                    <div class="toki-control-group">
+                        <label class="toki-label">Google Drive Folder ID</label>
+                        <input type="text" id="toki-sel-folder-id" class="toki-input" placeholder="Folder ID">
+                    </div>
+
+                    <div class="toki-control-group">
+                        <label class="toki-label">API Key (보안)</label>
+                        <input type="password" id="toki-sel-apikey" class="toki-input" placeholder="API Key">
+                    </div>
+
+                    <div class="toki-section-title">Download Policies</div>
                     <div class="toki-control-group">
                         <label class="toki-label">저장 정책</label>
                         <select id="toki-sel-policy" class="toki-select">
-                            <option value="individual">개별 파일</option>
-                            <option value="zipOfCbzs">챕터 묶음</option>
-                            <option value="native">자동 분류</option>
-                            <option value="drive">드라이브</option>
-                        </select>
-                    </div>
-                    
-                    <div class="toki-control-group">
-                        <label class="toki-label">다운로드 속도</label>
-                        <select id="toki-sel-speed" class="toki-select">
-                            <option value="agile">빠름</option>
-                            <option value="cautious">신중</option>
-                            <option value="thorough">철저</option>
-                            <option value="slow">느림</option>
-                            <option value="very_slow">매우 느림</option>
+                            <option value="individual">개별 파일 (Individual)</option>
+                            <option value="zipOfCbzs">챕터 묶음 (ZIP of CBZs)</option>
+                            <option value="native">자동 분류 (Native)</option>
+                            <option value="drive">드라이브 업로드 (GoogleDrive)</option>
                         </select>
                     </div>
 
@@ -4752,7 +4896,48 @@ class MenuModal {
                         </button>
                     </div>
 
-                    <div class="toki-section-title">Novel Settings</div>
+                    <div class="toki-control-group">
+                        <label class="toki-label">로컬 파일명 템플릿</label>
+                        <input type="text" id="toki-sel-nametemplate" class="toki-input" placeholder="{number} - {title}">
+                        <div class="toki-hint" style="font-size: 11px; color: #888; margin-top: 4px;">
+                            로컬 저장 시 파일명 포맷입니다. 
+                            (치환자: <b>{number}</b>=패딩번호, <b>{rawNumber}</b>=원본번호, <b>{series}</b>=작품명, <b>{title}</b>=회차제목)<br>
+                            ※ 구글 드라이브 업로드 시에는 기존 포맷으로 고정됩니다.
+                        </div>
+                    </div>
+
+                    <div class="toki-control-group">
+                        <label class="toki-label">로컬 화수 패딩 자릿수</label>
+                        <select id="toki-sel-localpadding" class="toki-select">
+                            <option value="0">패딩 없음 (1, 2, 10)</option>
+                            <option value="2">2자리 패딩 (01, 02, 10)</option>
+                            <option value="3">3자리 패딩 (001, 002, 010)</option>
+                            <option value="4">4자리 패딩 (0001, 0002, 0010)</option>
+                        </select>
+                    </div>
+
+                    <div class="toki-control-group">
+                        <label class="toki-label">다운로드 속도</label>
+                        <select id="toki-sel-speed" class="toki-select">
+                            <option value="agile">빠름 (1-3초)</option>
+                            <option value="cautious">신중 (2-5초)</option>
+                            <option value="thorough">철저 (3-8초)</option>
+                            <option value="slow">느림 (5-15초)</option>
+                            <option value="very_slow">매우 느림 (10-30초)</option>
+                        </select>
+                    </div>
+
+                    <div class="toki-control-group">
+                        <label class="toki-label">이미지 스캔 속도 배율
+                            <span id="toki-scan-speed-val" style="font-weight: bold; color: var(--toki-primary, #6366f1);">1.0×</span>
+                        </label>
+                        <input type="range" id="toki-sel-scanspeed" min="0.5" max="5.0" step="0.5" value="1.0" class="toki-range" style="width: 100%;">
+                        <div class="toki-hint" style="font-size: 11px; color: #888; margin-top: 4px;">
+                            0.5×(빠름/불안정) ─ 1.0×(기본) ─ 3.0×(안정) ─ 5.0×(확실)
+                        </div>
+                    </div>
+
+                    <div class="toki-section-title">Format & Rules</div>
                     <div class="toki-form-grid">
                         <div class="toki-control-group">
                             <label class="toki-label">소설 포맷</label>
@@ -4762,27 +4947,39 @@ class MenuModal {
                             </select>
                         </div>
                         <div class="toki-control-group">
-                            <label class="toki-label">Smart Skip</label>
-                            <select id="toki-sel-smartskip" class="toki-select">
-                                <option value="90">90% (민감)</option>
-                                <option value="70">70% (보통)</option>
-                                <option value="50">50% (기본)</option>
+                            <label class="toki-label">소설 패키징</label>
+                            <select id="toki-sel-novel-mode" class="toki-select">
+                                <option value="perChapter">개별 회차</option>
+                                <option value="singleVolume">범위 합본</option>
                             </select>
                         </div>
                     </div>
 
                     <div class="toki-control-group">
-                        <label class="toki-label">소설 패키징</label>
-                        <select id="toki-sel-novel-mode" class="toki-select">
-                            <option value="perChapter">회차별 개별 저장</option>
-                            <option value="singleVolume">범위 합본 저장</option>
+                        <label class="toki-label">Smart Skip 민감도</label>
+                        <select id="toki-sel-smartskip" class="toki-select">
+                            <option value="90">90% (매우 민감)</option>
+                            <option value="80">80% (민감)</option>
+                            <option value="70">70% (보통)</option>
+                            <option value="50">50% (기본)</option>
                         </select>
                     </div>
 
-                    <div class="toki-section-title">Configuration</div>
-                    <button class="toki-btn-action toki-btn-secondary toki-btn-slate" id="toki-btn-advanced">
-                        🛠️ 상세 주소 및 API 키 설정 (Advanced)
-                    </button>
+                    <div class="toki-control-group">
+                        <label class="toki-label">원격 파싱 룰 URL (JSON)</label>
+                        <input type="text" id="toki-sel-remote-rule" class="toki-input" placeholder="https://example.com/rules.json">
+                    </div>
+
+                    <div class="toki-control-group">
+                        <label class="toki-label">커스텀 파싱 룰 (JSON Array)</label>
+                        <textarea id="toki-sel-custom-rule" class="toki-textarea toki-textarea-code" placeholder="[{...}]" style="min-height: 100px;"></textarea>
+                    </div>
+
+                    <div class="toki-control-group toki-mt-24 toki-mb-24">
+                        <button class="toki-btn-action toki-btn-gradient-green" id="toki-btn-save-settings" style="height: 48px;">
+                            <span>💾 설정 저장하기</span>
+                        </button>
+                    </div>
                 </div>
 
                 <!-- 3. History Tab -->
@@ -4803,7 +5000,7 @@ class MenuModal {
                         </button>
                     </div>
                     <p class="toki-text-xs toki-text-center toki-line-16">
-                        구글 드라이브의 데이터를 기반으로 목록에 완료 표시(✅)를 업데이트합니다.
+                        구글 드라이브와의 연결을 확인하고 동기화 이력을 체크합니다.
                     </p>
                 </div>
 
@@ -4837,44 +5034,62 @@ class MenuModal {
                     </div>
                 </div>
             </div>
+        </div>
 
-            <hr class="toki-divider">
-
-            <!-- 📊 실시간 진행 상황 및 큐 모니터 (상시 고정) -->
-            <div id="toki-logbox-progress" style="display: block;">
-                <div id="toki-progress-header">
-                    <span id="toki-progress-overall-text">진행률: 0% (0 / 0)</span>
-                    <div id="toki-progress-overall-controls">
-                        <span id="toki-btn-queue-clear" title="완료/실패 큐 정리" class="toki-cursor-pointer toki-progress-btn">🧹</span>
-                        <span id="toki-btn-queue-pause" title="일시 정지" class="toki-cursor-pointer toki-progress-btn">⏸️</span>
-                        <span id="toki-btn-queue-stop" title="수집 중단" class="toki-cursor-pointer toki-progress-btn">⏹️</span>
-                    </div>
+        <!-- 📊 수집 진행 상황 및 대기열 모달 -->
+        <div id="toki-modal-progress" class="toki-dashboard-modal-overlay" style="display: none;">
+            <div class="toki-dashboard-modal">
+                <div class="toki-dashboard-modal-header">
+                    <span class="toki-dashboard-modal-title">📊 수집 진행 상황 & 대기열</span>
+                    <button class="toki-dashboard-modal-close" id="toki-btn-modal-progress-close" title="닫기">&times;</button>
                 </div>
-                <div class="toki-progress-bar-container">
-                    <div id="toki-progress-overall-bar" class="toki-progress-overall-bar-fill"></div>
-                </div>
-                <div id="toki-progress-workers-list">
-                    <!-- 활성 팝업(Worker) 동적 렌더링 -->
-                </div>
-                <div id="toki-progress-queue-section" style="display: none;">
-                    <div id="toki-queue-section-header">
-                        <span>📋 수집 대기열 목록</span>
-                    </div>
-                    <div id="toki-progress-queue-list">
-                        <!-- 대기열 목록 동적 렌더링 -->
+                <div class="toki-dashboard-modal-content">
+                    <div id="toki-logbox-progress" style="display: block;">
+                        <div id="toki-progress-header">
+                            <span id="toki-progress-overall-text">진행률: 0% (0 / 0)</span>
+                            <div id="toki-progress-overall-controls">
+                                <span id="toki-btn-queue-expand" title="대기열 크게 보기" class="toki-cursor-pointer toki-progress-btn">↕️</span>
+                                <span id="toki-btn-queue-clear" title="완료/실패 큐 정리" class="toki-cursor-pointer toki-progress-btn">🧹</span>
+                                <span id="toki-btn-queue-reset" title="대기열 전체 삭제 (초기화)" class="toki-cursor-pointer toki-progress-btn">🗑️</span>
+                                <span id="toki-btn-queue-pause" title="일시 정지" class="toki-cursor-pointer toki-progress-btn">⏸️</span>
+                                <span id="toki-btn-queue-stop" title="수집 중단" class="toki-cursor-pointer toki-progress-btn">⏹️</span>
+                            </div>
+                        </div>
+                        <div class="toki-progress-bar-container">
+                            <div id="toki-progress-overall-bar" class="toki-progress-overall-bar-fill"></div>
+                        </div>
+                        <div id="toki-progress-workers-list">
+                            <!-- 활성 팝업(Worker) 동적 렌더링 -->
+                        </div>
+                        <div id="toki-progress-queue-section" style="display: none;">
+                            <div id="toki-queue-section-header">
+                                <span>📋 수집 대기열 목록</span>
+                            </div>
+                            <div id="toki-progress-queue-list">
+                                <!-- 대기열 목록 동적 렌더링 -->
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
+        </div>
 
-            <hr class="toki-divider">
-
-            <!-- 📝 실시간 로그 박스 모니터 (상시 고정) -->
-            <div id="toki-dashboard-log-section">
-                <div id="toki-log-header">
-                    <span>📋 실시간 수집 로그 모니터</span>
-                    <span id="toki-btn-log-clear" title="Clear Logs" class="toki-cursor-pointer" style="font-size: 12px; color: var(--toki-color-warning, #e6a23c); cursor: pointer;">🚫 비우기</span>
+        <!-- 📋 실시간 로그 모달 -->
+        <div id="toki-modal-logs" class="toki-dashboard-modal-overlay" style="display: none;">
+            <div class="toki-dashboard-modal">
+                <div class="toki-dashboard-modal-header">
+                    <span class="toki-dashboard-modal-title">📋 실시간 수집 로그 모니터</span>
+                    <button class="toki-dashboard-modal-close" id="toki-btn-modal-logs-close" title="닫기">&times;</button>
                 </div>
-                <ul id="toki-logbox-content"></ul>
+                <div class="toki-dashboard-modal-content">
+                    <div id="toki-dashboard-log-section" style="display: flex;">
+                        <div id="toki-log-header">
+                            <span>📋 실시간 수집 로그 모니터</span>
+                            <span id="toki-btn-log-clear" title="Clear Logs" class="toki-cursor-pointer" style="font-size: 12px; color: var(--toki-color-warning, #e6a23c); cursor: pointer;">🚫 비우기</span>
+                        </div>
+                        <ul id="toki-logbox-content"></ul>
+                    </div>
+                </div>
             </div>
         </div>
         `;
@@ -4945,15 +5160,42 @@ class MenuModal {
         }
 
         // 4. Settings Tab Events
+        const selGasId = doc.getElementById('toki-sel-gas-id');
+        const selFolderId = doc.getElementById('toki-sel-folder-id');
+        const selApiKey = doc.getElementById('toki-sel-apikey');
         const selPolicy = doc.getElementById('toki-sel-policy');
+        const selNameTemplate = doc.getElementById('toki-sel-nametemplate');
+        const selLocalPadding = doc.getElementById('toki-sel-localpadding');
         const selSpeed = doc.getElementById('toki-sel-speed');
+        const selScanSpeed = doc.getElementById('toki-sel-scanspeed');
+        const selNovelFormat = doc.getElementById('toki-sel-novel-format');
         const selNovelTerm = doc.getElementById('toki-sel-novel-mode');
+        const selSmartSkip = doc.getElementById('toki-sel-smartskip');
+        const selRemoteRule = doc.getElementById('toki-sel-remote-rule');
+        const selCustomRule = doc.getElementById('toki-sel-custom-rule');
 
         if (this.handlers.getConfig) {
             const cfg = this.handlers.getConfig();
-            if (cfg.policy && selPolicy) selPolicy.value = cfg.policy;
-            if (cfg.sleepMode && selSpeed) selSpeed.value = cfg.sleepMode;
-            if (cfg.novelMode && selNovelTerm) selNovelTerm.value = cfg.novelMode;
+            if (selGasId) selGasId.value = cfg.gasId || '';
+            if (selFolderId) selFolderId.value = cfg.folderId || '';
+            if (selApiKey) selApiKey.value = cfg.apiKey || '';
+            if (selPolicy) {
+                selPolicy.value = cfg.policy || 'individual';
+                this.updateNativeHelper(doc, selPolicy.value);
+            }
+            if (selNameTemplate) selNameTemplate.value = cfg.localNameTemplate || '';
+            if (selLocalPadding) selLocalPadding.value = cfg.localEpisodePadding !== undefined ? String(cfg.localEpisodePadding) : '4';
+            if (selSpeed) selSpeed.value = cfg.sleepMode || 'agile';
+            if (selScanSpeed) {
+                selScanSpeed.value = cfg.scanSpeed !== undefined ? String(cfg.scanSpeed) : '1.0';
+                const valSpan = doc.getElementById('toki-scan-speed-val');
+                if (valSpan) valSpan.innerText = `${parseFloat(selScanSpeed.value).toFixed(1)}×`;
+            }
+            if (selNovelFormat) selNovelFormat.value = cfg.novelFormat || 'epub';
+            if (selNovelTerm) selNovelTerm.value = cfg.novelMode || 'perChapter';
+            if (selSmartSkip) selSmartSkip.value = cfg.smartSkipRatio !== undefined ? String(cfg.smartSkipRatio) : '50';
+            if (selRemoteRule) selRemoteRule.value = cfg.remoteRuleUrl || '';
+            if (selCustomRule) selCustomRule.value = cfg.customRules || '';
         }
 
         if (selPolicy) {
@@ -4987,23 +5229,75 @@ class MenuModal {
             };
         }
 
-        if (selSpeed) {
-            selSpeed.onchange = () => {
-                if (this.handlers.setConfig) this.handlers.setConfig('TOKI_SLEEP_MODE', selSpeed.value);
-            };
-        }
+        // 9. Queue List Item & Modal Controls Event Delegation (우주 무결 안전 장치)
+        const progressModalOverlay = doc.getElementById('toki-modal-progress');
+        if (progressModalOverlay) {
+            progressModalOverlay.addEventListener('click', (e) => {
+                // 9-1. 개별 삭제 ❌
+                const deleteBtn = e.target.closest('.toki-queue-item-delete');
+                if (deleteBtn) {
+                    const itemId = deleteBtn.getAttribute('data-id');
+                    if (popupWindow.confirm('선택한 에피소드를 대기열에서 제거하시겠습니까?')) {
+                        (0,core_queue/* removeQueueItem */.d$)(itemId);
+                        LogBox.getInstance().updateProgressUI();
+                        (0,core_queue/* runSchedulerOnce */.gi)();
+                    }
+                    return;
+                }
 
-        if (selNovelTerm) {
-            selNovelTerm.onchange = () => {
-                if (this.handlers.setConfig) this.handlers.setConfig('TOKI_NOVEL_MODE', selNovelTerm.value);
-            };
-        }
+                // 9-2. 대기열 전체 삭제 (초기화) 🗑️
+                const resetBtn = e.target.closest('#toki-btn-queue-reset');
+                if (resetBtn) {
+                    if (popupWindow.confirm('🗑️ 대기열의 모든 에피소드를 즉시 완전히 삭제하시겠습니까?\n(진행 중인 작업도 모두 강제 중단됩니다)')) {
+                        (0,core_queue/* stopAllWorkers */.HO)();
+                        (0,core_queue/* clearQueue */.lg)();
+                        LogBox.getInstance().updateProgressUI();
+                    }
+                    return;
+                }
 
-        const advancedBtn = doc.getElementById('toki-btn-advanced');
-        if (advancedBtn) {
-            advancedBtn.onclick = () => {
-                if (this.handlers.openSettings) this.handlers.openSettings(doc);
-            };
+                // 9-3. 완료/실패 정리 🧹
+                const clearBtn = e.target.closest('#toki-btn-queue-clear');
+                if (clearBtn) {
+                    if (popupWindow.confirm('🧹 완료/실패 항목을 정리하시겠습니까?')) {
+                        (0,core_queue/* removeCompletedAndFailedItems */.US)();
+                        LogBox.getInstance().updateProgressUI();
+                        (0,core_queue/* runSchedulerOnce */.gi)();
+                    }
+                    return;
+                }
+
+                // 9-4. 일시 정지 ⏸️
+                const pauseBtn = e.target.closest('#toki-btn-queue-pause');
+                if (pauseBtn) {
+                    const isPaused = (0,core_queue/* getQueuePaused */.kZ)();
+                    (0,core_queue/* setQueuePaused */.EB)(!isPaused);
+                    LogBox.getInstance().updateProgressUI();
+                    if (isPaused) {
+                        (0,core_queue/* runSchedulerOnce */.gi)();
+                    }
+                    return;
+                }
+
+                // 9-5. 수집 중단 ⏹️
+                const stopBtn = e.target.closest('#toki-btn-queue-stop');
+                if (stopBtn) {
+                    if (popupWindow.confirm('⚠️ 모든 배치 작업을 중단하시겠습니까?')) {
+                        (0,core_queue/* stopAllWorkers */.HO)();
+                        LogBox.getInstance().updateProgressUI();
+                    }
+                    return;
+                }
+
+                // 9-6. 크게 보기 ↕️
+                const expandBtn = e.target.closest('#toki-btn-queue-expand');
+                if (expandBtn) {
+                    const isMaximized = progressModalOverlay.classList.toggle('toki-queue-maximized');
+                    expandBtn.textContent = isMaximized ? '🔽' : '↕️';
+                    expandBtn.title = isMaximized ? '대기열 원래대로 보기' : '대기열 크게 보기';
+                    return;
+                }
+            });
         }
 
         // 5. History Tab Events
@@ -5054,41 +5348,52 @@ class MenuModal {
             };
         }
 
-        // 7. Queue Control Events
-        const queueClearBtn = doc.getElementById('toki-btn-queue-clear');
-        if (queueClearBtn) {
-            queueClearBtn.onclick = () => {
-                if (typeof window.tokiQueue !== 'undefined') {
-                    if (confirm('🧹 완료/실패 항목을 정리하시겠습니까?')) {
-                        window.tokiQueue.removeCompletedAndFailedItems();
-                        LogBox.getInstance().updateProgressUI();
-                    }
+        // 7. Dashboard Modal Toggle Events
+        const showProgressBtn = doc.getElementById('toki-btn-show-progress');
+        const progressModal = doc.getElementById('toki-modal-progress');
+        const closeProgressBtn = doc.getElementById('toki-btn-modal-progress-close');
+        
+        if (showProgressBtn && progressModal) {
+            showProgressBtn.onclick = () => {
+                progressModal.style.display = 'flex';
+            };
+        }
+        if (closeProgressBtn && progressModal) {
+            closeProgressBtn.onclick = () => {
+                progressModal.style.display = 'none';
+            };
+        }
+        if (progressModal) {
+            progressModal.onclick = (e) => {
+                if (e.target === progressModal) {
+                    progressModal.style.display = 'none';
                 }
             };
         }
 
-        const queuePauseBtn = doc.getElementById('toki-btn-queue-pause');
-        if (queuePauseBtn) {
-            queuePauseBtn.onclick = () => {
-                if (typeof window.tokiQueue !== 'undefined') {
-                    const isPaused = window.tokiQueue.getQueuePaused();
-                    window.tokiQueue.setQueuePaused(!isPaused);
-                    LogBox.getInstance().updateProgressUI();
+        const showLogsBtn = doc.getElementById('toki-btn-show-logs');
+        const logsModal = doc.getElementById('toki-modal-logs');
+        const closeLogsBtn = doc.getElementById('toki-btn-modal-logs-close');
+
+        if (showLogsBtn && logsModal) {
+            showLogsBtn.onclick = () => {
+                logsModal.style.display = 'flex';
+            };
+        }
+        if (closeLogsBtn && logsModal) {
+            closeLogsBtn.onclick = () => {
+                logsModal.style.display = 'none';
+            };
+        }
+        if (logsModal) {
+            logsModal.onclick = (e) => {
+                if (e.target === logsModal) {
+                    logsModal.style.display = 'none';
                 }
             };
         }
 
-        const queueStopBtn = doc.getElementById('toki-btn-queue-stop');
-        if (queueStopBtn) {
-            queueStopBtn.onclick = () => {
-                if (typeof window.tokiQueue !== 'undefined') {
-                    if (confirm('⚠️ 모든 배치 작업을 중단하시겠습니까?')) {
-                        window.tokiQueue.stopAllWorkers();
-                        LogBox.getInstance().updateProgressUI();
-                    }
-                }
-            };
-        }
+
     }
 
     show() {
@@ -5127,53 +5432,29 @@ class MenuModal {
  * @param {string[]} historyList Array of episode IDs (e.g. ["0001", "0002"])
  */
 async function markDownloadedItems(historyList) {
-    if (!historyList || historyList.length === 0) return;
+    // [v1.21.7] 현 시점에서 필요하지 않은 회차 목록 완료 체크 표시(마킹) 렌더링 기능을 전면 제외하여 리소스 최적화
+    return;
 
     // Use Set for fast lookup
-    const historySet = new Set(historyList.map(id => id.toString())); // Ensure string comparison
+    // removed by dead control flow
+ // Ensure string comparison
 
-    const parser = await ParserFactory/* ParserFactory */.O.getParser();
-    if (!parser) {
-        console.warn('[UI] 파서를 찾을 수 없어 다운로드 표시를 생략합니다.');
-        return;
-    }
+    // removed by dead control flow
 
-    const items = await parser.getListItems();
-    let markedCount = 0;
+    // removed by dead control flow
 
-    items.forEach(li => {
-        try {
-            const item = parser.parseListItem(li);
-            if (!item) return; // Skip if parse failed
-            
-            const { num, element } = item;
 
-            if (num) {
-                // Normalize: '0001' -> '1', '1' -> '1' for comparison
-                const normalizedNum = parseInt(num).toString();
-                
-                // Check if ANY items in history set matches this number
-                let isDownloaded = historySet.has(num) || historySet.has(normalizedNum);
-                
-                // Try left-pad match
-                if(!isDownloaded && normalizedNum.length < 4) {
-                    const padded = normalizedNum.padStart(4, '0');
-                    isDownloaded = historySet.has(padded);
-                }
+    // removed by dead control flow
 
-                if (isDownloaded) {
-                    // Visual Indicator (v1.9.1 Class-based)
-                    element.classList.add('toki-downloaded'); 
-                    markedCount++;
-                }
-            }
-        } catch (e) {
-            console.warn('[UI] 특정 항목(li) 마킹 중 오류 발생 (건너뜀):', e);
-        }
-    });
+    // removed by dead control flow
+
+
+    // removed by dead control flow
+
 
     
-    console.log(`[UI] ${markedCount}개 항목에 다운로드 완료 표시 적용.`);
+    // removed by dead control flow
+
 }
 
 /**
@@ -6739,17 +7020,20 @@ async function processItem(item, builder, siteInfo, iframe, parser, seriesTitle 
                 destination: destination,
                 novelFormat: config.novelFormat || 'epub',
                 matchedRule: parser.rule,
-                protocolDomain: parser.protocolDomain
+                protocolDomain: parser.protocolDomain,
+                scanSpeedMultiplier: config.scanSpeed,
+                localNameTemplate: config.localNameTemplate,
+                localEpisodePadding: config.localEpisodePadding
             });
 
             if (result === true) {
-                logger.log(`✅ [자립형 워커] 소설 수집 및 드라이브/로컬 저장 성공: ${item.title}`, 'Downloader');
+                logger.log(`... [자립형 워커] 소설 수집 및 드라이브/로컬 저장 성공: ${item.title}`, 'Downloader');
                 await (0,utils/* sleep */.yy)(policy.min, policy.max);
                 return true; // Self-contained completed
             } else if (typeof result === 'string') {
                 // Plan C Fallback (API Decryption) - runs locally in parent
                 builder.addChapter(item.title, result);
-                logger.log(`✅ [Plan C API 폴백] 추출 성공: ${item.title}`, 'Downloader');
+                logger.log(`... [Plan C API 폴백] 추출 성공: ${item.title}`, 'Downloader');
                 await (0,utils/* sleep */.yy)(policy.min, policy.max);
                 return false; // Requires parent to save
             } else {
@@ -6769,7 +7053,10 @@ async function processItem(item, builder, siteInfo, iframe, parser, seriesTitle 
                 folderId: item.folderId || config.folderId || '',
                 destination: destination,
                 matchedRule: parser.rule,
-                protocolDomain: parser.protocolDomain
+                protocolDomain: parser.protocolDomain,
+                scanSpeedMultiplier: config.scanSpeed,
+                localNameTemplate: config.localNameTemplate,
+                localEpisodePadding: config.localEpisodePadding
             });
 
             if (success) {
@@ -7341,8 +7628,24 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                 }
                 */
 
-                // Final Filename: "0001 - Title"
-                const fullFilename = `${item.num} - ${chapterTitle}`;
+                // Final Filename: Dynamic based on Template or Drive fallback
+                let fullFilename;
+                if (destination !== 'drive') {
+                    const paddingVal = parseInt(config.localEpisodePadding, 10);
+                    const paddedNum = paddingVal > 0 
+                        ? (item.num || '').toString().padStart(paddingVal, '0') 
+                        : (item.num || '').toString();
+
+                    const template = config.localNameTemplate || "{number} - {title}";
+                    fullFilename = template
+                        .replace(/{number}/g, paddedNum)
+                        .replace(/{rawNumber}/g, (item.num || '').toString())
+                        .replace(/{series}/g, seriesTitle || rootFolder || '')
+                        .replace(/{title}/g, chapterTitle || '');
+                } else {
+                    const paddedNum = (item.num || '').toString().padStart(4, '0');
+                    fullFilename = `${paddedNum} - ${chapterTitle}`;
+                }
 
                 // [v1.6.0] Kavita Metadata Insertion
                 const innerZip = await currentBuilder.build({ 
@@ -7783,17 +8086,7 @@ async function main() {
     // -- 1. GM Menus (Must be registered early to prevent deadlocks) --
     if (typeof GM_registerMenuCommand !== 'undefined') {
         GM_registerMenuCommand('⚙️ 설정 (Settings)', () => (0,core_config/* showConfigModal */.Vh)());
-        GM_registerMenuCommand('🧩 파싱 규칙 관리', () => {
-            const editor = new ui/* TreeRuleEditor */.AC();
-            editor.show();
-        });
-        GM_registerMenuCommand('📜 로그창 토글 (Log)', () => logger.toggle());
         GM_registerMenuCommand('🌐 Viewer 열기', openViewer);
-        GM_registerMenuCommand('📥 전체 다운로드', () => {
-            const config = (0,core_config/* getConfig */.zj)();
-            tokiDownload(undefined, config.policy);
-        });
-        GM_registerMenuCommand('📂 파일명 표준화 (Migration)', runFilenameMigration);
     }
 
     // -- 2. Pre-detection & Core States --
@@ -8141,6 +8434,8 @@ function initWorkerExtractor() {
     // Register listener for commands from parent
     const cleanupIpc = (0,ipc_broker/* registerIpcListener */.Q_)(async (msg) => {
         if (msg.type === 'START_EXTRACTION') {
+            const { queueId } = msg.payload;
+
             // CF Challenge Check
             const isCloudflare = document.title.includes('Just a moment') ||
                                  document.getElementById('cf-challenge-running') ||
@@ -8149,7 +8444,7 @@ function initWorkerExtractor() {
             
             if (isCloudflare) {
                 console.warn("⚠️ [TokiSync:Worker] 클라우드플레어 보안 챌린지 감지 - 대기 모드 진입");
-                (0,ipc_broker/* sendToParent */.Ac)('CAPTCHA_DETECTED');
+                (0,ipc_broker/* sendToParent */.Ac)('CAPTCHA_DETECTED', { queueId });
                 return;
             }
 
@@ -8163,7 +8458,6 @@ function initWorkerExtractor() {
             }
 
             const { 
-                queueId, 
                 targetType, 
                 seriesTitle, 
                 rootFolder, // Normalized parent-side root folder name ([ID] Title)
@@ -8173,7 +8467,10 @@ function initWorkerExtractor() {
                 destination, 
                 novelFormat, 
                 matchedRule,
-                protocolDomain
+                protocolDomain,
+                scanSpeedMultiplier = 1.0,
+                localNameTemplate = "{number} - {title}",
+                localEpisodePadding = "4"
             } = msg.payload;
 
             console.log(`🚀 [TokiSync:Worker] 동작 지시문 수신 (ID: ${queueId}, 유형: ${targetType})`);
@@ -8188,9 +8485,24 @@ function initWorkerExtractor() {
                 const configNovelFormat = novelFormat || 'epub';
                 const extension = (targetType === 'novel') ? configNovelFormat : 'cbz';
                 
-                // Padded filename logic ("0001 - Title")
-                const paddedNum = (episodeNum || '').toString().padStart(4, '0');
-                const fullFilename = `${paddedNum} - ${episodeTitle}`;
+                // Final Filename: Dynamic based on Template or Drive fallback
+                let fullFilename;
+                if (destination !== 'drive') {
+                    const paddingVal = parseInt(localEpisodePadding, 10);
+                    const paddedNum = paddingVal > 0 
+                        ? (episodeNum || '').toString().padStart(paddingVal, '0') 
+                        : (episodeNum || '').toString();
+
+                    const template = localNameTemplate || "{number} - {title}";
+                    fullFilename = template
+                        .replace(/{number}/g, paddedNum)
+                        .replace(/{rawNumber}/g, (episodeNum || '').toString())
+                        .replace(/{series}/g, seriesTitle || rootFolder || '')
+                        .replace(/{title}/g, episodeTitle || '');
+                } else {
+                    const paddedNum = (episodeNum || '').toString().padStart(4, '0');
+                    fullFilename = `${paddedNum} - ${episodeTitle}`;
+                }
 
                 // --- 1. SOSEL EXTRACTION ---
                 if (targetType === 'novel') {
@@ -8263,7 +8575,7 @@ function initWorkerExtractor() {
                     reportProgress(queueId, 20, queue/* WORKER_STAGE */.WB.DOM_READY);
 
                     // Wait for comic content inside DOM
-                    const contentDoc = await (0,utils/* waitForContent */.UF)(window, 10000, viewerCfg);
+                    const contentDoc = await (0,utils/* waitForContent */.UF)(window, Math.round(10000 * scanSpeedMultiplier), viewerCfg);
                     if (!contentDoc) {
                         console.warn("[TokiSync:Worker] 10초 내 콘텐츠 렌더링 미감지. 갈무리 강행.");
                     }
@@ -8276,7 +8588,7 @@ function initWorkerExtractor() {
                     reportProgress(queueId, 40, queue/* WORKER_STAGE */.WB.SCROLLING);
 
                     // Physical scroll down
-                    await (0,utils/* scrollToLoad */.Vs)(document, 25000, viewerCfg);
+                    await (0,utils/* scrollToLoad */.Vs)(document, 25000, viewerCfg, scanSpeedMultiplier);
 
                     // Downloader helper with concurrency 5
                     const runImageDownloads = async (imageUrls) => {
@@ -8338,7 +8650,7 @@ function initWorkerExtractor() {
                         reportProgress(queueId, 35, queue/* WORKER_STAGE */.WB.SCROLLING);
                         await (0,utils/* sleep */.yy)(2000);
                         
-                        await (0,utils/* scrollToLoad */.Vs)(document, 15000, viewerCfg);
+                        await (0,utils/* scrollToLoad */.Vs)(document, 15000, viewerCfg, scanSpeedMultiplier);
                         
                         finalImages = parser.getImageList(document);
                         console.log(`🎯 [Deep Fallback] 2차 이미지 주소 ${finalImages.length}개 재추출 완료.`);
