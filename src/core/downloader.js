@@ -7,6 +7,7 @@ import { CbzBuilder } from './cbz.js';
 import { TxtBuilder } from './txt.js';
 import { LogBox, Notifier } from './ui.js';
 import { getConfig, isConfigValid } from './config.js';
+import { EventBus, EVT } from './EventBus.js';
 import { startSilentAudio, stopSilentAudio } from './anti_sleep.js';
 import { fetchHistory, refreshCacheAfterUpload, getBooksByCacheId, initUpdateUploadViaGASRelay, getMergeIndexFragment } from './gas.js';
 import { fetchHistoryDirect, checkSingleHistoryDirect, getOAuthToken, getOrCreateFolder } from './network.js';
@@ -22,7 +23,7 @@ const SLEEP_POLICIES = {
     very_slow: { min: 10000, max: 30000 } // 매우 느림 (10-30초)
 };
 
-export async function processItem(item, builder, siteInfo, iframe, parser, seriesTitle = "", targetDoc = null, rootFolder = "") {
+export async function processItem(item, builder, siteInfo, iframe, parser, seriesTitle = "", targetDoc = null, rootFolder = "", destination = "local") {
     const { category } = siteInfo;
     const isNovel = (category === 'Novel' || category === 'novel');
     const viewerCfg = parser.rule.viewer || {};
@@ -32,7 +33,6 @@ export async function processItem(item, builder, siteInfo, iframe, parser, serie
     let policy = SLEEP_POLICIES[config.sleepMode] || SLEEP_POLICIES.agile;
 
     const id = getQueueItemId(seriesTitle, item.num ? item.num.toString() : '');
-    const destination = (config.policy === 'native') ? 'native' : (config.gasUrl ? 'drive' : 'local');
     
     // 상태를 'processing'으로 올려 즉시 실시간 수집 연동 시작 (단일/로컬 워커 진행률 연동용)
     updateQueueItem(id, { status: 'processing', stage: WORKER_STAGE.INIT });
@@ -55,17 +55,20 @@ export async function processItem(item, builder, siteInfo, iframe, parser, serie
                 destination: destination,
                 novelFormat: config.novelFormat || 'epub',
                 matchedRule: parser.rule,
-                protocolDomain: parser.protocolDomain
+                protocolDomain: parser.protocolDomain,
+                scanSpeedMultiplier: config.scanSpeed / 750,
+                localNameTemplate: config.localNameTemplate,
+                localEpisodePadding: config.localEpisodePadding
             });
 
             if (result === true) {
-                logger.log(`✅ [자립형 워커] 소설 수집 및 드라이브/로컬 저장 성공: ${item.title}`, 'Downloader');
+                logger.log(`... [자립형 워커] 소설 수집 및 드라이브/로컬 저장 성공: ${item.title}`, 'Downloader');
                 await sleep(policy.min, policy.max);
                 return true; // Self-contained completed
             } else if (typeof result === 'string') {
                 // Plan C Fallback (API Decryption) - runs locally in parent
                 builder.addChapter(item.title, result);
-                logger.log(`✅ [Plan C API 폴백] 추출 성공: ${item.title}`, 'Downloader');
+                logger.log(`... [Plan C API 폴백] 추출 성공: ${item.title}`, 'Downloader');
                 await sleep(policy.min, policy.max);
                 return false; // Requires parent to save
             } else {
@@ -85,7 +88,10 @@ export async function processItem(item, builder, siteInfo, iframe, parser, serie
                 folderId: item.folderId || config.folderId || '',
                 destination: destination,
                 matchedRule: parser.rule,
-                protocolDomain: parser.protocolDomain
+                protocolDomain: parser.protocolDomain,
+                scanSpeedMultiplier: config.scanSpeed / 750,
+                localNameTemplate: config.localNameTemplate,
+                localEpisodePadding: config.localEpisodePadding
             });
 
             if (success) {
@@ -144,14 +150,14 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
     const partialFailures = []; // [v1.8.1] 부분 실패 리스트 (이미지 일부 누락)
     const siteInfo = await detectSite();
     if (!siteInfo) {
-        alert("지원하지 않는 사이트이거나 다운로드 페이지가 아닙니다.");
+        EventBus.emit(EVT.NOTIFY_ERROR, { msg: "지원하지 않는 사이트이거나 다운로드 페이지가 아닙니다." });
         stopSilentAudio();
         return;
     }
 
     const parser = await ParserFactory.getParser();
     if (!parser) {
-        alert("파서를 초기화할 수 없습니다.");
+        EventBus.emit(EVT.NOTIFY_ERROR, { msg: "파서를 초기화할 수 없습니다." });
         stopSilentAudio();
         return;
     }
@@ -194,7 +200,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
 
         // [v1.8.2] Graceful Fallback for missing Drive configuration
         if (destination === 'drive' && !isConfigValid()) {
-            alert('구글 드라이브 설정(Folder ID 등)이 누락되었습니다. 임시로 개별 로컬 다운로드 정책으로 전환합니다.');
+            EventBus.emit(EVT.NOTIFY_ERROR, { msg: '구글 드라이브 설정(Folder ID 등)이 누락되었습니다. 임시로 개별 로컬 다운로드 정책으로 전환합니다.' });
             logger.warn('⚠️ 구글 드라이브 설정 누락 감지. 정책을 개별 로컬 다운로드로 자동 전환합니다.', 'System');
             buildingPolicy = 'individual';
             destination = 'local';
@@ -289,7 +295,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                 const thumbnailUrl = parser.getThumbnailUrl();
                 if (thumbnailUrl) {
                     logger.log('📷 시리즈 썸네일 업로드 중...');
-                    const thumbBlob = await fetchBlobWithXHR(thumbnailUrl);
+                    const thumbBlob = await fetchBlobWithXHR(thumbnailUrl, document.URL);
                     
                     // Upload as 'cover.jpg' - network.js will auto-redirect to _Thumbnails/{ID}.jpg
                     // saveFile(data, filename, type, extension, metadata)
@@ -444,7 +450,8 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                 destination: destination,
                 novelFormat: configNovelFormat,
                 matchedRule: parser.rule,
-                protocolDomain: parser.protocolDomain || window.location.origin
+                protocolDomain: parser.protocolDomain || window.location.origin,
+                seriesMetadata: seriesMetadata
             });
         }
 
@@ -588,7 +595,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
             // Process Item
             let selfContained = false;
             try {
-                selfContained = await processItem(item, currentBuilder, siteInfo, iframe, parser, seriesTitle, null, rootFolder);
+                selfContained = await processItem(item, currentBuilder, siteInfo, iframe, parser, seriesTitle, null, rootFolder, destination);
                 
                 // [v1.8.1] 부분 실패 체크 (이미지 누락 여부) - 자립형 워커가 아닌 로컬 빌더 구동 시에만 처리
                 if (!selfContained && currentBuilder && currentBuilder.chapters) {
@@ -657,8 +664,24 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                 }
                 */
 
-                // Final Filename: "0001 - Title"
-                const fullFilename = `${item.num} - ${chapterTitle}`;
+                // Final Filename: Dynamic based on Template or Drive fallback
+                let fullFilename;
+                if (destination !== 'drive') {
+                    const paddingVal = parseInt(config.localEpisodePadding, 10);
+                    const paddedNum = paddingVal > 0 
+                        ? (item.num || '').toString().padStart(paddingVal, '0') 
+                        : (item.num || '').toString();
+
+                    const template = config.localNameTemplate || "{number} - {title}";
+                    fullFilename = template
+                        .replace(/{number}/g, paddedNum)
+                        .replace(/{rawNumber}/g, (item.num || '').toString())
+                        .replace(/{series}/g, seriesTitle || rootFolder || '')
+                        .replace(/{title}/g, chapterTitle || '');
+                } else {
+                    const paddedNum = (item.num || '').toString().padStart(4, '0');
+                    fullFilename = `${paddedNum} - ${chapterTitle}`;
+                }
 
                 // [v1.6.0] Kavita Metadata Insertion
                 const innerZip = await currentBuilder.build({ 

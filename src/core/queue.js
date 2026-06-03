@@ -3,6 +3,8 @@
  * 영속성 디스크 큐 및 이벤트 기반 세마포어 스케줄러 엔진
  */
 
+import { LogBox } from './ui.js';
+
 export const WORKER_STAGE = {
   INIT: 'STAGE_INIT',             // 초기화 및 Handshake 대기 중
   DOM_READY: 'STAGE_DOM_READY',   // 콘텐츠 DOM 렌더링 및 안정화 대기 중
@@ -41,11 +43,12 @@ const saveRawQueue = (queue) => {
   try {
     if (typeof GM_setValue !== 'undefined') {
       GM_setValue(STORAGE_KEY, queue);
-      return;
-    }
-    if (typeof localStorage !== 'undefined') {
+    } else if (typeof localStorage !== 'undefined') {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(queue));
     }
+    try {
+      LogBox.getInstance().updateProgressUI();
+    } catch (uiErr) {}
   } catch (e) {
     console.error('[TokiSync Queue] Failed to save queue to storage:', e);
   }
@@ -415,19 +418,65 @@ export const runSchedulerOnce = async () => {
     await sleepJitter(1500, 3000);
 
     // 5. 팝업 실행 및 상태 갱신
-    console.log(`[Queue Scheduler] 🚀 팝업 기동: ${nextItem.episodeTitle} (${nextItem.episodeUrl})`);
+    console.log(`[Queue Scheduler] 🚀 팝업 릴레이 기동: ${nextItem.episodeTitle} (${nextItem.episodeUrl})`);
     updateQueueItem(nextItem.id, { status: 'processing' });
     
-    // 실제 팝업 기동 가교 함수 호출
-    const popupRef = openEpisodePopup(nextItem.episodeUrl, nextItem.id);
-    if (popupRef) {
-      activeWorkers.set(nextItem.id, popupRef);
+    // 유효한 기존 팝업 채널 재사용 탐색
+    let recycledPopup = null;
+    let targetSlotId = null;
+
+    // 2개의 슬롯 중 비어있거나 완료된 팝업 슬롯을 탐색하여 재사용
+    for (const [id, popupRef] of activeWorkers.entries()) {
+        const item = queue.find(i => i.id === id);
+        if (popupRef && !popupRef.closed && (!item || item.status === 'completed' || item.status === 'failed')) {
+            recycledPopup = popupRef;
+            targetSlotId = id;
+            break;
+        }
+    }
+
+    if (recycledPopup) {
+        const targetWindowName = `tokisync_novel_worker_${targetSlotId}`.replace(/[^a-zA-Z0-9_]/g, '');
+        const newWindowName = `tokisync_novel_worker_${nextItem.id}`.replace(/[^a-zA-Z0-9_]/g, '');
+
+        console.log(`[Queue Scheduler] ♻️ 기존 자식 팝업 슬롯 재사용 (이름: ${targetWindowName} -> 신규: ${newWindowName})`);
+        // activeWorkers 정리 및 교체
+        activeWorkers.delete(targetSlotId);
+        activeWorkers.set(nextItem.id, recycledPopup);
+
+        try {
+            // [우회 극대화] window.open 대신 window 객체 참조를 직접 제어하여 100% 확실하게 기존 팝업창을 재사용합니다.
+            console.log(`[Queue Scheduler] location.replace로 팝업 리다이렉션 시도: ${nextItem.episodeUrl}`);
+            try {
+                recycledPopup.location.replace(nextItem.episodeUrl);
+            } catch (replaceErr) {
+                console.warn('[Queue Scheduler] location.replace 제한 감지 -> location.href 폴백 시도:', replaceErr);
+                recycledPopup.location.href = nextItem.episodeUrl;
+            }
+            
+            // 통신용 window.name 갱신 시도 (크로스 도메인 보안 경계 등으로 예외 시 대비하여 안전 조치)
+            try {
+                recycledPopup.name = newWindowName;
+            } catch (nameErr) {
+                console.warn('[Queue Scheduler] recycledPopup.name 설정 실패 (무시 가능):', nameErr);
+            }
+            
+            activeWorkers.set(nextItem.id, recycledPopup);
+        } catch (err) {
+            console.error('[Queue Scheduler] 팝업 릴레이 강제 실패:', err);
+        }
     } else {
-      // 팝업 차단 등으로 창 생성 실패 시 즉시 failed 처리
-      updateQueueItem(nextItem.id, { 
-        status: 'failed', 
-        errorMsg: '브라우저 팝업 차단막에 의해 창 생성에 실패했습니다.' 
-      });
+        // 가용 팝업이 없을 때만 물리적 open 수행 (최초 진입 시 2회만 동작)
+        const popupRef = openEpisodePopup(nextItem.episodeUrl, nextItem.id);
+        if (popupRef) {
+            activeWorkers.set(nextItem.id, popupRef);
+        } else {
+            // 팝업 차단 등으로 창 생성 실패 시 즉시 failed 처리
+            updateQueueItem(nextItem.id, { 
+                status: 'failed', 
+                errorMsg: '브라우저 팝업 차단막에 의해 창 생성에 실패했습니다.' 
+            });
+        }
     }
 
   } catch (err) {

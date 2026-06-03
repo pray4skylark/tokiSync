@@ -46,6 +46,8 @@ export function initWorkerExtractor() {
     // Register listener for commands from parent
     const cleanupIpc = registerIpcListener(async (msg) => {
         if (msg.type === 'START_EXTRACTION') {
+            const { queueId } = msg.payload;
+
             // CF Challenge Check
             const isCloudflare = document.title.includes('Just a moment') ||
                                  document.getElementById('cf-challenge-running') ||
@@ -54,7 +56,7 @@ export function initWorkerExtractor() {
             
             if (isCloudflare) {
                 console.warn("⚠️ [TokiSync:Worker] 클라우드플레어 보안 챌린지 감지 - 대기 모드 진입");
-                sendToParent('CAPTCHA_DETECTED');
+                sendToParent('CAPTCHA_DETECTED', { queueId });
                 return;
             }
 
@@ -68,7 +70,6 @@ export function initWorkerExtractor() {
             }
 
             const { 
-                queueId, 
                 targetType, 
                 seriesTitle, 
                 rootFolder, // Normalized parent-side root folder name ([ID] Title)
@@ -78,7 +79,10 @@ export function initWorkerExtractor() {
                 destination, 
                 novelFormat, 
                 matchedRule,
-                protocolDomain
+                protocolDomain,
+                scanSpeedMultiplier = 1.0,
+                localNameTemplate = "{number} - {title}",
+                localEpisodePadding = "4"
             } = msg.payload;
 
             console.log(`🚀 [TokiSync:Worker] 동작 지시문 수신 (ID: ${queueId}, 유형: ${targetType})`);
@@ -93,9 +97,24 @@ export function initWorkerExtractor() {
                 const configNovelFormat = novelFormat || 'epub';
                 const extension = (targetType === 'novel') ? configNovelFormat : 'cbz';
                 
-                // Padded filename logic ("0001 - Title")
-                const paddedNum = (episodeNum || '').toString().padStart(4, '0');
-                const fullFilename = `${paddedNum} - ${episodeTitle}`;
+                // Final Filename: Dynamic based on Template or Drive fallback
+                let fullFilename;
+                if (destination !== 'drive') {
+                    const paddingVal = parseInt(localEpisodePadding, 10);
+                    const paddedNum = paddingVal > 0 
+                        ? (episodeNum || '').toString().padStart(paddingVal, '0') 
+                        : (episodeNum || '').toString();
+
+                    const template = localNameTemplate || "{number} - {title}";
+                    fullFilename = template
+                        .replace(/{number}/g, paddedNum)
+                        .replace(/{rawNumber}/g, (episodeNum || '').toString())
+                        .replace(/{series}/g, seriesTitle || rootFolder || '')
+                        .replace(/{title}/g, episodeTitle || '');
+                } else {
+                    const paddedNum = (episodeNum || '').toString().padStart(4, '0');
+                    fullFilename = `${paddedNum} - ${episodeTitle}`;
+                }
 
                 // --- 1. SOSEL EXTRACTION ---
                 if (targetType === 'novel') {
@@ -168,7 +187,7 @@ export function initWorkerExtractor() {
                     reportProgress(queueId, 20, WORKER_STAGE.DOM_READY);
 
                     // Wait for comic content inside DOM
-                    const contentDoc = await waitForContent(window, 10000, viewerCfg);
+                    const contentDoc = await waitForContent(window, Math.round(10000 * scanSpeedMultiplier), viewerCfg);
                     if (!contentDoc) {
                         console.warn("[TokiSync:Worker] 10초 내 콘텐츠 렌더링 미감지. 갈무리 강행.");
                     }
@@ -181,7 +200,7 @@ export function initWorkerExtractor() {
                     reportProgress(queueId, 40, WORKER_STAGE.SCROLLING);
 
                     // Physical scroll down
-                    await scrollToLoad(document, 25000, viewerCfg);
+                    await scrollToLoad(document, 25000, viewerCfg, scanSpeedMultiplier);
 
                     // Downloader helper with concurrency 5
                     const runImageDownloads = async (imageUrls) => {
@@ -196,7 +215,7 @@ export function initWorkerExtractor() {
                             const chunkPromises = chunk.map(async (url, index) => {
                                 const globalIndex = i + index;
                                 try {
-                                    const imgBlob = await fetchBlobWithXHR(url);
+                                    const imgBlob = await fetchBlobWithXHR(url, window.location.href);
                                     const arrayBuffer = await blobToArrayBuffer(imgBlob);
                                     processedCount++;
 
@@ -243,7 +262,7 @@ export function initWorkerExtractor() {
                         reportProgress(queueId, 35, WORKER_STAGE.SCROLLING);
                         await sleep(2000);
                         
-                        await scrollToLoad(document, 15000, viewerCfg);
+                        await scrollToLoad(document, 15000, viewerCfg, scanSpeedMultiplier);
                         
                         finalImages = parser.getImageList(document);
                         console.log(`🎯 [Deep Fallback] 2차 이미지 주소 ${finalImages.length}개 재추출 완료.`);

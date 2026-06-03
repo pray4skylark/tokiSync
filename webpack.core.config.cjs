@@ -1,12 +1,14 @@
 const path = require('path');
 const webpack = require('webpack');
 const fs = require('fs');
+const TerserPlugin = require('terser-webpack-plugin');
+const pkg = require('./package.json');
 
 // Metadata Block
 const METADATA_MAIN = `// ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.20.5
+// @version      \${pkg.components.script}
 // @description  Toki series sites -> Google Drive syncing tool (Bundled)
 // @author       pray4skylark
 // @updateURL    https://pray4skylark.github.io/tokiSync/tokiSync.user.js
@@ -22,8 +24,8 @@ const METADATA_MAIN = `// ==UserScript==
 // @match        https://script.google.com/*
 // @match        https://*.github.io/tokiSync/*
 // @match        https://pray4skylark.github.io/tokiSync/*
-// @match        http://localhost:*/*
-// @match        http://127.0.0.1:*/*
+// @include      http://localhost:*/*
+// @include      http://127.0.0.1:*/*
 // @icon         https://github.com/user-attachments/assets/99f5bb36-4ef8-40cc-8ae5-e3bf1c7952ad
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
@@ -62,8 +64,8 @@ const METADATA_NEW_CORE = `// ==UserScript==
 // @include      *://*toki*/*
 // @include      *://*toon*/*
 // @match        https://pray4skylark.github.io/tokiSync/*
-// @match        http://localhost:*/*
-// @match        http://127.0.0.1:*/*
+// @include      http://localhost:*/*
+// @include      http://127.0.0.1:*/*
 // @icon         https://github.com/user-attachments/assets/99f5bb36-4ef8-40cc-8ae5-e3bf1c7952ad
 // @grant        GM_registerMenuCommand
 // @grant        GM_xmlhttpRequest
@@ -112,8 +114,25 @@ module.exports = {
       },
     ],
   },
-  optimization: { minimize: false },
+  optimization: {
+    minimize: false,
+    minimizer: [
+      new TerserPlugin({
+        extractComments: false, // 주석을 외부 라이선스 파일로 쪼개서 추출 분리하는 현상 차단
+        terserOptions: {
+          format: {
+            comments: /==UserScript==|@name|@namespace|@version|@description|@author|@updateURL|@downloadURL|@match|@include|@icon|@grant|@connect|@require|@run-at|@license/i, // 유저스크립트 필수 헤더 규격 주석의 안전 보존
+          },
+        },
+      }),
+    ],
+  },
   plugins: [
+    new webpack.DefinePlugin({
+      __SCRIPT_VERSION__: JSON.stringify(pkg.components.script),
+      __VIEWER_VERSION__: JSON.stringify(pkg.components.viewer),
+      __GAS_VERSION__: JSON.stringify(pkg.components.gas)
+    }),
     new webpack.BannerPlugin({
       banner: METADATA_MAIN,
       raw: true,

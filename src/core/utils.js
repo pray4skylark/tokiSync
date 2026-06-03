@@ -187,7 +187,7 @@ export async function waitForContent(targetWindow, maxWaitMs = 8000, viewerCfg =
     LogBox.getInstance().warn(`DOM 폴링 타임아웃 ${maxWaitMs}ms — 콘텐츠 미감지, 멈춰서 물 평가`, 'DOM:Poll');
 }
 
-export async function scrollToLoad(iframeDoc, stallTimeoutMs = 20000, viewerCfg = {}) {
+export async function scrollToLoad(iframeDoc, stallTimeoutMs = 20000, viewerCfg = {}, multiplier = 1.0) {
     const win = iframeDoc.defaultView || iframeDoc.parentWindow;
     if (!win) return;
 
@@ -232,8 +232,8 @@ export async function scrollToLoad(iframeDoc, stallTimeoutMs = 20000, viewerCfg 
                 if (isHidden) win.dispatchEvent(new Event('scroll'));
             }
 
-            // 둔갑 및 이미지 실시간 완착 대기 루프 (최대 4초)
-            const SINGLE_PAGE_TIMEOUT = 4000;
+            // 둔갑 및 이미지 실시간 완착 대기 루프 (최대 4초 * 배율)
+            const SINGLE_PAGE_TIMEOUT = Math.round(4000 * multiplier);
             const POLL_INTERVAL = 200;
             let elapsed = 0;
 
@@ -269,7 +269,7 @@ export async function scrollToLoad(iframeDoc, stallTimeoutMs = 20000, viewerCfg 
                 logger.log(`✅ [Scroll] 페이지 [${displayIdx} / ${pageElements.length}] 이미지 완착 성공!`, 'DOM:Scroll');
             }
 
-            await sleep(100); // 지연 로딩 방어용 완충 딜레이
+            await sleep(Math.round(100 * multiplier)); // 지연 로딩 방어용 완충 딜레이
         }
     } 
     // ── [케이스 2: 부모 컨테이너가 없거나 자식이 없는 경우 (구형/일반 뷰어 안전 폴백)] ──
@@ -314,7 +314,7 @@ export async function scrollToLoad(iframeDoc, stallTimeoutMs = 20000, viewerCfg 
             img.scrollIntoView({ behavior, block: 'center' });
             if (isHidden) win.dispatchEvent(new Event('scroll'));
 
-            const SINGLE_IMAGE_TIMEOUT = 4000;
+            const SINGLE_IMAGE_TIMEOUT = Math.round(4000 * multiplier);
             const POLL_INTERVAL = 200;
             let elapsed = 0;
 
@@ -324,7 +324,7 @@ export async function scrollToLoad(iframeDoc, stallTimeoutMs = 20000, viewerCfg 
                 await sleep(POLL_INTERVAL);
                 elapsed += POLL_INTERVAL;
             }
-            await sleep(100);
+            await sleep(Math.round(100 * multiplier));
         }
     }
 
@@ -519,9 +519,10 @@ export async function getImageDimensions(blob) {
  * [v1.8.4] GM_xmlhttpRequest 기반의 안전한 Blob Fetcher
  * 브라우저 fetch()로 인해 발생하는 CORS 및 Referer 차단을 우회합니다.
  * @param {string} url 
+ * @param {string} [referer]
  * @returns {Promise<Blob>}
  */
-export async function fetchBlobWithXHR(url) {
+export async function fetchBlobWithXHR(url, referer) {
     // 35초 절대 강제 타임아웃 프로미스 정의 (CORS/샌드박스 먹통 상황 방어용 극약 처방)
     let timeoutTimer = null;
     const forceTimeoutPromise = new Promise((_, reject) => {
@@ -537,7 +538,7 @@ export async function fetchBlobWithXHR(url) {
             try {
                 const resp = await fetch(url, {
                     mode: 'cors',
-                    credentials: 'omit'
+                    credentials: 'include'
                 });
                 if (!resp.ok) throw new Error(`HTTP status ${resp.status}`);
                 return await resp.blob();
@@ -552,7 +553,7 @@ export async function fetchBlobWithXHR(url) {
                     method: 'GET',
                     url: url,
                     headers: {
-                        "Referer": window.location.origin,
+                        "Referer": referer || window.location.href,
                         "User-Agent": navigator.userAgent
                     },
                     responseType: 'blob',
@@ -566,7 +567,7 @@ export async function fetchBlobWithXHR(url) {
                     },
                     onerror: (err) => {
                         console.warn('[TokiSync Utils] GM_xmlhttpRequest 오류 감지. fetch 폴백을 발동합니다:', url);
-                        fetch(url, { mode: 'cors', credentials: 'omit' })
+                        fetch(url, { mode: 'cors', credentials: 'include' })
                             .then(r => {
                                 if (!r.ok) throw new Error(`HTTP status ${r.status}`);
                                 return r.blob();
@@ -576,7 +577,7 @@ export async function fetchBlobWithXHR(url) {
                     },
                     ontimeout: () => {
                         console.warn('[TokiSync Utils] GM_xmlhttpRequest 25초 타임아웃. fetch 폴백 시도:', url);
-                        fetch(url, { mode: 'cors', credentials: 'omit' })
+                        fetch(url, { mode: 'cors', credentials: 'include' })
                             .then(r => {
                                 if (!r.ok) throw new Error(`HTTP status ${r.status}`);
                                 return r.blob();
@@ -587,7 +588,7 @@ export async function fetchBlobWithXHR(url) {
                 });
             } catch (e) {
                 console.error('[TokiSync Utils] GM_xmlhttpRequest 호출 중 예외 발생, 일반 fetch로 긴급 우회:', e);
-                fetch(url, { mode: 'cors', credentials: 'omit' })
+                fetch(url, { mode: 'cors', credentials: 'include' })
                     .then(r => {
                         if (!r.ok) throw new Error(`HTTP status ${r.status}`);
                         return r.blob();
