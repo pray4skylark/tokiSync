@@ -1,4 +1,4 @@
-/* ⚙️ TokiSync Server Code Bundle v1.0.0 (Generated: 2026-06-06T19:10:03.269Z) */
+/* ⚙️ TokiSync Server Code Bundle v1.0.0 (Generated: 2026-06-06T20:27:53.755Z) */
 
 /* ========================================================================== */
 /* FILE: Main.gs */
@@ -1130,23 +1130,46 @@ function View_Dispatcher(data) {
                 // [v1.6.2] Enrich fragment with full series metadata for dynamic Insert support
                 const titleClean = seriesFolderName.replace(/^\[\d+\]\s*/, '').trim();
                 
+                // [v1.22.0] 기존 _toki_meta.json 내용을 병합하여 수동 편집 내역 보존
+                let existingMeta = {};
+                const metaName = "_toki_meta.json";
+                const metaResults = DriveAccessService.list(seriesId, {
+                    query: `name = '${metaName}'`,
+                    fields: "files(id)"
+                });
+
+                if (metaResults.length > 0) {
+                    try {
+                        const content = DriveAccessService.getFileContent(metaResults[0].id);
+                        if (content && content.trim() !== "") {
+                            existingMeta = JSON.parse(content);
+                        }
+                    } catch (e) {
+                        Debug.log(`[MergeIndex] Failed to parse existing metadata: ${e.toString()}`);
+                    }
+                }
+                
                 const extraMeta = data.metadata || {};
-                const fragData = JSON.stringify({
+                const mergedMeta = {
+                    ...existingMeta,
                     id: seriesId,
                     sourceId: sourceId,
-                    name: titleClean,
+                    name: titleClean || existingMeta.name || seriesFolderName.replace(/^\[\d+\]\s*/, '').trim(),
                     folderName: seriesFolderName,
-                    url: "", // V3 metadata webViewLink is not used here to keep it small
-                    category: data.category || "Unknown",
-                    author: extraMeta.author || "",
-                    status: extraMeta.status || "연재중",
-                    summary: extraMeta.summary || "",
-                    thumbnail: extraMeta.thumbnail || "",
-                    created: meta.modifiedTime, // modifiedTime used as fallback for created
+                    url: existingMeta.url || "", 
+                    category: data.category || existingMeta.category || "Unknown",
+                    author: existingMeta.author || extraMeta.author || "",
+                    status: normalizeStatus(existingMeta.status || extraMeta.status || "연재중"),
+                    summary: existingMeta.summary || extraMeta.summary || "",
+                    thumbnail: existingMeta.thumbnail || extraMeta.thumbnail || "",
+                    thumbnailId: existingMeta.thumbnailId || extraMeta.thumbnailId || "",
+                    created: existingMeta.created || meta.modifiedTime, 
                     cacheFileId: cacheFileId,
                     itemsCount: itemsCount,
                     lastUpdated: new Date().toISOString()
-                });
+                };
+                
+                const fragData = JSON.stringify(mergedMeta);
                 
                 const existingFrags = DriveAccessService.list(mergeFolderId, {
                     query: `name = '${fragName}'`,
@@ -1161,12 +1184,6 @@ function View_Dispatcher(data) {
                 Debug.log(`[MergeIndex] Created fragment for ${sourceId} / ${cacheFileId}`);
 
                 // [v1.7.0] Metadata Persistence (Phase 3)
-                const metaName = "_toki_meta.json";
-                const metaResults = DriveAccessService.list(seriesId, {
-                    query: `name = '${metaName}'`,
-                    fields: "files(id)"
-                });
-
                 if (metaResults.length > 0) {
                     DriveAccessService.updateFileContent(metaResults[0].id, fragData);
                 } else {
@@ -1180,6 +1197,7 @@ function View_Dispatcher(data) {
             Debug.log(`[MergeIndex] Error creating fragment: ${mergeErr.toString()}`);
             resultBody = { updated: true, seriesId: seriesId, mergeStatus: "failed", error: mergeErr.toString() };
         }
+      }
     } else if (action === "view_update_metadata") {
       if (!data.seriesId) throw new Error("seriesId is required");
       if (!data.metadata) throw new Error("metadata is required");
@@ -1737,7 +1755,7 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
   const folderName = folder.name;
 
   let metadata = {
-    status: "ONGOING",
+    status: "연재중",
     authors: [],
     summary: "",
     category: categoryContext,
@@ -1757,7 +1775,7 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
     try {
       const content = DriveAccessService.getFileContent(metaResults[0].id);
       const metaData = JSON.parse(content);
-      const tid = (thumbMap && metaData.sourceId) ? thumbMap[metaData.sourceId] : "";
+      const tid = ((thumbMap && metaData.sourceId) ? thumbMap[metaData.sourceId] : "") || metaData.thumbnailId || "";
       return {
         id: metaData.id || folderId,
         sourceId: metaData.sourceId || "",
@@ -1773,7 +1791,7 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
         category: metaData.category || categoryContext,
         metadata: {
             category: metaData.category || categoryContext,
-            status: metaData.status || "ONGOING",
+            status: normalizeStatus(metaData.status) || "연재중",
             authors: metaData.author ? [metaData.author] : [],
             summary: metaData.summary || ""
         }
@@ -1815,7 +1833,7 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
       ) {
         metadata.category = parsed.category;
       }
-      if (parsed.status) metadata.status = parsed.status;
+      if (parsed.status) metadata.status = normalizeStatus(parsed.status);
       if (parsed.metadata && parsed.metadata.authors)
         metadata.authors = parsed.metadata.authors;
       else if (parsed.author) metadata.authors = [parsed.author];
@@ -1894,7 +1912,7 @@ function View_updateMetadata(seriesId, metadata, rootFolderId) {
     name: metadata.name !== undefined ? metadata.name : (existingMeta.name || folderName.replace(/^\[\d+\]\s*/, '').trim()),
     category: metadata.category !== undefined ? metadata.category : (existingMeta.category || "Unknown"),
     author: metadata.author !== undefined ? metadata.author : (existingMeta.author || ""),
-    status: metadata.status !== undefined ? metadata.status : (existingMeta.status || "연재중"),
+    status: metadata.status !== undefined ? normalizeStatus(metadata.status) : (normalizeStatus(existingMeta.status) || "연재중"),
     summary: metadata.summary !== undefined ? metadata.summary : (existingMeta.summary || ""),
     thumbnail: metadata.thumbnail !== undefined ? metadata.thumbnail : (existingMeta.thumbnail || ""),
     thumbnailId: metadata.thumbnailId !== undefined ? metadata.thumbnailId : (existingMeta.thumbnailId || ""),
@@ -1981,6 +1999,18 @@ function View_uploadThumbnail(seriesId, base64Data, rootFolderId) {
   View_updateMetadata(seriesId, { thumbnailId: fileId, thumbnail: "" }, rootFolderId);
   
   return { success: true, thumbnailId: fileId };
+}
+
+/**
+ * 상태값을 표준 한글 규격("연재중", "완결", "휴재")으로 정규화합니다.
+ */
+function normalizeStatus(status) {
+  if (!status) return "연재중";
+  const upper = status.toString().trim().toUpperCase();
+  if (upper === "ONGOING" || upper === "연재중") return "연재중";
+  if (upper === "COMPLETED" || upper === "완결") return "완결";
+  if (upper === "HIATUS" || upper === "휴재") return "휴재";
+  return status;
 }
 
 
