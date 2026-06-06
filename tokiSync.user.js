@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.22.0
+// @version      1.22.1
 // @description  Toki series sites -> Google Drive syncing tool (Bundled)
 // @author       pray4skylark
 // @updateURL    https://pray4skylark.github.io/tokiSync/tokiSync.user.js
@@ -92,7 +92,7 @@ const EVT = {
 /* harmony export */   Gg: function() { return /* binding */ updateQueueItem; },
 /* harmony export */   HO: function() { return /* binding */ stopAllWorkers; },
 /* harmony export */   IS: function() { return /* binding */ getQueue; },
-/* harmony export */   US: function() { return /* binding */ removeCompletedAndFailedItems; },
+/* harmony export */   OF: function() { return /* binding */ removeCompletedItems; },
 /* harmony export */   WB: function() { return /* binding */ WORKER_STAGE; },
 /* harmony export */   d$: function() { return /* binding */ removeQueueItem; },
 /* harmony export */   gi: function() { return /* binding */ runSchedulerOnce; },
@@ -102,7 +102,7 @@ const EVT = {
 /* harmony export */   mR: function() { return /* binding */ activeWorkers; },
 /* harmony export */   zX: function() { return /* binding */ getQueueStats; }
 /* harmony export */ });
-/* unused harmony exports transitionQueueItemsForRelay, updateQueueItemProgress, removeCompletedItems */
+/* unused harmony exports transitionQueueItemsForRelay, updateQueueItemProgress, removeCompletedAndFailedItems */
 /* harmony import */ var _ui_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(989);
 /**
  * tokiSync v1.21.0 - Persistent Multi-Queue Batch Core
@@ -2544,6 +2544,7 @@ async function fetchMediaViaWorkerSingleAttempt(episodeUrl, targetType = 'novel'
         let handshakeTimeoutId = null;
         let cleanupIpc = null;
         let livenessInterval = null;
+        const queueId = config.queueId || `${location.pathname.split('/')[2] || '0'}_${location.pathname.split('/')[3] || '0'}`;
 
         const cleanup = () => {
             if (cleanupIpc) { cleanupIpc(); cleanupIpc = null; }
@@ -2552,9 +2553,35 @@ async function fetchMediaViaWorkerSingleAttempt(episodeUrl, targetType = 'novel'
             if (livenessInterval) { clearInterval(livenessInterval); livenessInterval = null; }
         };
 
+        const handleSuccess = async (payload, sourceWindow) => {
+            cleanup();
+
+            // 즉각 ACK 응답 전송 (자식이 안전하게 종료하도록 피드백)
+            if (sourceWindow && !sourceWindow.closed) {
+                try {
+                    (0,_ipc_broker_js__WEBPACK_IMPORTED_MODULE_1__/* .sendToWorker */ .eu)(sourceWindow, 'IPC_ACK', { queueId });
+                } catch (ackErr) {
+                    console.warn('[WorkerController] ACK 전송 실패 (무시):', ackErr);
+                }
+            }
+
+            // WAF Jitter 대기 (3~5초)
+            const jitterDelay = 3000 + Math.random() * 2000;
+            console.log(`[WorkerController] WAF 지터 대기 (${(jitterDelay / 1000).toFixed(2)}초)...`);
+            await new Promise(r => setTimeout(r, jitterDelay));
+
+            // 데이터와 함께 성공 상태 반환
+            resolve({
+                success: true,
+                content: payload.content || null,
+                images: payload.images || null
+            });
+        };
+
         // Register consolidated IPC Listener
         cleanupIpc = (0,_ipc_broker_js__WEBPACK_IMPORTED_MODULE_1__/* .registerIpcListener */ .Q_)(async (msg) => {
-            const { type, payload } = msg;
+            const { type, payload, sourceEvent } = msg;
+            const sourceWindow = sourceEvent?.source || activeWorkerRef;
 
             // 1. Handshake Ready Received ➡️ Inject Action Instructions
             if (type === 'WORKER_READY') {
@@ -2567,12 +2594,11 @@ async function fetchMediaViaWorkerSingleAttempt(episodeUrl, targetType = 'novel'
                 if (activeWorkerRef && !activeWorkerRef.closed) {
                     console.log(`[WorkerController] 📢 READY 수신 ➡️ 지시 주입 (유형: ${targetType})`);
                     
-                    // Inject metadata bundle for local self-contained execution
                     (0,_ipc_broker_js__WEBPACK_IMPORTED_MODULE_1__/* .sendToWorker */ .eu)(activeWorkerRef, 'START_EXTRACTION', {
-                        queueId: config.queueId || `${location.pathname.split('/')[2] || '0'}_${location.pathname.split('/')[3] || '0'}`,
+                        queueId: queueId,
                         targetType: targetType,
                         seriesTitle: config.seriesTitle || 'UnknownSeries',
-                        rootFolder: config.rootFolder || config.seriesTitle || 'UnknownSeries', // Explicit normalized drive root folder name
+                        rootFolder: config.rootFolder || config.seriesTitle || 'UnknownSeries',
                         episodeTitle: config.episodeTitle || 'UnknownEpisode',
                         episodeNum: config.episodeNum || '0000',
                         folderId: config.folderId || '',
@@ -2596,7 +2622,7 @@ async function fetchMediaViaWorkerSingleAttempt(episodeUrl, targetType = 'novel'
                         cleanup();
                         console.error('[WorkerController] 캡차 타임아웃 (5분)');
                         closeActiveWorker();
-                        resolve(false);
+                        resolve({ success: false });
                     }, 300000);
                 }
             }
@@ -2610,7 +2636,7 @@ async function fetchMediaViaWorkerSingleAttempt(episodeUrl, targetType = 'novel'
                 else if (stage === _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.SCROLLING) stageText = '스크롤 스캔';
                 else if (stage === _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.PARSING) stageText = '미디어 파싱';
                 else if (stage === _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.DOWNLOADING) stageText = '다운로드';
-                else if (stage === _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.UPLOADING) stageText = '드라이브 저장';
+                else if (stage === _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.UPLOADING) stageText = '데이터 전송';
                 else if (stage === _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.COMPLETED) stageText = '완료';
 
                 _EventBus_js__WEBPACK_IMPORTED_MODULE_3__/* .EventBus */ .l.emit(_EventBus_js__WEBPACK_IMPORTED_MODULE_3__/* .EVT */ .c.LOG, {
@@ -2620,42 +2646,51 @@ async function fetchMediaViaWorkerSingleAttempt(episodeUrl, targetType = 'novel'
                 });
             }
 
-            // 4. Task completed successfully
-            if (type === 'TASK_COMPLETED') {
-                cleanup();
-                
-                // Add WAF jitter delay (3~5s) to stay stealthy
-                const jitterDelay = 3000 + Math.random() * 2000;
-                console.log(`[WorkerController] WAF 지터 대기 (${(jitterDelay / 1000).toFixed(2)}초)...`);
-                await new Promise(r => setTimeout(r, jitterDelay));
-                
-                resolve(true); // Success
+            // 4. Task completed successfully via standard postMessage
+            if (type === 'TASK_COMPLETED' && payload?.queueId === queueId) {
+                console.log('[WorkerController] TASK_COMPLETED 수신완료 (표준 채널)');
+                await handleSuccess(payload, sourceWindow);
             }
 
-            // 5. Task failed with error
-            if (type === 'TASK_FAILED') {
+            // 5. Task completed with GM Storage Fallback (크로스도메인 2중 폴백)
+            if (type === 'TASK_COMPLETED_FALLBACK' && payload?.queueId === queueId) {
+                console.log('[WorkerController] TASK_COMPLETED_FALLBACK 수신완료 (GM Storage 채널)');
+                const key = `tokisync_fallback_${queueId}`;
+                const rawPayload = GM_getValue(key);
+                if (rawPayload) {
+                    GM_deleteValue(key); // 즉각 파기
+                    await handleSuccess(rawPayload, sourceWindow);
+                } else {
+                    console.error('[WorkerController] GM Storage 폴백 데이터를 읽지 못했습니다.');
+                    cleanup();
+                    resolve({ success: false });
+                }
+            }
+
+            // 6. Task failed with error
+            if (type === 'TASK_FAILED' && payload?.queueId === queueId) {
                 cleanup();
                 console.error(`[WorkerController] 자식 워커가 에러를 보고함: ${payload.errorMsg}`);
-                resolve(false); // Fail
+                resolve({ success: false, errorMsg: payload.errorMsg });
             }
         });
 
-        // 팝업 수동 종료 실시간 감시 타이머 (Liveness Guard)
+        // Liveness Guard
         livenessInterval = setInterval(() => {
             if (activeWorkerRef && activeWorkerRef.closed) {
                 console.warn('[WorkerController] ⚠️ 단일 워커 팝업 수동 종료 감지 (즉시 예외 복구)');
                 cleanup();
                 closeActiveWorker();
-                resolve(false);
+                resolve({ success: false });
             }
         }, 1000);
 
-        // 30s Handshake Safety (Fast-fail if redirect blocked or popup frozen)
+        // 30s Handshake Safety
         handshakeTimeoutId = setTimeout(() => {
             cleanup();
             console.error('[WorkerController] ⚠️ 30초 핸드셰이킹 타임아웃 (리다이렉션 차단 의심)');
             closeActiveWorker();
-            resolve(false);
+            resolve({ success: false });
         }, 30000);
 
         // General Timeout
@@ -2663,7 +2698,7 @@ async function fetchMediaViaWorkerSingleAttempt(episodeUrl, targetType = 'novel'
             cleanup();
             console.error(`[WorkerController] 수집 타임아웃 (${timeoutDuration / 1000}초)`);
             closeActiveWorker();
-            resolve(false);
+            resolve({ success: false });
         }, timeoutDuration);
 
         // Start or Recycle Popup window
@@ -2694,7 +2729,7 @@ async function fetchMediaViaWorkerSingleAttempt(episodeUrl, targetType = 'novel'
             console.error('[WorkerController] 워커 팝업 기동 실패:', err);
             closeActiveWorker();
             alert(`[TokiSync 팝업 차단 알림]\n\n브라우저 주소창 우측에서 [팝업 및 리다이렉트 항상 허용]으로 설정해 주셔야 합니다.\n(오류: ${err.message})`);
-            resolve(false);
+            resolve({ success: false });
         }
     });
 }
@@ -2715,10 +2750,10 @@ async function fetchMediaViaWorker(episodeUrl, targetType = 'novel', config = {}
         }
 
         try {
-            const success = await fetchMediaViaWorkerSingleAttempt(episodeUrl, targetType, config);
-            if (success) {
+            const result = await fetchMediaViaWorkerSingleAttempt(episodeUrl, targetType, config);
+            if (result.success) {
                 console.log(`[WorkerController] 🎉 수집 성공 (${attempt}/${MAX_RETRIES})`);
-                return true; // Return success status
+                return result; // 리턴된 데이터 세트 반환 ({ success: true, content, images })
             }
             console.warn(`[WorkerController] ⚠️ 수집 실패 (${attempt}/${MAX_RETRIES}) — 작업 불완성`);
         } catch (err) {
@@ -2727,7 +2762,7 @@ async function fetchMediaViaWorker(episodeUrl, targetType = 'novel', config = {}
     }
 
     console.error(`[WorkerController] 🛑 총 ${MAX_RETRIES}회 전부 실패 — URL: ${episodeUrl}`);
-    return false;
+    return { success: false };
 }
 
 // =============================================================
@@ -2739,17 +2774,18 @@ async function fetchMediaViaWorker(episodeUrl, targetType = 'novel', config = {}
  */
 async function fetchNovelText(episodeUrl, config = {}) {
     console.log('[WorkerController] 소설 수집 개시 (Plan B — 자립형 팝업)');
-    const success = await fetchMediaViaWorker(episodeUrl, 'novel', config);
+    const result = await fetchMediaViaWorker(episodeUrl, 'novel', config);
 
-    if (success) return true; // Success (Worker already saved it!)
+    if (result.success && result.content) {
+        return result.content; // 추출된 본문 텍스트 반환
+    }
 
     // Plan C Fallback: Local API Decryption (if decryptApi configuration exists)
     if (config.decryptApi || config.endpoint) {
         console.warn('[WorkerController] Plan B 실패 ➡️ Plan C(API 복호화) 로컬 폴백 시도');
         const content = await (0,_novel_decryptor_js__WEBPACK_IMPORTED_MODULE_0__/* .fetchNovelTextViaApi */ .i)(episodeUrl, config.decryptApi || config);
         if (content) {
-            // Since API fallback runs in parent, parent must write it
-            return content; // Return raw text so downloader.js can package and save
+            return content;
         }
     }
 
@@ -2761,7 +2797,11 @@ async function fetchNovelText(episodeUrl, config = {}) {
  */
 async function fetchComicImages(episodeUrl, config = {}) {
     console.log('[WorkerController] 만화 이미지 수집 개시 (Plan B — 자립형 팝업)');
-    return await fetchMediaViaWorker(episodeUrl, 'comic', config);
+    const result = await fetchMediaViaWorker(episodeUrl, 'comic', config);
+    if (result.success && result.images) {
+        return result.images; // 추출된 이미지 어레이 반환 [{ url, data: ArrayBuffer, ext, isMissing }, ...]
+    }
+    return null;
 }
 
 /**
@@ -2811,6 +2851,65 @@ function initBatchWorkerController() {
         }
     }, 2000);
 
+    const handleBatchSuccess = (matchedId, payload, sourceWindow) => {
+        console.log(`[WorkerController] 🎉 [배치] 수집 완료 처리 (ID: matchedId)`);
+
+        // 자식에게 즉시 ACK 수락 신호 전송
+        if (sourceWindow && !sourceWindow.closed) {
+            try {
+                (0,_ipc_broker_js__WEBPACK_IMPORTED_MODULE_1__/* .sendToWorker */ .eu)(sourceWindow, 'IPC_ACK', { queueId: matchedId });
+            } catch (ackErr) {
+                console.warn('[WorkerController] [배치] ACK 전송 실패:', ackErr);
+            }
+        }
+
+        // 수집된 바이너리/텍스트 데이터를 메모리 전역 큐 아이템 필드에 적재
+        (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .updateQueueItem */ .Gg)(matchedId, {
+            status: 'completed',
+            progressPercent: 100,
+            stage: _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.COMPLETED,
+            extractedContent: payload.content || null,
+            extractedImages: payload.images || null
+        });
+
+        const popupRef = _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.get(matchedId);
+        if (popupRef) {
+            const actualRef = popupRef.ref || popupRef;
+            if (actualRef && !actualRef.closed) {
+                const queue = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getQueue */ .IS)();
+                const pendingExists = queue.some(i => i.status === 'pending');
+                if (!pendingExists) {
+                    actualRef.close();
+                    _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.delete(matchedId);
+                }
+            } else {
+                _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.delete(matchedId);
+            }
+        }
+
+        _EventBus_js__WEBPACK_IMPORTED_MODULE_3__/* .EventBus */ .l.emit(_EventBus_js__WEBPACK_IMPORTED_MODULE_3__/* .EVT */ .c.UPDATE_PROGRESS);
+
+        // 드라이브 캐시 최종 갱신
+        const currentQueue = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getQueue */ .IS)();
+        const hasActive = currentQueue.some(i => i.status === 'pending' || i.status === 'processing');
+        if (!hasActive) {
+            const completedItem = currentQueue.find(i => i.id === matchedId);
+            if (completedItem && completedItem.destination === 'drive') {
+                console.log(`[WorkerController] ☁️ 전 대기열 수집 완료 -> 드라이브 캐시 갱신 시작: ${completedItem.rootFolder}`);
+                (0,_gas_js__WEBPACK_IMPORTED_MODULE_5__/* .refreshCacheAfterUpload */ .jz)(
+                    completedItem.rootFolder,
+                    completedItem.category,
+                    completedItem.seriesMetadata || {}
+                ).catch(e =>
+                    console.warn(`[WorkerController] 캐시 갱신 실패: ${e.message}`)
+                );
+            }
+        }
+
+        // 다음 릴레이 스케줄 기동
+        (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .runSchedulerOnce */ .gi)();
+    };
+
     (0,_ipc_broker_js__WEBPACK_IMPORTED_MODULE_1__/* .registerIpcListener */ .Q_)(async (msg) => {
         const { type, payload, sourceEvent } = msg;
         if (!sourceEvent || !sourceEvent.source) return;
@@ -2820,15 +2919,14 @@ function initBatchWorkerController() {
             const { targetUrl } = payload || {};
             let matchedId = null;
 
-            // 1차: activeWorkers의 window 참조 비교
             for (const [id, popupRef] of _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.entries()) {
-                if (popupRef === sourceEvent.source) {
+                const actualRef = popupRef.ref || popupRef;
+                if (actualRef === sourceEvent.source) {
                     matchedId = id;
                     break;
                 }
             }
 
-            // 2차: URL 기반 매칭 폴백 (리다이렉션으로 주소가 완전히 틀어졌을 때 복구)
             if (!matchedId && targetUrl) {
                 const queue = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getQueue */ .IS)();
                 const matchedItem = queue.find(item => 
@@ -2837,7 +2935,6 @@ function initBatchWorkerController() {
                 );
                 if (matchedItem) {
                     matchedId = matchedItem.id;
-                    // 최신 Window 참조로 activeWorkers 즉시 복원 갱신
                     _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.set(matchedId, sourceEvent.source);
                     console.log(`[WorkerController] ♻️ URL 매칭 성공 ➡️ Window 참조 복원 갱신 (ID: ${matchedId})`);
                 }
@@ -2879,7 +2976,8 @@ function initBatchWorkerController() {
 
             if (!matchedId) {
                 for (const [id, popupRef] of _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.entries()) {
-                    if (popupRef === sourceEvent.source) { matchedId = id; break; }
+                    const actualRef = popupRef.ref || popupRef;
+                    if (actualRef === sourceEvent.source) { matchedId = id; break; }
                 }
             }
 
@@ -2904,7 +3002,8 @@ function initBatchWorkerController() {
 
             if (!matchedId) {
                 for (const [id, popupRef] of _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.entries()) {
-                    if (popupRef === sourceEvent.source) { matchedId = id; break; }
+                    const actualRef = popupRef.ref || popupRef;
+                    if (actualRef === sourceEvent.source) { matchedId = id; break; }
                 }
             }
 
@@ -2919,7 +3018,7 @@ function initBatchWorkerController() {
                     else if (stage === _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.SCROLLING) stageText = '스크롤 스캔';
                     else if (stage === _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.PARSING) stageText = '미디어 파싱';
                     else if (stage === _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.DOWNLOADING) stageText = '다운로드';
-                    else if (stage === _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.UPLOADING) stageText = '드라이브 저장';
+                    else if (stage === _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.UPLOADING) stageText = '데이터 전송';
                     else if (stage === _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.COMPLETED) stageText = '완료';
 
                     _EventBus_js__WEBPACK_IMPORTED_MODULE_3__/* .EventBus */ .l.emit(_EventBus_js__WEBPACK_IMPORTED_MODULE_3__/* .EVT */ .c.LOG, {
@@ -2932,66 +3031,57 @@ function initBatchWorkerController() {
             }
         }
 
-        // 4. TASK_COMPLETED: 자식 워커 수집 및 드라이브 저장 정상 완료
+        // 4. TASK_COMPLETED: 표준 postMessage 방식 수집 완료
         if (type === 'TASK_COMPLETED') {
             const { queueId } = payload || {};
             let matchedId = queueId;
 
             if (!matchedId) {
                 for (const [id, popupRef] of _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.entries()) {
-                    if (popupRef === sourceEvent.source) { matchedId = id; break; }
+                    const actualRef = popupRef.ref || popupRef;
+                    if (actualRef === sourceEvent.source) { matchedId = id; break; }
                 }
             }
 
             if (matchedId) {
-                console.log(`[WorkerController] 🎉 [배치] 수집 완료 (ID: ${matchedId})`);
-                
-                const popupRef = _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.get(matchedId);
-                if (popupRef && !popupRef.closed) {
-                    // [최종 패치] 대기열에 pending 상태의 작업이 남아 있으면 창을 닫지 않고 릴레이용 보존!
-                    const queue = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getQueue */ .IS)();
-                    const pendingExists = queue.some(i => i.status === 'pending');
-                    if (!pendingExists) {
-                        popupRef.close();
-                        _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.delete(matchedId);
-                    }
-                } else {
-                    _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.delete(matchedId);
-                }
-                
-                (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .updateQueueItem */ .Gg)(matchedId, { status: 'completed', progressPercent: 100, stage: _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.COMPLETED });
-                _EventBus_js__WEBPACK_IMPORTED_MODULE_3__/* .EventBus */ .l.emit(_EventBus_js__WEBPACK_IMPORTED_MODULE_3__/* .EVT */ .c.UPDATE_PROGRESS);
-
-                // [배치 최종 갱신] 전 대기열 수집 완료 시 원격 드라이브 캐시 최종 갱신 수행
-                const currentQueue = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getQueue */ .IS)();
-                const hasActive = currentQueue.some(i => i.status === 'pending' || i.status === 'processing');
-                if (!hasActive) {
-                    const completedItem = currentQueue.find(i => i.id === matchedId);
-                    if (completedItem && completedItem.destination === 'drive') {
-                        console.log(`[WorkerController] ☁️ 전 대기열 수집 완료 -> 드라이브 캐시 갱신 시작: ${completedItem.rootFolder}`);
-                        (0,_gas_js__WEBPACK_IMPORTED_MODULE_5__/* .refreshCacheAfterUpload */ .jz)(
-                            completedItem.rootFolder,
-                            completedItem.category,
-                            completedItem.seriesMetadata || {}
-                        ).catch(e =>
-                            console.warn(`[WorkerController] 캐시 갱신 실패: ${e.message}`)
-                        );
-                    }
-                }
-
-                // 다음 대기 항목 릴레이 스케줄링
-                (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .runSchedulerOnce */ .gi)();
+                handleBatchSuccess(matchedId, payload, sourceEvent.source);
             }
         }
 
-        // 5. TASK_FAILED: 예외 및 복구 불능 실패 보고
+        // 5. TASK_COMPLETED_FALLBACK: GM Storage 폴백 완료
+        if (type === 'TASK_COMPLETED_FALLBACK') {
+            const { queueId } = payload || {};
+            let matchedId = queueId;
+
+            if (!matchedId) {
+                for (const [id, popupRef] of _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.entries()) {
+                    const actualRef = popupRef.ref || popupRef;
+                    if (actualRef === sourceEvent.source) { matchedId = id; break; }
+                }
+            }
+
+            if (matchedId) {
+                console.log(`[WorkerController] [배치] TASK_COMPLETED_FALLBACK 수신완료 (ID: ${matchedId})`);
+                const key = `tokisync_fallback_${matchedId}`;
+                const rawPayload = GM_getValue(key);
+                if (rawPayload) {
+                    GM_deleteValue(key); // 삭제
+                    handleBatchSuccess(matchedId, rawPayload, sourceEvent.source);
+                } else {
+                    console.error('[WorkerController] [배치] 폴백 데이터 획득 실패');
+                }
+            }
+        }
+
+        // 6. TASK_FAILED: 예외 및 복구 불능 실패 보고
         if (type === 'TASK_FAILED') {
             const { errorMsg, queueId } = payload || {};
             let matchedId = queueId;
 
             if (!matchedId) {
                 for (const [id, popupRef] of _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.entries()) {
-                    if (popupRef === sourceEvent.source) { matchedId = id; break; }
+                    const actualRef = popupRef.ref || popupRef;
+                    if (actualRef === sourceEvent.source) { matchedId = id; break; }
                 }
             }
 
@@ -2999,16 +3089,18 @@ function initBatchWorkerController() {
                 console.error(`[WorkerController] ❌ [배치] 수집 실패 (ID: ${matchedId}): ${errorMsg}`);
                 
                 const popupRef = _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.get(matchedId);
-                if (popupRef && !popupRef.closed) {
-                    // [최종 패치] 대기열에 남은 작업이 없으면 닫고, 있으면 릴레이용으로 킵!
-                    const queue = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getQueue */ .IS)();
-                    const pendingExists = queue.some(i => i.status === 'pending');
-                    if (!pendingExists) {
-                        popupRef.close();
+                if (popupRef) {
+                    const actualRef = popupRef.ref || popupRef;
+                    if (actualRef && !actualRef.closed) {
+                        const queue = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getQueue */ .IS)();
+                        const pendingExists = queue.some(i => i.status === 'pending');
+                        if (!pendingExists) {
+                            actualRef.close();
+                            _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.delete(matchedId);
+                        }
+                    } else {
                         _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.delete(matchedId);
                     }
-                } else {
-                    _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.delete(matchedId);
                 }
 
                 const queue = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getQueue */ .IS)();
@@ -3023,7 +3115,7 @@ function initBatchWorkerController() {
                     _EventBus_js__WEBPACK_IMPORTED_MODULE_3__/* .EventBus */ .l.emit(_EventBus_js__WEBPACK_IMPORTED_MODULE_3__/* .EVT */ .c.UPDATE_PROGRESS);
                 }
 
-                // [배치 최종 갱신] 실패 상황이더라도 전 대기열 수집이 완전히 종료되면 캐시 갱신 수행
+                // 배치 최종 실패 마감 시 처리
                 const currentQueue = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getQueue */ .IS)();
                 const hasActive = currentQueue.some(i => i.status === 'pending' || i.status === 'processing');
                 if (!hasActive) {
@@ -3040,7 +3132,6 @@ function initBatchWorkerController() {
                     }
                 }
 
-                // 다음 대기 항목 릴레이 스케줄링
                 (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .runSchedulerOnce */ .gi)();
             }
         }
@@ -4218,7 +4309,8 @@ __webpack_require__.d(__webpack_exports__, {
   LogBox: function() { return /* binding */ LogBox; },
   fo: function() { return /* binding */ MenuModal; },
   ze: function() { return /* binding */ Notifier; },
-  hV: function() { return /* binding */ markDownloadedItems; }
+  hV: function() { return /* binding */ markDownloadedItems; },
+  c9: function() { return /* binding */ showProgressModal; }
 });
 
 // UNUSED EXPORTS: FormRuleEditor, TreeRuleEditor
@@ -4929,7 +5021,7 @@ class MenuModal {
                             <span id="toki-progress-overall-text">진행률: 0% (0 / 0)</span>
                             <div id="toki-progress-overall-controls">
                                 <span id="toki-btn-queue-expand" title="대기열 크게 보기" class="toki-cursor-pointer toki-progress-btn">↕️</span>
-                                <span id="toki-btn-queue-clear" title="완료/실패 큐 정리" class="toki-cursor-pointer toki-progress-btn">🧹</span>
+                                <span id="toki-btn-queue-clear" title="완료 항목 정리" class="toki-cursor-pointer toki-progress-btn">🧹</span>
                                 <span id="toki-btn-queue-reset" title="대기열 전체 삭제 (초기화)" class="toki-cursor-pointer toki-progress-btn">🗑️</span>
                                 <span id="toki-btn-queue-pause" title="일시 정지" class="toki-cursor-pointer toki-progress-btn">⏸️</span>
                                 <span id="toki-btn-queue-stop" title="수집 중단" class="toki-cursor-pointer toki-progress-btn">⏹️</span>
@@ -5136,11 +5228,11 @@ class MenuModal {
                     return;
                 }
 
-                // 9-3. 완료/실패 정리 🧹
+                // 9-3. 완료 정리 🧹
                 const clearBtn = e.target.closest('#toki-btn-queue-clear');
                 if (clearBtn) {
-                    if (popupWindow.confirm('🧹 완료/실패 항목을 정리하시겠습니까?')) {
-                        (0,core_queue/* removeCompletedAndFailedItems */.US)();
+                    if (popupWindow.confirm('🧹 완료된 항목들을 정리하시겠습니까?')) {
+                        (0,core_queue/* removeCompletedItems */.OF)();
                         LogBox.getInstance().updateProgressUI();
                         (0,core_queue/* runSchedulerOnce */.gi)();
                     }
@@ -5836,7 +5928,7 @@ class FormRuleEditor {
     }
 
     render() {
-        const scriptVer =  true ? "1.22.0" : 0;
+        const scriptVer =  true ? "1.22.1" : 0;
         this.overlay.innerHTML = `
             <div class="toki-modal toki-form-editor-modal">
                 <div class="toki-modal-header">
@@ -6517,6 +6609,23 @@ class FormRuleEditor {
     }
 }
 
+/**
+ * 대기열 진행 모달을 강제로 노출시키는 팝업 헬퍼 함수
+ */
+function showProgressModal() {
+    const logBox = LogBox.getInstance();
+    logBox.openDashboard();
+    
+    if (logBox.popupWindow) {
+        const doc = logBox.popupWindow.document;
+        const progressModal = doc.getElementById('toki-modal-progress');
+        if (progressModal) {
+            progressModal.style.display = 'flex';
+        }
+    }
+}
+
+
 
 
 /***/ })
@@ -6975,6 +7084,10 @@ async function processItem(item, builder, siteInfo, iframe, parser, seriesTitle 
 
     const finalRootFolder = rootFolder || seriesTitle || 'UnknownSeries';
 
+    const currentNovelMode = config.novelMode;
+    const isSingleVolume = isNovel && currentNovelMode === 'singleVolume';
+    const buildingPolicy = config.buildingPolicy || 'individual';
+
     try {
         if (isNovel) {
             logger.log(`[소설] 추출 중: ${item.title}`, 'Downloader');
@@ -6997,16 +7110,16 @@ async function processItem(item, builder, siteInfo, iframe, parser, seriesTitle 
                 localEpisodePadding: config.localEpisodePadding
             });
 
-            if (result === true) {
-                logger.log(`... [자립형 워커] 소설 수집 및 드라이브/로컬 저장 성공: ${item.title}`, 'Downloader');
+            if (typeof result === 'string') {
+                builder.addChapter(item.title, result.trim());
+                logger.log(`✅ [부모 컨트롤러] 소설 추출 성공 (조립 적재 완료): ${item.title}`, 'Downloader');
+                
+                // 단일 합본용 큐 아이템 상태 갱신
+                (0,queue/* updateQueueItem */.Gg)(id, { status: 'completed', progressPercent: 100, stage: queue/* WORKER_STAGE */.WB.COMPLETED });
+                EventBus/* EventBus */.l.emit(EventBus/* EVT */.c.UPDATE_PROGRESS);
+                
                 await (0,utils/* sleep */.yy)(policy.min, policy.max);
-                return true; // Self-contained completed
-            } else if (typeof result === 'string') {
-                // Plan C Fallback (API Decryption) - runs locally in parent
-                builder.addChapter(item.title, result);
-                logger.log(`... [Plan C API 폴백] 추출 성공: ${item.title}`, 'Downloader');
-                await (0,utils/* sleep */.yy)(policy.min, policy.max);
-                return false; // Requires parent to save
+                return false; // 부모 측에서 일괄 빌드 및 최종 저장을 하도록 false 반환
             } else {
                 throw new Error(`추출 실패 (소설 본문 응답 없음)`);
             }
@@ -7014,7 +7127,7 @@ async function processItem(item, builder, siteInfo, iframe, parser, seriesTitle 
         else {
             logger.log(`[만화] 추출 중: ${item.title}`, 'Downloader');
 
-            const success = await (0,worker_controller/* fetchComicImages */.gq)(item.src, {
+            const images = await (0,worker_controller/* fetchComicImages */.gq)(item.src, {
                 viewerCfg: viewerCfg,
                 seriesTitle: seriesTitle,
                 rootFolder: finalRootFolder,
@@ -7030,17 +7143,36 @@ async function processItem(item, builder, siteInfo, iframe, parser, seriesTitle 
                 localEpisodePadding: config.localEpisodePadding
             });
 
-            if (success) {
-                logger.log(`✅ [자립형 워커] 만화 수집 및 드라이브/로컬 저장 성공: ${item.title}`, 'Downloader');
+            if (Array.isArray(images)) {
+                // resolvedImages: [{ url, data: ArrayBuffer, ext, isMissing }, ...]
+                const resolvedImages = images.map(img => {
+                    const mimeType = img.ext?.includes('png') ? 'image/png' : (img.ext?.includes('webp') ? 'image/webp' : 'image/jpeg');
+                    return {
+                        url: img.url,
+                        blob: img.data ? new Blob([img.data], { type: mimeType }) : new Blob([]),
+                        ext: img.ext || '.jpg',
+                        isMissing: !!img.isMissing
+                    };
+                });
+
+                builder.addChapter(item.title, resolvedImages);
+                logger.log(`✅ [부모 컨트롤러] 만화 이미지 추출 성공 (조립 적재 완료): ${item.title}`, 'Downloader');
+                
+                // 단일 합본용 큐 아이템 상태 갱신
+                (0,queue/* updateQueueItem */.Gg)(id, { status: 'completed', progressPercent: 100, stage: queue/* WORKER_STAGE */.WB.COMPLETED });
+                EventBus/* EventBus */.l.emit(EventBus/* EVT */.c.UPDATE_PROGRESS);
+
                 await (0,utils/* sleep */.yy)(policy.min, policy.max);
-                return true; // Self-contained completed
+                return false; // 부모 측에서 일괄 저장하므로 false 반환
             } else {
                 throw new Error(`추출 실패 (만화 팝업 수집 실패)`);
             }
         }
     } finally {
-        // 단일/로컬 워커 수집 완료/실패 후 대기열 임시 아이템 클린업
-        (0,queue/* removeQueueItem */.d$)(id);
+        // 단일 합본 및 배치 모드가 아닐 때만 즉시 큐 청소 (UI 지속 노출 보장)
+        if (!isSingleVolume && buildingPolicy !== 'zipOfCbzs') {
+            (0,queue/* removeQueueItem */.d$)(id);
+        }
     }
 }
 
@@ -7070,6 +7202,38 @@ function parseRangeSpec(spec) {
 
 async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = false) {
     const logger = ui.LogBox.getInstance();
+    const config = (0,core_config/* getConfig */.zj)();
+    
+    // --- 🚨 대기열 프리체크 스마트 필터 및 UI 위임 ---
+    const currentQueue = (0,queue/* getQueue */.IS)();
+    if (currentQueue.length > 0) {
+        const hasFailed = currentQueue.some(item => item.status === 'failed');
+        const hasPendingOrProcessing = currentQueue.some(item => item.status === 'pending' || item.status === 'processing');
+
+        if (hasFailed || hasPendingOrProcessing) {
+            const confirmNew = confirm(
+                "⚠️ 대기열에 완료되지 않았거나 실패한 수집 항목이 남아있습니다.\n\n" +
+                "[확인] 기존 대기열 초기화 후 새로 다운로드 시작\n" +
+                "[취소] 다운로드 요청 취소 및 대기열 수동 관리 창 열기"
+            );
+            
+            if (confirmNew) {
+                console.log('[TokiSync] 사용자의 승인으로 기존 대기열을 초기화합니다.');
+                (0,queue/* stopAllWorkers */.HO)();
+                (0,queue/* clearQueue */.lg)();
+            } else {
+                console.log('[TokiSync] 다운로드 요청을 취소하고 대기열 관리 창을 엽니다.');
+                (0,ui/* showProgressModal */.c9)();
+                return;
+            }
+        } else {
+            // 온전히 완료된 큐만 있다면 묻지 않고 자동 초기화
+            console.log('[TokiSync] 이전 수집이 정상 완료되었으므로 대기열을 자동 초기화합니다.');
+            (0,queue/* clearQueue */.lg)();
+        }
+    }
+    // ------------------------------------------------
+
     logger.init();
     logger.show();
     logger.info(`다운로드 시작 (정책: ${policy}, 강제 덮어쓰기: ${forceOverwrite})...`);
@@ -7633,10 +7797,10 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                     masterZip.file(`${fullFilename}.${extension}`, blob);
                     
                     // [v1.8.2] Batching Logic
-                    // Novel: Infinite batch. Webtoon: 20 per batch to prevent OOM
+                    // Novel: Infinite batch. Webtoon: 10 per batch to prevent OOM (하향 조정)
                     const processedCount = i + 1;
                     const isLastItem = (i === list.length - 1);
-                    const BATCH_SIZE = isNovel ? Infinity : 20;
+                    const BATCH_SIZE = isNovel ? Infinity : 10;
 
                     if ((BATCH_SIZE !== Infinity && processedCount % BATCH_SIZE === 0) || isLastItem) {
                         const batchNum = Math.ceil(processedCount / BATCH_SIZE);
@@ -7645,7 +7809,8 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                         logger.info(`📦 배치 저장 중... (${batchFilename})`);
                         await (0,utils/* saveFile */.OJ)(masterZip, batchFilename, 'local', 'zip', { category });
                         
-                        // Clear masterZip for next batch to save memory
+                        // Clear masterZip for next batch to save memory and GC
+                        masterZip = null;
                         masterZip = new JSZip();
                     }
                 } else if (buildingPolicy === 'individual') {
@@ -7758,6 +7923,9 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                 // Visual feedback (v1.9.5 consistent styling)
                 item.element.classList.add('toki-downloaded');
             }
+            
+            // GC 가드: 사용 완료된 개별 챕터 빌더의 메모리 즉시 해제
+            currentBuilder = null;
         }
 
 
@@ -8368,11 +8536,8 @@ var novel_decryptor = __webpack_require__(602);
 ;// ./src/core/worker-extractor.js
 /**
  * tokiSync - Self-contained Worker Extractor
- * Executes extraction, packaging, and direct Drive uploading inside the child popup.
+ * Executes extraction and forwards raw content back to the parent controller.
  */
-
-
-
 
 
 
@@ -8398,7 +8563,7 @@ function reportProgress(queueId, percent, stage) {
  * Main execution of the Self-contained Worker
  */
 function initWorkerExtractor() {
-    console.log("🚀 [TokiSync:Worker] 자립형 워커 엔진 시동 완료");
+    console.log("🚀 [TokiSync:Worker] 자립형 워커 엔진 시동 완료 (수집 전담 모드)");
 
     // Establish Handshake Heartbeat every second until parent injects instructions
     let handshakeInterval = setInterval(() => {
@@ -8440,17 +8605,12 @@ function initWorkerExtractor() {
             const { 
                 targetType, 
                 seriesTitle, 
-                rootFolder, // Normalized parent-side root folder name ([ID] Title)
+                rootFolder, 
                 episodeTitle, 
                 episodeNum, 
-                folderId, 
-                destination, 
-                novelFormat, 
                 matchedRule,
                 protocolDomain,
-                scanSpeedMultiplier = 1.0,
-                localNameTemplate = "{number} - {title}",
-                localEpisodePadding = "4"
+                scanSpeedMultiplier = 1.0
             } = msg.payload;
 
             console.log(`🚀 [TokiSync:Worker] 동작 지시문 수신 (ID: ${queueId}, 유형: ${targetType})`);
@@ -8461,33 +8621,12 @@ function initWorkerExtractor() {
             const viewerCfg = parser.rule.viewer || {};
 
             try {
-                let blob = null;
-                const configNovelFormat = novelFormat || 'epub';
-                const extension = (targetType === 'novel') ? configNovelFormat : 'cbz';
-                
-                // Final Filename: Dynamic based on Template or Drive fallback
-                let fullFilename;
-                if (destination !== 'drive') {
-                    const paddingVal = parseInt(localEpisodePadding, 10);
-                    const paddedNum = paddingVal > 0 
-                        ? (episodeNum || '').toString().padStart(paddingVal, '0') 
-                        : (episodeNum || '').toString();
-
-                    const template = localNameTemplate || "{number} - {title}";
-                    fullFilename = template
-                        .replace(/{number}/g, paddedNum)
-                        .replace(/{rawNumber}/g, (episodeNum || '').toString())
-                        .replace(/{series}/g, seriesTitle || rootFolder || '')
-                        .replace(/{title}/g, episodeTitle || '');
-                } else {
-                    const paddedNum = (episodeNum || '').toString().padStart(4, '0');
-                    fullFilename = `${paddedNum} - ${episodeTitle}`;
-                }
+                let content = "";
+                let resolvedImages = [];
 
                 // --- 1. SOSEL EXTRACTION ---
                 if (targetType === 'novel') {
                     reportProgress(queueId, 20, queue/* WORKER_STAGE */.WB.DOM_READY);
-                    let content = "";
                     let attempt = 0;
                     const maxAttempts = 10;
 
@@ -8535,19 +8674,7 @@ function initWorkerExtractor() {
                         throw new Error("소설 본문 추출에 실패했습니다. (Shadow DOM/API 복호화 무반응)");
                     }
 
-                    reportProgress(queueId, 70, queue/* WORKER_STAGE */.WB.PARSING);
-                    console.log(`[TokiSync:Worker] 소설 빌더 가동 시작 (${configNovelFormat.toUpperCase()})`);
-
-                    const builder = (configNovelFormat === 'txt') ? new TxtBuilder() : new EpubBuilder();
-                    builder.addChapter(episodeTitle, content.trim());
-                    const zip = await builder.build({
-                        series: seriesTitle,
-                        title: episodeTitle,
-                        number: episodeNum,
-                        writer: 'TokiSync'
-                    });
-                    blob = await zip.generateAsync({ type: 'blob' });
-
+                    reportProgress(queueId, 85, queue/* WORKER_STAGE */.WB.PARSING);
                 } 
                 // --- 2. MANHWA EXTRACTION ---
                 else {
@@ -8596,7 +8723,7 @@ function initWorkerExtractor() {
                                         data: arrayBuffer,
                                         size: imgBlob.size,
                                         type: imgBlob.type
-                                    };
+                                     };
                                 } catch (err) {
                                     console.error(`[TokiSync:Worker] 이미지 다운로드 실패 (${url}):`, err);
                                     processedCount++;
@@ -8646,54 +8773,96 @@ function initWorkerExtractor() {
                         return downloadedItem;
                     });
 
-                    console.log(`🎯 [TokiSync:Worker] 이미지 조립 및 CBZ 빌딩 개시`);
+                    console.log(`🎯 [TokiSync:Worker] 이미지 조립 준비 (부모 스레드 전달용)`);
                     reportProgress(queueId, 85, queue/* WORKER_STAGE */.WB.PARSING);
 
-                    const builder = new CbzBuilder();
-                    const resolvedImages = mergedData.map(img => {
-                        const mimeType = img.type || 'image/jpeg';
+                    resolvedImages = mergedData.map(img => {
                         return {
                             url: img.url,
-                            blob: img.data ? new Blob([img.data], { type: mimeType }) : new Blob([]),
+                            data: img.data, // ArrayBuffer 유지 (Transferable)
                             ext: img.type?.includes('png') ? '.png' : (img.type?.includes('webp') ? '.webp' : '.jpg'),
                             isMissing: !img.data
                         };
                     });
-
-                    builder.addChapter(episodeTitle, resolvedImages);
-                    const zip = await builder.build({
-                        series: seriesTitle,
-                        title: episodeTitle,
-                        number: episodeNum,
-                        writer: 'TokiSync'
-                    });
-                    blob = await zip.generateAsync({ type: 'blob' });
                 }
 
-                // --- 3. STORAGE PERSISTENCE (Direct Save/Upload) ---
-                console.log(`[TokiSync:Worker] I/O 드라이버 기동 - 저장소 적재 시작 (${destination})`);
-                reportProgress(queueId, 90, queue/* WORKER_STAGE */.WB.UPLOADING);
+                // --- 3. DATA TRANSMISSION & ACK LIFECYCLE ---
+                console.log(`[TokiSync:Worker] 데이터 전송 기동 - 부모 스레드로 전달 시작`);
+                reportProgress(queueId, 95, queue/* WORKER_STAGE */.WB.UPLOADING);
 
-                await (0,utils/* saveFile */.OJ)(blob, fullFilename, destination || 'drive', extension, {
-                    folderName: rootFolder || seriesTitle,
-                    category: targetType,
-                    folderId: folderId || ''
+                let completed = false;
+
+                const sendData = async () => {
+                    const payload = { queueId };
+                    const transferables = [];
+
+                    if (targetType === 'novel') {
+                        payload.content = content.trim();
+                    } else {
+                        payload.images = resolvedImages;
+                        resolvedImages.forEach(img => {
+                            if (img.data) {
+                                transferables.push(img.data);
+                            }
+                        });
+                    }
+
+                    try {
+                        console.log(`[TokiSync:Worker] 1차 시도: postMessage 기반 전송 개시...`);
+                        (0,ipc_broker/* sendToParent */.Ac)('TASK_COMPLETED', payload, transferables);
+                        console.log(`[TokiSync:Worker] postMessage 송신 완료. 부모의 ACK를 기다립니다.`);
+                    } catch (ipcErr) {
+                        console.warn(`[TokiSync:Worker] ⚠️ postMessage 실패 (샌드박스 차단 의심) -> GM_setValue 2차 폴백 구동:`, ipcErr);
+                        
+                        await new Promise((resolve) => {
+                            GM_setValue(`tokisync_fallback_${queueId}`, payload);
+                            // 전송 알림
+                            (0,ipc_broker/* sendToParent */.Ac)('TASK_COMPLETED_FALLBACK', { queueId });
+                            resolve();
+                        });
+                    }
+                };
+
+                // 부모의 ACK 응답을 받기 위한 이벤트 리스너 등록
+                let ackTimeout = null;
+                const ackCleanup = (0,ipc_broker/* registerIpcListener */.Q_)(async (ackMsg) => {
+                    if (ackMsg.type === 'IPC_ACK' && ackMsg.payload?.queueId === queueId) {
+                        console.log(`[TokiSync:Worker] 🎉 부모의 ACK 수신 완료! 안전하게 세션을 종료합니다.`);
+                        if (ackTimeout) clearTimeout(ackTimeout);
+                        ackCleanup();
+                        
+                        // 최종 큐 상태 업데이트
+                        (0,queue/* updateQueueItem */.Gg)(queueId, { 
+                            status: 'completed', 
+                            stage: queue/* WORKER_STAGE */.WB.COMPLETED, 
+                            progressPercent: 100 
+                        });
+                        reportProgress(queueId, 100, queue/* WORKER_STAGE */.WB.COMPLETED);
+                        
+                        cleanupIpc();
+                        
+                        // 팝업 닫기 세이프가드
+                        setTimeout(() => {
+                            window.close();
+                        }, 500);
+                    }
                 });
 
-                console.log(`[TokiSync:Worker] 🎉 에피소드 수집 & 저장 완착 완료! (${fullFilename})`);
-                
-                // Update final queue status inside Dexie/GM storage
-                (0,queue/* updateQueueItem */.Gg)(queueId, { 
-                    status: 'completed', 
-                    stage: queue/* WORKER_STAGE */.WB.COMPLETED, 
-                    progressPercent: 100 
-                });
-                
-                reportProgress(queueId, 100, queue/* WORKER_STAGE */.WB.COMPLETED);
-                
-                // Notify parent that task succeeded
-                (0,ipc_broker/* sendToParent */.Ac)('TASK_COMPLETED', { queueId });
-                cleanupIpc();
+                // ACK 대기 타임아웃 (15초간 부모 무반응 시 강제 종료)
+                ackTimeout = setTimeout(() => {
+                    console.warn(`[TokiSync:Worker] ⚠️ 부모 ACK 대기 타임아웃 (15초). 강제 완료 처리합니다.`);
+                    ackCleanup();
+                    (0,queue/* updateQueueItem */.Gg)(queueId, { 
+                        status: 'completed', 
+                        stage: queue/* WORKER_STAGE */.WB.COMPLETED, 
+                        progressPercent: 100 
+                    });
+                    reportProgress(queueId, 100, queue/* WORKER_STAGE */.WB.COMPLETED);
+                    cleanupIpc();
+                    window.close();
+                }, 15000);
+
+                await sendData();
 
             } catch (err) {
                 console.error(`[TokiSync:Worker] ❌ 에피소드 수집 중 치명적 오류 발생:`, err);
