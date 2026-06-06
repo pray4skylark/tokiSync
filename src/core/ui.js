@@ -11,7 +11,7 @@ import { RuleManager } from './parsers/RuleManager.js';
 import { GenericParser } from './parsers/GenericParser.js';
 import { extractEpisodeData } from './extractor.js';
 import styles from './ui.css';
-import { getQueue, getQueueStats, getQueuePaused, setQueuePaused, removeQueueItem, removeCompletedAndFailedItems, stopAllWorkers, runSchedulerOnce, clearQueue } from './queue.js';
+import { getQueue, getQueueStats, getQueuePaused, setQueuePaused, removeQueueItem, removeCompletedAndFailedItems, removeCompletedItems, stopAllWorkers, runSchedulerOnce, clearQueue } from './queue.js';
 
 export class LogBox {
     static instance = null;
@@ -689,7 +689,7 @@ export class MenuModal {
                             <span id="toki-progress-overall-text">진행률: 0% (0 / 0)</span>
                             <div id="toki-progress-overall-controls">
                                 <span id="toki-btn-queue-expand" title="대기열 크게 보기" class="toki-cursor-pointer toki-progress-btn">↕️</span>
-                                <span id="toki-btn-queue-clear" title="완료/실패 큐 정리" class="toki-cursor-pointer toki-progress-btn">🧹</span>
+                                <span id="toki-btn-queue-clear" title="완료 항목 정리" class="toki-cursor-pointer toki-progress-btn">🧹</span>
                                 <span id="toki-btn-queue-reset" title="대기열 전체 삭제 (초기화)" class="toki-cursor-pointer toki-progress-btn">🗑️</span>
                                 <span id="toki-btn-queue-pause" title="일시 정지" class="toki-cursor-pointer toki-progress-btn">⏸️</span>
                                 <span id="toki-btn-queue-stop" title="수집 중단" class="toki-cursor-pointer toki-progress-btn">⏹️</span>
@@ -896,11 +896,11 @@ export class MenuModal {
                     return;
                 }
 
-                // 9-3. 완료/실패 정리 🧹
+                // 9-3. 완료 정리 🧹
                 const clearBtn = e.target.closest('#toki-btn-queue-clear');
                 if (clearBtn) {
-                    if (popupWindow.confirm('🧹 완료/실패 항목을 정리하시겠습니까?')) {
-                        removeCompletedAndFailedItems();
+                    if (popupWindow.confirm('🧹 완료된 항목들을 정리하시겠습니까?')) {
+                        removeCompletedItems();
                         LogBox.getInstance().updateProgressUI();
                         runSchedulerOnce();
                     }
@@ -2301,4 +2301,21 @@ export class FormRuleEditor {
         return finalPath;
     }
 }
+
+/**
+ * 대기열 진행 모달을 강제로 노출시키는 팝업 헬퍼 함수
+ */
+export function showProgressModal() {
+    const logBox = LogBox.getInstance();
+    logBox.openDashboard();
+    
+    if (logBox.popupWindow) {
+        const doc = logBox.popupWindow.document;
+        const progressModal = doc.getElementById('toki-modal-progress');
+        if (progressModal) {
+            progressModal.style.display = 'flex';
+        }
+    }
+}
+
 

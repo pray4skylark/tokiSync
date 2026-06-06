@@ -5,14 +5,14 @@ import { detectSite } from './detector.js';
 import { EpubBuilder } from './epub.js';
 import { CbzBuilder } from './cbz.js';
 import { TxtBuilder } from './txt.js';
-import { LogBox, Notifier } from './ui.js';
+import { LogBox, Notifier, showProgressModal } from './ui.js';
 import { getConfig, isConfigValid } from './config.js';
 import { EventBus, EVT } from './EventBus.js';
 import { startSilentAudio, stopSilentAudio } from './anti_sleep.js';
 import { fetchHistory, refreshCacheAfterUpload, getBooksByCacheId, initUpdateUploadViaGASRelay, getMergeIndexFragment } from './gas.js';
 import { fetchHistoryDirect, checkSingleHistoryDirect, getOAuthToken, getOrCreateFolder } from './network.js';
 import { fetchNovelText, fetchComicImages, closeActiveWorker, initBatchWorkerController } from './worker-controller.js';
-import { addEpisodesToQueue, initQueueScheduler, activeWorkers, WORKER_STAGE, updateQueueItem, getQueue, removeQueueItem, getQueueItemId } from './queue.js';
+import { addEpisodesToQueue, initQueueScheduler, activeWorkers, WORKER_STAGE, updateQueueItem, getQueue, removeQueueItem, getQueueItemId, clearQueue, stopAllWorkers } from './queue.js';
 
 // Sleep Policy Presets
 const SLEEP_POLICIES = {
@@ -39,6 +39,10 @@ export async function processItem(item, builder, siteInfo, iframe, parser, serie
 
     const finalRootFolder = rootFolder || seriesTitle || 'UnknownSeries';
 
+    const currentNovelMode = config.novelMode;
+    const isSingleVolume = isNovel && currentNovelMode === 'singleVolume';
+    const buildingPolicy = config.buildingPolicy || 'individual';
+
     try {
         if (isNovel) {
             logger.log(`[소설] 추출 중: ${item.title}`, 'Downloader');
@@ -61,16 +65,16 @@ export async function processItem(item, builder, siteInfo, iframe, parser, serie
                 localEpisodePadding: config.localEpisodePadding
             });
 
-            if (result === true) {
-                logger.log(`... [자립형 워커] 소설 수집 및 드라이브/로컬 저장 성공: ${item.title}`, 'Downloader');
+            if (typeof result === 'string') {
+                builder.addChapter(item.title, result.trim());
+                logger.log(`✅ [부모 컨트롤러] 소설 추출 성공 (조립 적재 완료): ${item.title}`, 'Downloader');
+                
+                // 단일 합본용 큐 아이템 상태 갱신
+                updateQueueItem(id, { status: 'completed', progressPercent: 100, stage: WORKER_STAGE.COMPLETED });
+                EventBus.emit(EVT.UPDATE_PROGRESS);
+                
                 await sleep(policy.min, policy.max);
-                return true; // Self-contained completed
-            } else if (typeof result === 'string') {
-                // Plan C Fallback (API Decryption) - runs locally in parent
-                builder.addChapter(item.title, result);
-                logger.log(`... [Plan C API 폴백] 추출 성공: ${item.title}`, 'Downloader');
-                await sleep(policy.min, policy.max);
-                return false; // Requires parent to save
+                return false; // 부모 측에서 일괄 빌드 및 최종 저장을 하도록 false 반환
             } else {
                 throw new Error(`추출 실패 (소설 본문 응답 없음)`);
             }
@@ -78,7 +82,7 @@ export async function processItem(item, builder, siteInfo, iframe, parser, serie
         else {
             logger.log(`[만화] 추출 중: ${item.title}`, 'Downloader');
 
-            const success = await fetchComicImages(item.src, {
+            const images = await fetchComicImages(item.src, {
                 viewerCfg: viewerCfg,
                 seriesTitle: seriesTitle,
                 rootFolder: finalRootFolder,
@@ -94,17 +98,36 @@ export async function processItem(item, builder, siteInfo, iframe, parser, serie
                 localEpisodePadding: config.localEpisodePadding
             });
 
-            if (success) {
-                logger.log(`✅ [자립형 워커] 만화 수집 및 드라이브/로컬 저장 성공: ${item.title}`, 'Downloader');
+            if (Array.isArray(images)) {
+                // resolvedImages: [{ url, data: ArrayBuffer, ext, isMissing }, ...]
+                const resolvedImages = images.map(img => {
+                    const mimeType = img.ext?.includes('png') ? 'image/png' : (img.ext?.includes('webp') ? 'image/webp' : 'image/jpeg');
+                    return {
+                        url: img.url,
+                        blob: img.data ? new Blob([img.data], { type: mimeType }) : new Blob([]),
+                        ext: img.ext || '.jpg',
+                        isMissing: !!img.isMissing
+                    };
+                });
+
+                builder.addChapter(item.title, resolvedImages);
+                logger.log(`✅ [부모 컨트롤러] 만화 이미지 추출 성공 (조립 적재 완료): ${item.title}`, 'Downloader');
+                
+                // 단일 합본용 큐 아이템 상태 갱신
+                updateQueueItem(id, { status: 'completed', progressPercent: 100, stage: WORKER_STAGE.COMPLETED });
+                EventBus.emit(EVT.UPDATE_PROGRESS);
+
                 await sleep(policy.min, policy.max);
-                return true; // Self-contained completed
+                return false; // 부모 측에서 일괄 저장하므로 false 반환
             } else {
                 throw new Error(`추출 실패 (만화 팝업 수집 실패)`);
             }
         }
     } finally {
-        // 단일/로컬 워커 수집 완료/실패 후 대기열 임시 아이템 클린업
-        removeQueueItem(id);
+        // 단일 합본 및 배치 모드가 아닐 때만 즉시 큐 청소 (UI 지속 노출 보장)
+        if (!isSingleVolume && buildingPolicy !== 'zipOfCbzs') {
+            removeQueueItem(id);
+        }
     }
 }
 
@@ -134,6 +157,38 @@ export function parseRangeSpec(spec) {
 
 export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = false) {
     const logger = LogBox.getInstance();
+    const config = getConfig();
+    
+    // --- 🚨 대기열 프리체크 스마트 필터 및 UI 위임 ---
+    const currentQueue = getQueue();
+    if (currentQueue.length > 0) {
+        const hasFailed = currentQueue.some(item => item.status === 'failed');
+        const hasPendingOrProcessing = currentQueue.some(item => item.status === 'pending' || item.status === 'processing');
+
+        if (hasFailed || hasPendingOrProcessing) {
+            const confirmNew = confirm(
+                "⚠️ 대기열에 완료되지 않았거나 실패한 수집 항목이 남아있습니다.\n\n" +
+                "[확인] 기존 대기열 초기화 후 새로 다운로드 시작\n" +
+                "[취소] 다운로드 요청 취소 및 대기열 수동 관리 창 열기"
+            );
+            
+            if (confirmNew) {
+                console.log('[TokiSync] 사용자의 승인으로 기존 대기열을 초기화합니다.');
+                stopAllWorkers();
+                clearQueue();
+            } else {
+                console.log('[TokiSync] 다운로드 요청을 취소하고 대기열 관리 창을 엽니다.');
+                showProgressModal();
+                return;
+            }
+        } else {
+            // 온전히 완료된 큐만 있다면 묻지 않고 자동 초기화
+            console.log('[TokiSync] 이전 수집이 정상 완료되었으므로 대기열을 자동 초기화합니다.');
+            clearQueue();
+        }
+    }
+    // ------------------------------------------------
+
     logger.init();
     logger.show();
     logger.info(`다운로드 시작 (정책: ${policy}, 강제 덮어쓰기: ${forceOverwrite})...`);
@@ -697,10 +752,10 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                     masterZip.file(`${fullFilename}.${extension}`, blob);
                     
                     // [v1.8.2] Batching Logic
-                    // Novel: Infinite batch. Webtoon: 20 per batch to prevent OOM
+                    // Novel: Infinite batch. Webtoon: 10 per batch to prevent OOM (하향 조정)
                     const processedCount = i + 1;
                     const isLastItem = (i === list.length - 1);
-                    const BATCH_SIZE = isNovel ? Infinity : 20;
+                    const BATCH_SIZE = isNovel ? Infinity : 10;
 
                     if ((BATCH_SIZE !== Infinity && processedCount % BATCH_SIZE === 0) || isLastItem) {
                         const batchNum = Math.ceil(processedCount / BATCH_SIZE);
@@ -709,7 +764,8 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                         logger.info(`📦 배치 저장 중... (${batchFilename})`);
                         await saveFile(masterZip, batchFilename, 'local', 'zip', { category });
                         
-                        // Clear masterZip for next batch to save memory
+                        // Clear masterZip for next batch to save memory and GC
+                        masterZip = null;
                         masterZip = new JSZip();
                     }
                 } else if (buildingPolicy === 'individual') {
@@ -822,6 +878,9 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                 // Visual feedback (v1.9.5 consistent styling)
                 item.element.classList.add('toki-downloaded');
             }
+            
+            // GC 가드: 사용 완료된 개별 챕터 빌더의 메모리 즉시 해제
+            currentBuilder = null;
         }
 
 

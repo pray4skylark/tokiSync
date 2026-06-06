@@ -1,12 +1,9 @@
 /**
  * tokiSync - Self-contained Worker Extractor
- * Executes extraction, packaging, and direct Drive uploading inside the child popup.
+ * Executes extraction and forwards raw content back to the parent controller.
  */
 
-import { sleep, waitForContent, scrollToLoad, fetchBlobWithXHR, blobToArrayBuffer, saveFile } from './utils.js';
-import { EpubBuilder } from './epub.js';
-import { CbzBuilder } from './cbz.js';
-import { TxtBuilder } from './txt.js';
+import { sleep, waitForContent, scrollToLoad, fetchBlobWithXHR, blobToArrayBuffer } from './utils.js';
 import { updateQueueItem, WORKER_STAGE } from './queue.js';
 import { registerIpcListener, sendToParent } from './ipc-broker.js';
 import { GenericParser } from './parsers/GenericParser.js';
@@ -30,7 +27,7 @@ function reportProgress(queueId, percent, stage) {
  * Main execution of the Self-contained Worker
  */
 export function initWorkerExtractor() {
-    console.log("🚀 [TokiSync:Worker] 자립형 워커 엔진 시동 완료");
+    console.log("🚀 [TokiSync:Worker] 자립형 워커 엔진 시동 완료 (수집 전담 모드)");
 
     // Establish Handshake Heartbeat every second until parent injects instructions
     let handshakeInterval = setInterval(() => {
@@ -72,17 +69,12 @@ export function initWorkerExtractor() {
             const { 
                 targetType, 
                 seriesTitle, 
-                rootFolder, // Normalized parent-side root folder name ([ID] Title)
+                rootFolder, 
                 episodeTitle, 
                 episodeNum, 
-                folderId, 
-                destination, 
-                novelFormat, 
                 matchedRule,
                 protocolDomain,
-                scanSpeedMultiplier = 1.0,
-                localNameTemplate = "{number} - {title}",
-                localEpisodePadding = "4"
+                scanSpeedMultiplier = 1.0
             } = msg.payload;
 
             console.log(`🚀 [TokiSync:Worker] 동작 지시문 수신 (ID: ${queueId}, 유형: ${targetType})`);
@@ -93,33 +85,12 @@ export function initWorkerExtractor() {
             const viewerCfg = parser.rule.viewer || {};
 
             try {
-                let blob = null;
-                const configNovelFormat = novelFormat || 'epub';
-                const extension = (targetType === 'novel') ? configNovelFormat : 'cbz';
-                
-                // Final Filename: Dynamic based on Template or Drive fallback
-                let fullFilename;
-                if (destination !== 'drive') {
-                    const paddingVal = parseInt(localEpisodePadding, 10);
-                    const paddedNum = paddingVal > 0 
-                        ? (episodeNum || '').toString().padStart(paddingVal, '0') 
-                        : (episodeNum || '').toString();
-
-                    const template = localNameTemplate || "{number} - {title}";
-                    fullFilename = template
-                        .replace(/{number}/g, paddedNum)
-                        .replace(/{rawNumber}/g, (episodeNum || '').toString())
-                        .replace(/{series}/g, seriesTitle || rootFolder || '')
-                        .replace(/{title}/g, episodeTitle || '');
-                } else {
-                    const paddedNum = (episodeNum || '').toString().padStart(4, '0');
-                    fullFilename = `${paddedNum} - ${episodeTitle}`;
-                }
+                let content = "";
+                let resolvedImages = [];
 
                 // --- 1. SOSEL EXTRACTION ---
                 if (targetType === 'novel') {
                     reportProgress(queueId, 20, WORKER_STAGE.DOM_READY);
-                    let content = "";
                     let attempt = 0;
                     const maxAttempts = 10;
 
@@ -167,19 +138,7 @@ export function initWorkerExtractor() {
                         throw new Error("소설 본문 추출에 실패했습니다. (Shadow DOM/API 복호화 무반응)");
                     }
 
-                    reportProgress(queueId, 70, WORKER_STAGE.PARSING);
-                    console.log(`[TokiSync:Worker] 소설 빌더 가동 시작 (${configNovelFormat.toUpperCase()})`);
-
-                    const builder = (configNovelFormat === 'txt') ? new TxtBuilder() : new EpubBuilder();
-                    builder.addChapter(episodeTitle, content.trim());
-                    const zip = await builder.build({
-                        series: seriesTitle,
-                        title: episodeTitle,
-                        number: episodeNum,
-                        writer: 'TokiSync'
-                    });
-                    blob = await zip.generateAsync({ type: 'blob' });
-
+                    reportProgress(queueId, 85, WORKER_STAGE.PARSING);
                 } 
                 // --- 2. MANHWA EXTRACTION ---
                 else {
@@ -228,7 +187,7 @@ export function initWorkerExtractor() {
                                         data: arrayBuffer,
                                         size: imgBlob.size,
                                         type: imgBlob.type
-                                    };
+                                     };
                                 } catch (err) {
                                     console.error(`[TokiSync:Worker] 이미지 다운로드 실패 (${url}):`, err);
                                     processedCount++;
@@ -278,54 +237,96 @@ export function initWorkerExtractor() {
                         return downloadedItem;
                     });
 
-                    console.log(`🎯 [TokiSync:Worker] 이미지 조립 및 CBZ 빌딩 개시`);
+                    console.log(`🎯 [TokiSync:Worker] 이미지 조립 준비 (부모 스레드 전달용)`);
                     reportProgress(queueId, 85, WORKER_STAGE.PARSING);
 
-                    const builder = new CbzBuilder();
-                    const resolvedImages = mergedData.map(img => {
-                        const mimeType = img.type || 'image/jpeg';
+                    resolvedImages = mergedData.map(img => {
                         return {
                             url: img.url,
-                            blob: img.data ? new Blob([img.data], { type: mimeType }) : new Blob([]),
+                            data: img.data, // ArrayBuffer 유지 (Transferable)
                             ext: img.type?.includes('png') ? '.png' : (img.type?.includes('webp') ? '.webp' : '.jpg'),
                             isMissing: !img.data
                         };
                     });
-
-                    builder.addChapter(episodeTitle, resolvedImages);
-                    const zip = await builder.build({
-                        series: seriesTitle,
-                        title: episodeTitle,
-                        number: episodeNum,
-                        writer: 'TokiSync'
-                    });
-                    blob = await zip.generateAsync({ type: 'blob' });
                 }
 
-                // --- 3. STORAGE PERSISTENCE (Direct Save/Upload) ---
-                console.log(`[TokiSync:Worker] I/O 드라이버 기동 - 저장소 적재 시작 (${destination})`);
-                reportProgress(queueId, 90, WORKER_STAGE.UPLOADING);
+                // --- 3. DATA TRANSMISSION & ACK LIFECYCLE ---
+                console.log(`[TokiSync:Worker] 데이터 전송 기동 - 부모 스레드로 전달 시작`);
+                reportProgress(queueId, 95, WORKER_STAGE.UPLOADING);
 
-                await saveFile(blob, fullFilename, destination || 'drive', extension, {
-                    folderName: rootFolder || seriesTitle,
-                    category: targetType,
-                    folderId: folderId || ''
+                let completed = false;
+
+                const sendData = async () => {
+                    const payload = { queueId };
+                    const transferables = [];
+
+                    if (targetType === 'novel') {
+                        payload.content = content.trim();
+                    } else {
+                        payload.images = resolvedImages;
+                        resolvedImages.forEach(img => {
+                            if (img.data) {
+                                transferables.push(img.data);
+                            }
+                        });
+                    }
+
+                    try {
+                        console.log(`[TokiSync:Worker] 1차 시도: postMessage 기반 전송 개시...`);
+                        sendToParent('TASK_COMPLETED', payload, transferables);
+                        console.log(`[TokiSync:Worker] postMessage 송신 완료. 부모의 ACK를 기다립니다.`);
+                    } catch (ipcErr) {
+                        console.warn(`[TokiSync:Worker] ⚠️ postMessage 실패 (샌드박스 차단 의심) -> GM_setValue 2차 폴백 구동:`, ipcErr);
+                        
+                        await new Promise((resolve) => {
+                            GM_setValue(`tokisync_fallback_${queueId}`, payload);
+                            // 전송 알림
+                            sendToParent('TASK_COMPLETED_FALLBACK', { queueId });
+                            resolve();
+                        });
+                    }
+                };
+
+                // 부모의 ACK 응답을 받기 위한 이벤트 리스너 등록
+                let ackTimeout = null;
+                const ackCleanup = registerIpcListener(async (ackMsg) => {
+                    if (ackMsg.type === 'IPC_ACK' && ackMsg.payload?.queueId === queueId) {
+                        console.log(`[TokiSync:Worker] 🎉 부모의 ACK 수신 완료! 안전하게 세션을 종료합니다.`);
+                        if (ackTimeout) clearTimeout(ackTimeout);
+                        ackCleanup();
+                        
+                        // 최종 큐 상태 업데이트
+                        updateQueueItem(queueId, { 
+                            status: 'completed', 
+                            stage: WORKER_STAGE.COMPLETED, 
+                            progressPercent: 100 
+                        });
+                        reportProgress(queueId, 100, WORKER_STAGE.COMPLETED);
+                        
+                        cleanupIpc();
+                        
+                        // 팝업 닫기 세이프가드
+                        setTimeout(() => {
+                            window.close();
+                        }, 500);
+                    }
                 });
 
-                console.log(`[TokiSync:Worker] 🎉 에피소드 수집 & 저장 완착 완료! (${fullFilename})`);
-                
-                // Update final queue status inside Dexie/GM storage
-                updateQueueItem(queueId, { 
-                    status: 'completed', 
-                    stage: WORKER_STAGE.COMPLETED, 
-                    progressPercent: 100 
-                });
-                
-                reportProgress(queueId, 100, WORKER_STAGE.COMPLETED);
-                
-                // Notify parent that task succeeded
-                sendToParent('TASK_COMPLETED', { queueId });
-                cleanupIpc();
+                // ACK 대기 타임아웃 (15초간 부모 무반응 시 강제 종료)
+                ackTimeout = setTimeout(() => {
+                    console.warn(`[TokiSync:Worker] ⚠️ 부모 ACK 대기 타임아웃 (15초). 강제 완료 처리합니다.`);
+                    ackCleanup();
+                    updateQueueItem(queueId, { 
+                        status: 'completed', 
+                        stage: WORKER_STAGE.COMPLETED, 
+                        progressPercent: 100 
+                    });
+                    reportProgress(queueId, 100, WORKER_STAGE.COMPLETED);
+                    cleanupIpc();
+                    window.close();
+                }, 15000);
+
+                await sendData();
 
             } catch (err) {
                 console.error(`[TokiSync:Worker] ❌ 에피소드 수집 중 치명적 오류 발생:`, err);

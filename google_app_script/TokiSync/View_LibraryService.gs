@@ -287,7 +287,7 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
   const folderName = folder.name;
 
   let metadata = {
-    status: "ONGOING",
+    status: "연재중",
     authors: [],
     summary: "",
     category: categoryContext,
@@ -307,7 +307,7 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
     try {
       const content = DriveAccessService.getFileContent(metaResults[0].id);
       const metaData = JSON.parse(content);
-      const tid = (thumbMap && metaData.sourceId) ? thumbMap[metaData.sourceId] : "";
+      const tid = ((thumbMap && metaData.sourceId) ? thumbMap[metaData.sourceId] : "") || metaData.thumbnailId || "";
       return {
         id: metaData.id || folderId,
         sourceId: metaData.sourceId || "",
@@ -323,7 +323,7 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
         category: metaData.category || categoryContext,
         metadata: {
             category: metaData.category || categoryContext,
-            status: metaData.status || "ONGOING",
+            status: normalizeStatus(metaData.status) || "연재중",
             authors: metaData.author ? [metaData.author] : [],
             summary: metaData.summary || ""
         }
@@ -365,7 +365,7 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
       ) {
         metadata.category = parsed.category;
       }
-      if (parsed.status) metadata.status = parsed.status;
+      if (parsed.status) metadata.status = normalizeStatus(parsed.status);
       if (parsed.metadata && parsed.metadata.authors)
         metadata.authors = parsed.metadata.authors;
       else if (parsed.author) metadata.authors = [parsed.author];
@@ -444,7 +444,7 @@ function View_updateMetadata(seriesId, metadata, rootFolderId) {
     name: metadata.name !== undefined ? metadata.name : (existingMeta.name || folderName.replace(/^\[\d+\]\s*/, '').trim()),
     category: metadata.category !== undefined ? metadata.category : (existingMeta.category || "Unknown"),
     author: metadata.author !== undefined ? metadata.author : (existingMeta.author || ""),
-    status: metadata.status !== undefined ? metadata.status : (existingMeta.status || "연재중"),
+    status: metadata.status !== undefined ? normalizeStatus(metadata.status) : (normalizeStatus(existingMeta.status) || "연재중"),
     summary: metadata.summary !== undefined ? metadata.summary : (existingMeta.summary || ""),
     thumbnail: metadata.thumbnail !== undefined ? metadata.thumbnail : (existingMeta.thumbnail || ""),
     thumbnailId: metadata.thumbnailId !== undefined ? metadata.thumbnailId : (existingMeta.thumbnailId || ""),
@@ -531,5 +531,17 @@ function View_uploadThumbnail(seriesId, base64Data, rootFolderId) {
   View_updateMetadata(seriesId, { thumbnailId: fileId, thumbnail: "" }, rootFolderId);
   
   return { success: true, thumbnailId: fileId };
+}
+
+/**
+ * 상태값을 표준 한글 규격("연재중", "완결", "휴재")으로 정규화합니다.
+ */
+function normalizeStatus(status) {
+  if (!status) return "연재중";
+  const upper = status.toString().trim().toUpperCase();
+  if (upper === "ONGOING" || upper === "연재중") return "연재중";
+  if (upper === "COMPLETED" || upper === "완결") return "완결";
+  if (upper === "HIATUS" || upper === "휴재") return "휴재";
+  return status;
 }
 
