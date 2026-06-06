@@ -134,23 +134,46 @@ function View_Dispatcher(data) {
                 // [v1.6.2] Enrich fragment with full series metadata for dynamic Insert support
                 const titleClean = seriesFolderName.replace(/^\[\d+\]\s*/, '').trim();
                 
+                // [v1.22.0] 기존 _toki_meta.json 내용을 병합하여 수동 편집 내역 보존
+                let existingMeta = {};
+                const metaName = "_toki_meta.json";
+                const metaResults = DriveAccessService.list(seriesId, {
+                    query: `name = '${metaName}'`,
+                    fields: "files(id)"
+                });
+
+                if (metaResults.length > 0) {
+                    try {
+                        const content = DriveAccessService.getFileContent(metaResults[0].id);
+                        if (content && content.trim() !== "") {
+                            existingMeta = JSON.parse(content);
+                        }
+                    } catch (e) {
+                        Debug.log(`[MergeIndex] Failed to parse existing metadata: ${e.toString()}`);
+                    }
+                }
+                
                 const extraMeta = data.metadata || {};
-                const fragData = JSON.stringify({
+                const mergedMeta = {
+                    ...existingMeta,
                     id: seriesId,
                     sourceId: sourceId,
-                    name: titleClean,
+                    name: titleClean || existingMeta.name || seriesFolderName.replace(/^\[\d+\]\s*/, '').trim(),
                     folderName: seriesFolderName,
-                    url: "", // V3 metadata webViewLink is not used here to keep it small
-                    category: data.category || "Unknown",
-                    author: extraMeta.author || "",
-                    status: extraMeta.status || "연재중",
-                    summary: extraMeta.summary || "",
-                    thumbnail: extraMeta.thumbnail || "",
-                    created: meta.modifiedTime, // modifiedTime used as fallback for created
+                    url: existingMeta.url || "", 
+                    category: data.category || existingMeta.category || "Unknown",
+                    author: existingMeta.author || extraMeta.author || "",
+                    status: normalizeStatus(existingMeta.status || extraMeta.status || "연재중"),
+                    summary: existingMeta.summary || extraMeta.summary || "",
+                    thumbnail: existingMeta.thumbnail || extraMeta.thumbnail || "",
+                    thumbnailId: existingMeta.thumbnailId || extraMeta.thumbnailId || "",
+                    created: existingMeta.created || meta.modifiedTime, 
                     cacheFileId: cacheFileId,
                     itemsCount: itemsCount,
                     lastUpdated: new Date().toISOString()
-                });
+                };
+                
+                const fragData = JSON.stringify(mergedMeta);
                 
                 const existingFrags = DriveAccessService.list(mergeFolderId, {
                     query: `name = '${fragName}'`,
@@ -165,12 +188,6 @@ function View_Dispatcher(data) {
                 Debug.log(`[MergeIndex] Created fragment for ${sourceId} / ${cacheFileId}`);
 
                 // [v1.7.0] Metadata Persistence (Phase 3)
-                const metaName = "_toki_meta.json";
-                const metaResults = DriveAccessService.list(seriesId, {
-                    query: `name = '${metaName}'`,
-                    fields: "files(id)"
-                });
-
                 if (metaResults.length > 0) {
                     DriveAccessService.updateFileContent(metaResults[0].id, fragData);
                 } else {
@@ -185,6 +202,14 @@ function View_Dispatcher(data) {
             resultBody = { updated: true, seriesId: seriesId, mergeStatus: "failed", error: mergeErr.toString() };
         }
       }
+    } else if (action === "view_update_metadata") {
+      if (!data.seriesId) throw new Error("seriesId is required");
+      if (!data.metadata) throw new Error("metadata is required");
+      resultBody = View_updateMetadata(data.seriesId, data.metadata, folderId);
+    } else if (action === "view_upload_thumbnail") {
+      if (!data.seriesId) throw new Error("seriesId is required");
+      if (!data.base64Data) throw new Error("base64Data is required");
+      resultBody = View_uploadThumbnail(data.seriesId, data.base64Data, folderId);
     } else {
       throw new Error("Unknown Viewer Action: " + action);
     }

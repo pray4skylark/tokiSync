@@ -25,6 +25,7 @@ export function useViewerInput() {
   const {
     currentView,
     viewerData,
+    viewerDefaults,
     handleNext,
     handlePrev,
     toggleViewerUI,
@@ -41,14 +42,39 @@ export function useViewerInput() {
   const SWIPE_THRESHOLD = 40;
 
   /**
-   * 클릭 좌표(clientX) 기준으로 뷰어 영역 판별
-   * @returns {'prev'|'toggle'|'next'}
+   * 클릭 좌표(clientX, clientY) 기준으로 뷰어 영역 판별
    */
-  const getZone = (clientX) => {
+  const getZone = (clientX, clientY) => {
     const w = window.innerWidth;
-    if (clientX < w * 0.15) return 'prev';
-    if (clientX > w * 0.85) return 'next';
-    return 'toggle';
+    const h = window.innerHeight;
+    if (clientY < h * 0.15) return 'top';
+    if (clientY > h * 0.85) return 'bottom';
+    if (clientX < w * 0.15) return 'left';
+    if (clientX > w * 0.85) return 'right';
+    return 'center';
+  };
+
+  /**
+   * 영역별 매핑된 터치 액션 트리거
+   */
+  const triggerActionForZone = (zone, isTouch = false) => {
+    const mapping = viewerDefaults?.touchMapping || {
+      top: 'prev',
+      bottom: 'next',
+      left: 'prev',
+      right: 'next',
+      center: 'toggle'
+    };
+    const action = mapping[zone] || 'none';
+    const isImmediate = isTouch; // 터치 동작 시 즉각 이동 옵션 전송
+
+    if (action === 'prev') {
+      handlePrev(isImmediate);
+    } else if (action === 'next') {
+      handleNext(isImmediate);
+    } else if (action === 'toggle') {
+      toggleViewerUI();
+    }
   };
 
   /**
@@ -70,10 +96,8 @@ export function useViewerInput() {
     // 터치 후 발생하는 ghost mousedown 무시
     if (Date.now() - lastTouchEndTime < GHOST_CLICK_THRESHOLD) return;
 
-    const zone = getZone(e.clientX);
-    if (zone === 'prev') handlePrev();
-    else if (zone === 'next') handleNext();
-    else toggleViewerUI();
+    const zone = getZone(e.clientX, e.clientY);
+    triggerActionForZone(zone, false);
   };
 
   // ── 터치 핸들러 ────────────────────────────────────────────────
@@ -115,23 +139,24 @@ export function useViewerInput() {
 
     // 스크롤 모드: 탭만 처리 (스와이프는 브라우저 스크롤)
     if (viewerData.mode === 'scroll') {
-      if (absDx < 10 && absDy < 10) toggleViewerUI();
+      if (absDx < 10 && absDy < 10) {
+        const zone = getZone(t.clientX, t.clientY);
+        triggerActionForZone(zone, true);
+      }
       return;
     }
 
     // 페이지 모드: 수평 스와이프
     if (absDx > absDy && absDx > SWIPE_THRESHOLD) {
-      if (dx < 0) handleNext();
-      else handlePrev();
+      if (dx < 0) handleNext(true); // 즉각 이동
+      else handlePrev(true);
       return;
     }
 
-    // 탭: 좌/중/우 영역 판별
+    // 탭: 5개 영역 판별
     if (absDx < 10 && absDy < 10) {
-      const zone = getZone(t.clientX);
-      if (zone === 'prev') handlePrev();
-      else if (zone === 'next') handleNext();
-      else toggleViewerUI();
+      const zone = getZone(t.clientX, t.clientY);
+      triggerActionForZone(zone, true);
     }
   };
 

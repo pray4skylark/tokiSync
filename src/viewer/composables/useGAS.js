@@ -232,6 +232,20 @@ async function saveReadHistory(history) {
   return await request('view_history_save', { history });
 }
 
+/**
+ * 메타데이터 업데이트 요청 (GAS)
+ */
+async function updateMetadata(seriesId, metadata) {
+  return await request('view_update_metadata', { seriesId, metadata });
+}
+
+/**
+ * 썸네일 직접 업로드 요청 (GAS)
+ */
+async function uploadThumbnail(seriesId, base64Data) {
+  return await request('view_upload_thumbnail', { seriesId, base64Data });
+}
+
 export function useGAS() {
   return {
     gasConfig,
@@ -243,5 +257,7 @@ export function useGAS() {
     getChunk,
     getReadHistory,
     saveReadHistory,
+    updateMetadata,
+    uploadThumbnail,
   };
 }

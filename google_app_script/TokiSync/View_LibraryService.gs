@@ -287,7 +287,7 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
   const folderName = folder.name;
 
   let metadata = {
-    status: "ONGOING",
+    status: "연재중",
     authors: [],
     summary: "",
     category: categoryContext,
@@ -307,7 +307,7 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
     try {
       const content = DriveAccessService.getFileContent(metaResults[0].id);
       const metaData = JSON.parse(content);
-      const tid = (thumbMap && metaData.sourceId) ? thumbMap[metaData.sourceId] : "";
+      const tid = ((thumbMap && metaData.sourceId) ? thumbMap[metaData.sourceId] : "") || metaData.thumbnailId || "";
       return {
         id: metaData.id || folderId,
         sourceId: metaData.sourceId || "",
@@ -323,7 +323,7 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
         category: metaData.category || categoryContext,
         metadata: {
             category: metaData.category || categoryContext,
-            status: metaData.status || "ONGOING",
+            status: normalizeStatus(metaData.status) || "연재중",
             authors: metaData.author ? [metaData.author] : [],
             summary: metaData.summary || ""
         }
@@ -365,7 +365,7 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
       ) {
         metadata.category = parsed.category;
       }
-      if (parsed.status) metadata.status = parsed.status;
+      if (parsed.status) metadata.status = normalizeStatus(parsed.status);
       if (parsed.metadata && parsed.metadata.authors)
         metadata.authors = parsed.metadata.authors;
       else if (parsed.author) metadata.authors = [parsed.author];
@@ -408,5 +408,140 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
     lastModified: folder.modifiedTime,
     category: metadata.category,
   };
+}
+
+/**
+ * [v1.21.0] 시리즈 폴더의 메타데이터를 갱신하고 index.json에 반영합니다.
+ */
+function View_updateMetadata(seriesId, metadata, rootFolderId) {
+  if (!seriesId) throw new Error("seriesId is required");
+  
+  // 1. Get Series Folder Metadata to get folderName
+  const meta = DriveAccessService.getMetadata(seriesId);
+  const folderName = meta.name;
+  
+  // 2. Find or Create _toki_meta.json
+  const metaName = "_toki_meta.json";
+  const metaResults = DriveAccessService.list(seriesId, {
+    query: `name = '${metaName}'`,
+    fields: "files(id)"
+  });
+  
+  let existingMeta = {};
+  if (metaResults.length > 0) {
+    try {
+      const content = DriveAccessService.getFileContent(metaResults[0].id);
+      existingMeta = JSON.parse(content);
+    } catch (e) {
+      Logger.log("Failed to parse existing meta file: " + e.toString());
+    }
+  }
+  
+  // 3. Update fields (preserving system fields)
+  const updatedMeta = {
+    ...existingMeta,
+    id: seriesId,
+    name: metadata.name !== undefined ? metadata.name : (existingMeta.name || folderName.replace(/^\[\d+\]\s*/, '').trim()),
+    category: metadata.category !== undefined ? metadata.category : (existingMeta.category || "Unknown"),
+    author: metadata.author !== undefined ? metadata.author : (existingMeta.author || ""),
+    status: metadata.status !== undefined ? normalizeStatus(metadata.status) : (normalizeStatus(existingMeta.status) || "연재중"),
+    summary: metadata.summary !== undefined ? metadata.summary : (existingMeta.summary || ""),
+    thumbnail: metadata.thumbnail !== undefined ? metadata.thumbnail : (existingMeta.thumbnail || ""),
+    thumbnailId: metadata.thumbnailId !== undefined ? metadata.thumbnailId : (existingMeta.thumbnailId || ""),
+    lastUpdated: new Date().toISOString()
+  };
+  
+  const metaString = JSON.stringify(updatedMeta);
+  if (metaResults.length > 0) {
+    DriveAccessService.updateFileContent(metaResults[0].id, metaString);
+  } else {
+    DriveAccessService.createFile(seriesId, metaName, metaString, "application/json");
+  }
+  
+  // 4. Update index.json (Find and replace)
+  if (rootFolderId) {
+    const results = DriveAccessService.list(rootFolderId, {
+      query: `name = '${INDEX_FILE_NAME}'`,
+      fields: "files(id)"
+    });
+    
+    if (results.length > 0) {
+      try {
+        const content = DriveAccessService.getFileContent(results[0].id);
+        if (content && content.trim() !== "") {
+          const list = JSON.parse(content);
+          const idx = list.findIndex(s => s.id === seriesId);
+          if (idx !== -1) {
+            list[idx].name = updatedMeta.name;
+            list[idx].category = updatedMeta.category;
+            list[idx].thumbnail = updatedMeta.thumbnail;
+            list[idx].thumbnailId = updatedMeta.thumbnailId;
+            list[idx].lastModified = updatedMeta.lastUpdated;
+            if (!list[idx].metadata) list[idx].metadata = {};
+            list[idx].metadata.category = updatedMeta.category;
+            list[idx].metadata.status = updatedMeta.status;
+            list[idx].metadata.authors = updatedMeta.author ? [updatedMeta.author] : [];
+            list[idx].metadata.summary = updatedMeta.summary;
+            
+            View_saveIndex(rootFolderId, list);
+          }
+        }
+      } catch (e) {
+        Logger.log("[Metadata] Failed to update index.json: " + e.toString());
+      }
+    }
+  }
+  
+  return updatedMeta;
+}
+
+/**
+ * [v1.21.0] 썸네일 파일을 업로드하고, 시리즈 메타데이터의 thumbnailId를 갱신합니다.
+ */
+function View_uploadThumbnail(seriesId, base64Data, rootFolderId) {
+  if (!seriesId) throw new Error("seriesId is required");
+  if (!base64Data) throw new Error("base64Data is required");
+  
+  // 1. Decode base64 to binary bytes
+  const bytes = Utilities.base64Decode(base64Data);
+  const blob = Utilities.newBlob(bytes, "image/jpeg", "_thumbnail.jpg");
+  
+  // 2. Check if _thumbnail.jpg already exists
+  const existingFiles = DriveAccessService.list(seriesId, {
+    query: "name = '_thumbnail.jpg' and trashed = false",
+    fields: "files(id)"
+  });
+  
+  let fileId = "";
+  if (existingFiles.length > 0) {
+    fileId = existingFiles[0].id;
+    // Overwrite content
+    Drive.Files.update({}, fileId, blob, { supportsAllDrives: true });
+  } else {
+    // Create new file
+    const metadata = {
+      name: "_thumbnail.jpg",
+      parents: [seriesId]
+    };
+    const newFile = Drive.Files.create(metadata, blob, { supportsAllDrives: true });
+    fileId = newFile.id;
+  }
+  
+  // 3. Update metadata in series
+  View_updateMetadata(seriesId, { thumbnailId: fileId, thumbnail: "" }, rootFolderId);
+  
+  return { success: true, thumbnailId: fileId };
+}
+
+/**
+ * 상태값을 표준 한글 규격("연재중", "완결", "휴재")으로 정규화합니다.
+ */
+function normalizeStatus(status) {
+  if (!status) return "연재중";
+  const upper = status.toString().trim().toUpperCase();
+  if (upper === "ONGOING" || upper === "연재중") return "연재중";
+  if (upper === "COMPLETED" || upper === "완결") return "완결";
+  if (upper === "HIATUS" || upper === "휴재") return "휴재";
+  return status;
 }
 

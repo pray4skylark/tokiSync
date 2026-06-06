@@ -142,13 +142,125 @@
                     </select>
                   </div>
 
+                  <div class="col-span-1 md:col-span-2 border-t border-white/5 my-2"></div>
+                  <div class="col-span-1 md:col-span-2 text-[9px] font-black text-theme-accent uppercase tracking-widest ml-1 mb-2">Touch Navigation Controls</div>
+
+                  <!-- 5방향 터치 매핑 조작 섹션 -->
+                  <div class="col-span-1 md:col-span-2 p-5 rounded-[24px] bg-black/20 border border-white/5 flex flex-col space-y-4">
+                    <div class="flex flex-col">
+                      <span class="text-[11px] font-black text-theme-text uppercase">Touch Area Actions</span>
+                      <span class="text-[9px] text-theme-muted uppercase">화면 터치 영역별 동작을 커스터마이징합니다.</span>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                      <div class="flex items-center justify-between bg-black/30 p-3 rounded-xl border border-white/5">
+                        <span class="text-[10px] font-bold text-zinc-400 uppercase">상단 (Top)</span>
+                        <select v-model="viewerDefaults.touchMapping.top" class="bg-black/60 border border-white/10 rounded-lg px-2 py-1 text-[10px] font-black text-theme-accent outline-none">
+                          <option value="prev">이전 (Prev)</option>
+                          <option value="next">다음 (Next)</option>
+                          <option value="toggle">메뉴 (Toggle)</option>
+                          <option value="none">없음 (None)</option>
+                        </select>
+                      </div>
+                      
+                      <div class="flex items-center justify-between bg-black/30 p-3 rounded-xl border border-white/5">
+                        <span class="text-[10px] font-bold text-zinc-400 uppercase">하단 (Bottom)</span>
+                        <select v-model="viewerDefaults.touchMapping.bottom" class="bg-black/60 border border-white/10 rounded-lg px-2 py-1 text-[10px] font-black text-theme-accent outline-none">
+                          <option value="prev">이전 (Prev)</option>
+                          <option value="next">다음 (Next)</option>
+                          <option value="toggle">메뉴 (Toggle)</option>
+                          <option value="none">없음 (None)</option>
+                        </select>
+                      </div>
+                      
+                      <div class="flex items-center justify-between bg-black/30 p-3 rounded-xl border border-white/5">
+                        <span class="text-[10px] font-bold text-zinc-400 uppercase">좌측 (Left)</span>
+                        <select v-model="viewerDefaults.touchMapping.left" class="bg-black/60 border border-white/10 rounded-lg px-2 py-1 text-[10px] font-black text-theme-accent outline-none">
+                          <option value="prev">이전 (Prev)</option>
+                          <option value="next">다음 (Next)</option>
+                          <option value="toggle">메뉴 (Toggle)</option>
+                          <option value="none">없음 (None)</option>
+                        </select>
+                      </div>
+                      
+                      <div class="flex items-center justify-between bg-black/30 p-3 rounded-xl border border-white/5">
+                        <span class="text-[10px] font-bold text-zinc-400 uppercase">우측 (Right)</span>
+                        <select v-model="viewerDefaults.touchMapping.right" class="bg-black/60 border border-white/10 rounded-lg px-2 py-1 text-[10px] font-black text-theme-accent outline-none">
+                          <option value="prev">이전 (Prev)</option>
+                          <option value="next">다음 (Next)</option>
+                          <option value="toggle">메뉴 (Toggle)</option>
+                          <option value="none">없음 (None)</option>
+                        </select>
+                      </div>
+                      
+                      <div class="col-span-1 sm:col-span-2 flex items-center justify-between bg-black/30 p-3 rounded-xl border border-white/5">
+                        <span class="text-[10px] font-bold text-zinc-400 uppercase">중앙 (Center)</span>
+                        <select v-model="viewerDefaults.touchMapping.center" class="bg-black/60 border border-white/10 rounded-lg px-2 py-1 text-[10px] font-black text-theme-accent outline-none">
+                          <option value="prev">이전 (Prev)</option>
+                          <option value="next">다음 (Next)</option>
+                          <option value="toggle">메뉴 (Toggle)</option>
+                          <option value="none">없음 (None)</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
                 </div>
               </div>
 
               <!-- Tab: Data -->
               <div v-else-if="activeTab === 'data'" class="space-y-8 py-2">
+                
+                <!-- 용량 정보 & 일괄 비우기 -->
+                <div class="p-6 rounded-[24px] bg-black/20 border border-white/5 space-y-4">
+                  <div class="flex justify-between items-center">
+                    <div class="flex flex-col text-left">
+                      <span class="text-[11px] font-black text-theme-accent uppercase tracking-widest">Offline Storage</span>
+                      <span class="text-[9px] text-theme-muted uppercase mt-1">다운로드된 오프라인 캐시 용량입니다.</span>
+                    </div>
+                    <span class="text-sm font-black text-white bg-white/5 border border-white/10 px-4 py-2 rounded-xl">
+                      {{ formatSize(cachedTotalSize) }}
+                    </span>
+                  </div>
+                  
+                  <div v-if="cachedEpisodesList.length > 0">
+                    <button @click="clearAllEpisodeCaches" class="w-full bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 py-3 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] transition-all">
+                      🗑️ Clear All Caches (전체 삭제)
+                    </button>
+                  </div>
+                </div>
+
+                <!-- 캐시된 리스트 목록 -->
+                <div class="space-y-3 text-left">
+                  <span class="text-[9px] font-black text-theme-accent uppercase tracking-widest ml-1">Cached Episodes ({{ cachedEpisodesList.length }}개)</span>
+                  
+                  <div v-if="cachedEpisodesList.length === 0" class="text-center py-8 bg-black/10 rounded-[24px] border border-white/5 text-theme-muted text-xs uppercase">
+                    캐시된 데이터가 없습니다.
+                  </div>
+                  
+                  <div v-else class="max-h-[250px] overflow-y-auto space-y-2 custom-scrollbar pr-2">
+                    <div v-for="ep in cachedEpisodesList" :key="ep.fileId" class="flex items-center justify-between p-4 rounded-xl bg-black/30 border border-white/5 hover:border-white/10 transition-all">
+                      <div class="min-w-0 pr-4">
+                        <p class="text-[8px] font-black text-theme-accent uppercase tracking-wider truncate">{{ ep.seriesTitle }}</p>
+                        <p class="text-xs font-bold text-white truncate mt-0.5">{{ ep.episodeTitle }}</p>
+                        <p class="text-[8px] text-zinc-500 mt-1 uppercase">{{ new Date(ep.cachedAt).toLocaleString() }}</p>
+                      </div>
+                      <div class="flex items-center space-x-3 flex-shrink-0">
+                        <span class="text-[10px] font-bold text-zinc-400">{{ formatSize(ep.size) }}</span>
+                        <button @click="deleteEpisodeCache(ep.fileId)" class="p-2 hover:bg-red-500/20 text-zinc-400 hover:text-red-400 rounded-lg transition-all" title="삭제">
+                          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="col-span-1 md:col-span-2 border-t border-white/5 my-2"></div>
+
                 <div class="space-y-4">
-                  <div class="text-[9px] font-black text-red-500 uppercase tracking-widest ml-1 mb-2">Maintenance</div>
+                  <div class="text-[9px] font-black text-red-500 uppercase tracking-widest ml-1 mb-2 text-left">Maintenance</div>
                   <button @click="forceCloudSync" class="w-full bg-theme-surface-hover border border-white/5 hover:border-theme-accent p-6 rounded-[24px] text-left transition-all flex items-center justify-between group">
                     <div class="flex flex-col">
                       <span class="text-sm font-black text-theme-text uppercase">Force Cloud Sync</span>
@@ -180,12 +292,15 @@
 </template>
 
 <script setup>
-import { ref } from 'vue';
+import { ref, watch } from 'vue';
 import { useStore } from '../composables/useStore';
 
-const { showSettings, config, viewerDefaults, forceCloudSync, saveCloudConfig, reloadApp } = useStore();
+const { 
+  showSettings, config, viewerDefaults, forceCloudSync, saveCloudConfig, reloadApp,
+  formatSize, cachedEpisodesList, cachedTotalSize, loadOfflineCacheInfo, deleteEpisodeCache, clearAllEpisodeCaches
+} = useStore();
 
-const appVersion = typeof __VIEWER_VERSION__ !== 'undefined' ? __VIEWER_VERSION__ : '1.20.0';
+const appVersion = typeof __VIEWER_VERSION__ !== 'undefined' ? __VIEWER_VERSION__ : '1.22.0';
 
 const activeTab = ref('cloud');
 const tabItems = [
@@ -193,6 +308,12 @@ const tabItems = [
   { id: 'viewer', label: 'Viewer', icon: '📖' },
   { id: 'data', label: 'Data', icon: '🛠️' },
 ];
+
+watch(activeTab, (tab) => {
+  if (tab === 'data') {
+    loadOfflineCacheInfo();
+  }
+});
 </script>
 
 <style scoped>

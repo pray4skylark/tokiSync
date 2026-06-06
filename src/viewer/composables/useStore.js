@@ -20,7 +20,7 @@ function isStale(cachedAt, ttl) {
 
 // --- Sub-Composables ---
 const { isConnected, initBridge, bridgeFetch } = useBridge();
-const { gasConfig, setConfig, isConfigured, getLibrary, getBooks, getReadHistory, saveReadHistory } = useGAS();
+const { gasConfig, setConfig, isConfigured, getLibrary, getBooks, getReadHistory, saveReadHistory, updateMetadata, uploadThumbnail } = useGAS();
 const { 
   downloadProgress, isDownloading, isPreloading, 
   fetchAndUnzip, preloadEpisode, cleanupBlobUrls, formatSize, cancelViewerDownload 
@@ -38,7 +38,7 @@ const isInitialLoading = ref(true);
 const isSyncing = ref(false);
 const notification = ref('');
 const needsServerUpdate = ref(false); // [v1.8.0] 서버 업데이트 안내용
-const RECOMMENDED_SERVER_VERSION = '1.8.0';
+const RECOMMENDED_SERVER_VERSION = '1.22.0';
 
 const config = reactive({ deploymentId: '', apiKey: '', folderId: '' });
 const viewerDefaults = reactive({ 
@@ -49,7 +49,14 @@ const viewerDefaults = reactive({
   virtualScroll: true,
   preloadNext: true,
   downloadThreads: 2, // [v1.7.4] Default parallelism
-  viewerVersion: 1 // [v2.1] 1: Legacy, 2: Progress Locator System
+  viewerVersion: 2, // [v2.1] 1: Legacy, 2: Progress Locator System (기본값 2로 강제 전환 설정)
+  touchMapping: {
+    top: 'prev',
+    bottom: 'next',
+    left: 'prev',
+    right: 'next',
+    center: 'toggle'
+  }
 });
 
 // [v2.1] Progress Marker Engine Initialization
@@ -69,7 +76,17 @@ const {
   const saved = localStorage.getItem('TOKI_VIEWER_DEFAULTS');
   if (saved) {
     try {
-      Object.assign(viewerDefaults, JSON.parse(saved));
+      const parsed = JSON.parse(saved);
+      if (!parsed.touchMapping) {
+        parsed.touchMapping = {
+          top: 'prev',
+          bottom: 'next',
+          left: 'prev',
+          right: 'next',
+          center: 'toggle'
+        };
+      }
+      Object.assign(viewerDefaults, parsed);
     } catch (e) {
       console.warn('[Store] Failed to load viewerDefaults:', e);
     }
@@ -109,6 +126,32 @@ const toggleTheme = () => {
 };
 
 const libraryItems = ref([]);
+const librarySortMode = ref(localStorage.getItem('TOKI_LIBRARY_SORT_MODE') || 'recent');
+const seriesLastReadMap = ref({});
+const cachedEpisodesList = ref([]);
+const cachedTotalSize = ref(0);
+
+watch(librarySortMode, (val) => {
+  localStorage.setItem('TOKI_LIBRARY_SORT_MODE', val);
+});
+
+async function updateSeriesLastReadMap() {
+  try {
+    const histories = await db.readHistory.toArray();
+    const map = {};
+    histories.forEach(h => {
+      if (!h.seriesId) return;
+      if (!map[h.seriesId] || h.lastReadAt > map[h.seriesId]) {
+        map[h.seriesId] = h.lastReadAt;
+      }
+    });
+    seriesLastReadMap.value = map;
+    console.log('[Store] Updated series last read map:', map);
+  } catch (e) {
+    console.warn('[Store] Failed to update seriesLastReadMap:', e);
+  }
+}
+
 const selectedItem = ref(null);
 const currentEpisode = ref(null);
 const currentPage = ref(1);
@@ -186,13 +229,105 @@ async function cleanupEpisodeData() {
   }
 }
 
-const filteredLibrary = computed(() => libraryItems.value.filter(item => {
-  const cat = item.category || (item.metadata ? item.metadata.category : 'Unknown');
-  const matchTab = currentTab.value === 'all' || cat.toLowerCase() === currentTab.value;
-  const name = item.name || item.title || '';
-  // [v1.7.4] Filter out system folders starting with '_' (e.g., _MERGEINDEX)
-  return matchTab && !name.startsWith('_') && name.toLowerCase().includes(searchQuery.value.toLowerCase());
-}));
+async function loadOfflineCacheInfo() {
+  try {
+    const dataRecords = await db.episodeData.toArray();
+    let total = 0;
+    const list = [];
+
+    const epCaches = await db.episodeCache.toArray();
+    const epCacheMap = new Map(epCaches.map(e => [e.id, e]));
+
+    const libCache = await db.libraryCache.get('default');
+    const seriesMap = new Map(libCache?.data?.map(s => [s.id, s]) || []);
+
+    for (const record of dataRecords) {
+      const size = record.bytes ? record.bytes.length : 0;
+      total += size;
+
+      const epMeta = epCacheMap.get(record.fileId);
+      const seriesMeta = seriesMap.get(record.seriesId);
+
+      list.push({
+        fileId: record.fileId,
+        seriesId: record.seriesId,
+        seriesTitle: seriesMeta?.title || seriesMeta?.name || 'Unknown Series',
+        episodeTitle: epMeta?.name || epMeta?.title || record.fileId,
+        size: size,
+        cachedAt: record.cachedAt
+      });
+    }
+
+    cachedEpisodesList.value = list.sort((a, b) => b.cachedAt - a.cachedAt);
+    cachedTotalSize.value = total;
+    console.log(`[Store] Offline Cache Loaded. Total size: ${total} bytes, count: ${list.length}`);
+  } catch (e) {
+    console.warn('[Store] Failed to load offline cache info:', e);
+  }
+}
+
+async function deleteEpisodeCache(fileId) {
+  try {
+    await db.episodeData.delete(fileId);
+    notify('🗑️ 캐시를 성공적으로 삭제했습니다.');
+    await loadOfflineCacheInfo();
+  } catch (e) {
+    console.warn('[Store] Failed to delete episode cache:', e);
+    notify('❌ 캐시 삭제 실패');
+  }
+}
+
+async function clearAllEpisodeCaches() {
+  try {
+    await db.episodeData.clear();
+    notify('🗑️ 전체 오프라인 캐시를 삭제했습니다.');
+    await loadOfflineCacheInfo();
+  } catch (e) {
+    console.warn('[Store] Failed to clear all caches:', e);
+    notify('❌ 캐시 전체 삭제 실패');
+  }
+}
+
+const filteredLibrary = computed(() => {
+  const list = libraryItems.value.filter(item => {
+    const cat = item.category || (item.metadata ? item.metadata.category : 'Unknown');
+    const matchTab = currentTab.value === 'all' || cat.toLowerCase() === currentTab.value;
+    const name = item.name || item.title || '';
+    return matchTab && !name.startsWith('_') && name.toLowerCase().includes(searchQuery.value.toLowerCase());
+  });
+
+  if (librarySortMode.value === 'recent') {
+    return list.slice().sort((a, b) => {
+      const timeA = seriesLastReadMap.value[a.id] || '';
+      const timeB = seriesLastReadMap.value[b.id] || '';
+      if (timeA && timeB) return timeB.localeCompare(timeA);
+      if (timeA) return -1;
+      if (timeB) return 1;
+      // Default to alphabetical if neither read
+      const nameA = a.name || a.title || '';
+      const nameB = b.name || b.title || '';
+      return nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' });
+    });
+  } else if (librarySortMode.value === 'update') {
+    return list.slice().sort((a, b) => {
+      const timeA = a.lastUpdated || a.created || a.modifiedTime || '';
+      const timeB = b.lastUpdated || b.created || b.modifiedTime || '';
+      if (timeA && timeB) return timeB.localeCompare(timeA);
+      if (timeA) return -1;
+      if (timeB) return 1;
+      const nameA = a.name || a.title || '';
+      const nameB = b.name || b.title || '';
+      return nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' });
+    });
+  } else {
+    // alphabetical
+    return list.slice().sort((a, b) => {
+      const nameA = a.name || a.title || '';
+      const nameB = b.name || b.title || '';
+      return nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' });
+    });
+  }
+});
 
 const totalPages = computed(() => {
   if (!viewerContent.value) return 1;
@@ -321,6 +456,78 @@ const saveCloudConfig = () => {
 };
 
 /**
+ * [v1.21.0] 시리즈 폴더의 메타데이터를 저장 및 업데이트하고 로컬 캐시를 즉시 갱신합니다.
+ */
+const saveSeriesMetadata = async (seriesId, metadata, thumbnailBase64 = null) => {
+  isSyncing.value = true;
+  try {
+    let finalThumbnailId = metadata.thumbnailId || '';
+    
+    // 1. 썸네일 파일 업로드가 있는 경우
+    if (thumbnailBase64) {
+      notify('📤 썸네일 업로드 중...');
+      const uploadRes = await uploadThumbnail(seriesId, thumbnailBase64);
+      if (uploadRes && uploadRes.thumbnailId) {
+        finalThumbnailId = uploadRes.thumbnailId;
+      }
+    }
+    
+    // 2. 메타데이터 업데이트 API 전송
+    notify('💾 메타데이터 저장 중...');
+    const updatedMeta = await updateMetadata(seriesId, {
+      ...metadata,
+      thumbnailId: finalThumbnailId
+    });
+    
+    if (updatedMeta) {
+      // 3. 로컬 Dexie libraryCache 데이터 즉각 갱신
+      const cached = await db.libraryCache.get('default');
+      if (cached && Array.isArray(cached.data)) {
+        const idx = cached.data.findIndex(s => s.id === seriesId);
+        if (idx !== -1) {
+          cached.data[idx] = {
+            ...cached.data[idx],
+            name: updatedMeta.name,
+            category: updatedMeta.category,
+            thumbnailId: updatedMeta.thumbnailId,
+            thumbnail: updatedMeta.thumbnail,
+            lastModified: updatedMeta.lastUpdated,
+            metadata: {
+              ...cached.data[idx].metadata,
+              category: updatedMeta.category,
+              status: updatedMeta.status,
+              authors: updatedMeta.author ? [updatedMeta.author] : [],
+              summary: updatedMeta.summary
+            }
+          };
+          await db.libraryCache.put(cached);
+          libraryItems.value = cached.data;
+        }
+      }
+      
+      // selectedItem이 일치하면 이것도 업데이트
+      if (selectedItem.value && selectedItem.value.id === seriesId) {
+        selectedItem.value = {
+          ...selectedItem.value,
+          name: updatedMeta.name,
+          title: updatedMeta.name,
+          category: updatedMeta.category,
+          thumbnailId: updatedMeta.thumbnailId,
+          thumbnail: updatedMeta.thumbnail
+        };
+      }
+      
+      notify('✅ 메타데이터 저장이 완료되었습니다.');
+    }
+  } catch (e) {
+    console.error('[Store] Failed to save metadata:', e);
+    notify(`❌ 저장 실패: ${e.message}`);
+  } finally {
+    isSyncing.value = false;
+  }
+};
+
+/**
  * Initialize the app: setup Bridge, load config, fetch library
  */
 // --- Read History Helpers ---
@@ -346,7 +553,10 @@ async function syncHistoryFromDrive() {
   if (!isConfigured()) return;
   try {
     const remote = await getReadHistory();
-    if (!Array.isArray(remote)) return;
+    if (!Array.isArray(remote)) {
+      await updateSeriesLastReadMap();
+      return;
+    }
     const local = await db.readHistory.toArray();
     const merged = mergeHistory(local, remote);
     await db.readHistory.bulkPut(merged);
@@ -354,6 +564,8 @@ async function syncHistoryFromDrive() {
     console.log(`[History] Drive sync 완료: ${merged.length}개`);
   } catch (e) {
     console.warn('[History] Drive pull 실패 (로컬 이력 사용):', e);
+  } finally {
+    await updateSeriesLastReadMap();
   }
 }
 
@@ -432,6 +644,7 @@ const initApp = async () => {
       console.log('⚠️ GAS 설정이 필요합니다.');
     }
   }
+  await updateSeriesLastReadMap();
 
   isInitialLoading.value = false;
 };
@@ -624,6 +837,7 @@ const startReading = async (ep) => {
     const target = episodes.value.find(e => e.id === ep.id);
     if (target) target.isRead = true;
     await refreshLastReadEpisode();
+    await updateSeriesLastReadMap();
   } catch (e) {
     console.warn('[History] 로컬 이력 기록 실패:', e);
   }
@@ -701,11 +915,12 @@ const goToPrevEpisode = () => {
   }
 };
 
-const exitViewer = () => {
+const exitViewer = async () => {
   // [v2.9.2] 뷰어 종료 시 마지막 위치 즉시 저장
   if (currentEpisode.value) {
-    flushSaveToDB(currentEpisode.value.id);
+    await flushSaveToDB(currentEpisode.value.id);
   }
+  await updateSeriesLastReadMap();
   cancelViewerDownload(); // [v1.7.5] 시청 종료 시 뷰어 다운로드 + 프리로드 즉시 중단
   cleanupBlobUrls();
   viewerContent.value = null;
@@ -805,10 +1020,10 @@ watch(currentPage, (newPage) => {
   container.scrollTo({ top: targetScroll, behavior: 'auto' });
 });
 
-const next = () => {
+const next = (immediate = false) => {
   if (viewerData.mode === 'scroll') {
     const container = document.getElementById('viewer-container');
-    container.scrollBy({ top: window.innerHeight * 0.8, behavior: 'smooth' });
+    container.scrollBy({ top: window.innerHeight * 0.8, behavior: immediate ? 'auto' : 'smooth' });
   } else if (viewerContent.value?.type === 'text') {
     // Novel page mode
     if (novelCurrentPage.value < novelPageCount.value - 1) {
@@ -833,7 +1048,7 @@ const next = () => {
   }
 };
 
-const prev = () => {
+const prev = (immediate = false) => {
   // 안내 화면에서 뒤로가면 마지막 페이지로 복귀
   if (showNextEpisodeGuide.value) {
     showNextEpisodeGuide.value = false;
@@ -841,7 +1056,7 @@ const prev = () => {
   }
   if (viewerData.mode === 'scroll') {
     const container = document.getElementById('viewer-container');
-    container.scrollBy({ top: -window.innerHeight * 0.8, behavior: 'smooth' });
+    container.scrollBy({ top: -window.innerHeight * 0.8, behavior: immediate ? 'auto' : 'smooth' });
   } else if (viewerContent.value?.type === 'text') {
     // Novel page mode
     if (novelCurrentPage.value > 0) {
@@ -865,14 +1080,14 @@ const prev = () => {
   }
 };
 
-const handleNext = () => {
-  if (viewerDefaults.rtl) { prev(); return; }
-  next();
+const handleNext = (immediate = false) => {
+  if (viewerDefaults.rtl) { prev(immediate); return; }
+  next(immediate);
 };
 
-const handlePrev = () => {
-  if (viewerDefaults.rtl) { next(); return; }
-  prev();
+const handlePrev = (immediate = false) => {
+  if (viewerDefaults.rtl) { next(immediate); return; }
+  prev(immediate);
 };
 
 
@@ -962,7 +1177,7 @@ export function useStore() {
     isInitialLoading, isSyncing, notification, needsServerUpdate,
 
     // Config & Settings
-    config, gasConfig, viewerDefaults, viewerData, novelSettings,
+    config, gasConfig, viewerDefaults, viewerData, novelSettings, librarySortMode,
 
     // Global Theme
     appTheme, toggleTheme,
@@ -1003,6 +1218,7 @@ export function useStore() {
 
     // Methods
     notify, forceCloudSync, saveCloudConfig, initApp,
+    cachedEpisodesList, cachedTotalSize, loadOfflineCacheInfo, deleteEpisodeCache, clearAllEpisodeCaches, saveSeriesMetadata,
     openSeries, refreshEpisodes, startReading, exitViewer, goBackToLibrary,
     goToNextEpisode, goToPrevEpisode,
     toggleViewerUI, setViewerMode,

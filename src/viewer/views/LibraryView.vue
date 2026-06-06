@@ -1,14 +1,27 @@
 <template>
   <main class="max-w-7xl mx-auto w-full p-10 md:p-16">
     <div class="flex flex-col md:flex-row justify-between items-end mb-16 gap-10">
-      <div>
-        <h2 class="text-4xl font-black tracking-tighter mb-4 italic text-theme-text">My Collections</h2>
+    <div>
+      <h2 class="text-4xl font-black tracking-tighter mb-4 italic text-theme-text">My Collections</h2>
+      <div class="flex flex-wrap gap-4 items-center">
         <div class="flex space-x-2">
           <button v-for="tab in tabs" :key="tab.value" @click="currentTab = tab.value"
                   :class="currentTab === tab.value ? 'bg-theme-accent text-white' : 'bg-theme-surface text-theme-sub'"
                   class="px-6 py-2.5 rounded-xl text-[10px] font-black transition-all uppercase tracking-widest">{{ tab.label }}</button>
         </div>
+        <div class="flex bg-theme-surface rounded-xl p-0.5 border border-theme-border">
+          <button @click="librarySortMode = 'recent'"
+                  :class="librarySortMode === 'recent' ? 'bg-theme-accent text-white' : 'text-theme-muted hover:text-theme-text'"
+                  class="px-4 py-2 rounded-lg text-[9px] font-black transition-all uppercase tracking-wider">최근</button>
+          <button @click="librarySortMode = 'update'"
+                  :class="librarySortMode === 'update' ? 'bg-theme-accent text-white' : 'text-theme-muted hover:text-theme-text'"
+                  class="px-4 py-2 rounded-lg text-[9px] font-black transition-all uppercase tracking-wider">업데이트</button>
+          <button @click="librarySortMode = 'alphabetical'"
+                  :class="librarySortMode === 'alphabetical' ? 'bg-theme-accent text-white' : 'text-theme-muted hover:text-theme-text'"
+                  class="px-4 py-2 rounded-lg text-[9px] font-black transition-all uppercase tracking-wider">가나다</button>
+        </div>
       </div>
+    </div>
       <div class="flex items-center gap-4 w-full md:w-auto">
         <div class="relative flex-grow md:w-[400px] group">
           <input v-model="searchQuery" type="text" placeholder="Search..." class="w-full bg-theme-surface border border-theme-border rounded-[24px] px-8 py-5 pl-16 text-sm outline-none focus:ring-2 focus:ring-theme-accent transition-all text-theme-text">
@@ -48,6 +61,12 @@
         <div class="relative aspect-cover rounded-[36px] overflow-hidden card-hover bg-theme-thumb-bg shadow-2xl border border-theme-border transition-all">
           <img :src="getThumbnailUrl(item)" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
                @error="$event.target.src = NO_IMAGE_SVG">
+          <!-- 편집 버튼 -->
+          <button @click.stop="openEditModal(item)" 
+                  class="absolute top-4 right-4 w-9 h-9 bg-zinc-950/80 backdrop-blur border border-white/10 hover:bg-theme-accent hover:border-theme-accent rounded-xl flex items-center justify-center text-xs text-white opacity-0 group-hover:opacity-100 transition-all duration-300 shadow-xl"
+                  title="정보 수정">
+            ✏️
+          </button>
         </div>
         <div class="mt-6 px-2 text-theme-text">
           <h4 class="font-black text-sm truncate tracking-tighter group-hover:text-theme-accent transition-colors uppercase italic">{{ item.name || item.title }}</h4>
@@ -58,11 +77,25 @@
         </div>
       </div>
     </div>
+    
+    <!-- 메타데이터 수정 모달 -->
+    <MetadataEditModal :isOpen="isEditOpen" :series="editingSeries" @close="isEditOpen = false" />
   </main>
 </template>
 
 <script setup>
+import { ref } from 'vue';
 import { useStore } from '../composables/useStore';
 import ServerUpdateBanner from '../components/ServerUpdateBanner.vue';
-const { currentTab, tabs, searchQuery, isInitialLoading, isSyncing, filteredLibrary, openSeries, refreshLibrary, isConfigured, getThumbnailUrl, NO_IMAGE_SVG } = useStore();
+import MetadataEditModal from '../components/MetadataEditModal.vue';
+
+const { currentTab, tabs, searchQuery, isInitialLoading, isSyncing, filteredLibrary, openSeries, refreshLibrary, isConfigured, getThumbnailUrl, NO_IMAGE_SVG, librarySortMode } = useStore();
+
+const isEditOpen = ref(false);
+const editingSeries = ref(null);
+
+const openEditModal = (item) => {
+  editingSeries.value = item;
+  isEditOpen.value = true;
+};
 </script>
