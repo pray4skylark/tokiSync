@@ -1081,12 +1081,10 @@ const prev = (immediate = false) => {
 };
 
 const handleNext = (immediate = false) => {
-  if (viewerDefaults.rtl) { prev(immediate); return; }
   next(immediate);
 };
 
 const handlePrev = (immediate = false) => {
-  if (viewerDefaults.rtl) { next(immediate); return; }
   prev(immediate);
 };
 
