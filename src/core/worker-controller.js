@@ -9,6 +9,10 @@ import { updateQueueItem, WORKER_STAGE, activeWorkers, getQueue, runSchedulerOnc
 import { EventBus, EVT } from './EventBus.js';
 import { getConfig } from './config.js';
 import { refreshCacheAfterUpload } from './gas.js';
+import { EpubBuilder } from './epub.js';
+import { CbzBuilder } from './cbz.js';
+import { TxtBuilder } from './txt.js';
+import { saveFile } from './utils.js';
 
 // Reference for the single worker popup (used in sequential mode)
 let activeWorkerRef = null;
@@ -342,8 +346,8 @@ export function initBatchWorkerController() {
         }
     }, 2000);
 
-    const handleBatchSuccess = (matchedId, payload, sourceWindow) => {
-        console.log(`[WorkerController] 🎉 [배치] 수집 완료 처리 (ID: matchedId)`);
+    const handleBatchSuccess = async (matchedId, payload, sourceWindow) => {
+        console.log(`[WorkerController] 🎉 [배치] 수집 완료 처리 (ID: ${matchedId})`);
 
         // 자식에게 즉시 ACK 수락 신호 전송
         if (sourceWindow && !sourceWindow.closed) {
@@ -354,21 +358,113 @@ export function initBatchWorkerController() {
             }
         }
 
-        // 수집된 바이너리/텍스트 데이터를 메모리 전역 큐 아이템 필드에 적재
+        // 1. 큐에서 상세 정보 획득
+        const queue = getQueue();
+        const item = queue.find(i => i.id === matchedId);
+
+        if (!item) {
+            console.error(`[WorkerController] 대기열에서 매칭되는 아이템을 찾을 수 없습니다: ${matchedId}`);
+            return;
+        }
+
+        // 수집된 바이너리/텍스트 데이터를 임시로 메모리에 업데이트하고 상태를 UPLOADING으로 표시
         updateQueueItem(matchedId, {
-            status: 'completed',
-            progressPercent: 100,
-            stage: WORKER_STAGE.COMPLETED,
+            stage: WORKER_STAGE.UPLOADING,
+            progressPercent: 95,
             extractedContent: payload.content || null,
             extractedImages: payload.images || null
         });
+        EventBus.emit(EVT.UPDATE_PROGRESS);
+
+        try {
+            const { category, destination, novelFormat, episodeTitle, episodeNum, rootFolder, title, matchedRule } = item;
+            const isNovel = (category === 'Novel' || category === 'novel');
+            const siteName = matchedRule?.name || "TokiSync Parser";
+
+            let blob;
+            const extension = isNovel ? novelFormat : 'cbz';
+
+            // 2. 미디어 타입별 조립(Build) 진행
+            if (isNovel) {
+                if (!payload.content) {
+                    throw new Error("수집된 소설 본문 데이터가 없습니다.");
+                }
+                const builder = novelFormat === 'txt' ? new TxtBuilder() : new EpubBuilder();
+                builder.addChapter(episodeTitle, payload.content.trim());
+                
+                const innerZip = await builder.build({
+                    series: title || rootFolder,
+                    title: episodeTitle,
+                    number: episodeNum,
+                    writer: siteName
+                });
+                blob = await innerZip.generateAsync({ type: "blob" });
+            } else {
+                if (!payload.images || !Array.isArray(payload.images)) {
+                    throw new Error("수집된 만화 이미지 데이터가 없습니다.");
+                }
+                const builder = new CbzBuilder();
+                const resolvedImages = payload.images.map(img => {
+                    const mimeType = img.ext?.includes('png') ? 'image/png' : (img.ext?.includes('webp') ? 'image/webp' : 'image/jpeg');
+                    return {
+                        url: img.url,
+                        blob: img.data ? new Blob([img.data], { type: mimeType }) : new Blob([]),
+                        ext: img.ext || '.jpg',
+                        isMissing: !!img.isMissing
+                    };
+                });
+                builder.addChapter(episodeTitle, resolvedImages);
+                
+                const innerZip = await builder.build({
+                    series: title || rootFolder,
+                    title: episodeTitle,
+                    number: episodeNum,
+                    writer: siteName
+                });
+                blob = await innerZip.generateAsync({ type: "blob" });
+            }
+
+            // 3. 파일 이름 결정 및 구글 드라이브 업로드 실행 (Drive 업로드는 4자리 제로패딩 포함)
+            const paddedNum = (episodeNum || '').toString().padStart(4, '0');
+            const fullFilename = `${paddedNum} - ${episodeTitle}`;
+
+            console.log(`[WorkerController] [배치 업로드] 파일 조립 완료. 구글 드라이브 전송 시작: ${fullFilename}.${extension}`);
+            
+            await saveFile(blob, fullFilename, destination, extension, {
+                folderName: rootFolder,
+                category: category
+            });
+
+            // 4. 업로드 완료 후 최종 성공 전이
+            updateQueueItem(matchedId, {
+                status: 'completed',
+                progressPercent: 100,
+                stage: WORKER_STAGE.COMPLETED
+            });
+            console.log(`[WorkerController] 🎉 [배치] 업로드 및 완료 처리 성공 (ID: ${matchedId})`);
+
+        } catch (uploadErr) {
+            console.error(`[WorkerController] ❌ [배치] 업로드 처리 중 예외 발생:`, uploadErr);
+            const nextRetry = (item.retryCount || 0) + 1;
+            updateQueueItem(matchedId, {
+                status: nextRetry >= 3 ? 'failed' : 'pending',
+                retryCount: nextRetry,
+                errorMsg: uploadErr.message || '파일 빌드 및 업로드 실패'
+            });
+
+            EventBus.emit(EVT.LOG, {
+                msg: `❌ [배치 업로드 실패] [${item.episodeTitle}] ${uploadErr.message || '오류 발생'} (시도: ${nextRetry}/3)`,
+                tag: 'Queue',
+                level: 'error'
+            });
+        }
 
         const popupRef = activeWorkers.get(matchedId);
         if (popupRef) {
             const actualRef = popupRef.ref || popupRef;
             if (actualRef && !actualRef.closed) {
-                const queue = getQueue();
-                const pendingExists = queue.some(i => i.status === 'pending');
+                const updatedQueue = getQueue();
+                const pendingExists = updatedQueue.some(i => i.status === 'pending');
                 if (!pendingExists) {
                     actualRef.close();
                     activeWorkers.delete(matchedId);
