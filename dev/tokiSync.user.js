@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.22.1
+// @version      1.22.2
 // @description  Toki series sites -> Google Drive syncing tool (Bundled)
 // @author       pray4skylark
 // @updateURL    https://pray4skylark.github.io/tokiSync/tokiSync.user.js
@@ -5928,7 +5928,7 @@ class FormRuleEditor {
     }
 
     render() {
-        const scriptVer =  true ? "1.22.1" : 0;
+        const scriptVer =  true ? "1.22.2" : 0;
         this.overlay.innerHTML = `
             <div class="toki-modal toki-form-editor-modal">
                 <div class="toki-modal-header">
@@ -6890,7 +6890,7 @@ function cleanNovelParagraphs(html) {
         .replace(/<br\s*\/?>/gi, '\n')
         .replace(/<\/p>/gi, '\n')
         .replace(/<\/div>/gi, '\n')
-        .replace(/<[^>]+>/g, ''); // 나머지 HTML 태그 완전 제거
+        .replace(/<(?:\/?(?:br|p|div|span|a|b|strong|i|em|u|font|img|style|script)(?:\s+[^>]*)?)>/gi, ''); // 나머지 HTML 태그 완전 제거
 
     // 2. HTML 엔티티 치환
     text = text
