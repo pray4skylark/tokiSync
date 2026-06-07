@@ -9,7 +9,7 @@ function cleanNovelParagraphs(html) {
         .replace(/<br\s*\/?>/gi, '\n')
         .replace(/<\/p>/gi, '\n')
         .replace(/<\/div>/gi, '\n')
-        .replace(/<[^>]+>/g, ''); // 나머지 HTML 태그 완전 제거
+        .replace(/<(?:\/?(?:br|p|div|span|a|b|strong|i|em|u|font|img|style|script)(?:\s+[^>]*)?)>/gi, ''); // 나머지 HTML 태그 완전 제거
 
     // 2. HTML 엔티티 치환
     text = text
