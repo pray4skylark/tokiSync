@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.22.2
+// @version      1.22.3
 // @description  Toki series sites -> Google Drive syncing tool (Bundled)
 // @author       pray4skylark
 // @updateURL    https://pray4skylark.github.io/tokiSync/tokiSync.user.js
@@ -1321,6 +1321,159 @@ async function checkSingleHistoryDirect(folderId, episodeNumStr) {
 
 /***/ }),
 
+/***/ 409:
+/***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
+
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   I: function() { return /* binding */ TxtBuilder; }
+/* harmony export */ });
+/**
+ * 소설 본문의 HTML 태그를 제거하고 가독성 좋게 줄바꿈을 문단 단위로 정제하는 함수
+ */
+function cleanNovelParagraphs(html) {
+    if (!html) return "";
+
+    // 1. HTML 태그를 줄바꿈 및 공백으로 치환
+    let text = html
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/p>/gi, '\n')
+        .replace(/<\/div>/gi, '\n')
+        .replace(/<(?:\/?(?:br|p|div|span|a|b|strong|i|em|u|font|img|style|script)(?:\s+[^>]*)?)>/gi, ''); // 나머지 HTML 태그 완전 제거
+
+    // 2. HTML 엔티티 치환
+    text = text
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&')
+        .replace(/&quot;/g, '"');
+
+    // 3. 각 줄의 좌우 공백 트리밍 및 유령 문자 정리
+    text = text
+        .split('\n')
+        .map(line => line.trim())
+        .join('\n');
+
+    // 4. 3개 이상 과도한 연속 줄바꿈을 2개(\n\n, 빈 줄 1개)로 제한
+    text = text.replace(/\n{3,}/g, '\n\n');
+
+    return text.trim();
+}
+
+class TxtBuilder {
+    constructor() {
+        this.content = "";
+    }
+
+    addChapter(title, textContent) {
+        this.content += `\n\n=== ${title} ===\n\n`;
+        this.content += cleanNovelParagraphs(textContent);
+    }
+
+    async build(metadata = {}) {
+        try {
+            // Return an object that duck-types JSZip's generateAsync
+            return {
+                generateAsync: async () => {
+                    // Prepend metadata title at the top if available
+                    let finalContent = this.content;
+                    if (metadata.title) {
+                        finalContent = `[ ${metadata.title} ]\n` + finalContent;
+                    }
+                    return new Blob([finalContent], { type: 'text/plain;charset=utf-8' });
+                }
+            };
+        } catch (e) {
+            const { LogBox } = await Promise.resolve(/* import() */).then(__webpack_require__.bind(__webpack_require__, 989));
+            LogBox.getInstance().critical(`TXT 빌드 실패: ${e.message} (${metadata.title || 'unknown'})`, 'Builder:TXT');
+            throw e;
+        }
+    }
+}
+
+
+/***/ }),
+
+/***/ 416:
+/***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
+
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   $: function() { return /* binding */ CbzBuilder; }
+/* harmony export */ });
+
+class CbzBuilder {
+    constructor() {
+        this.chapters = [];
+    }
+
+    addChapter(title, images) {
+        // images: array of { blob, ext }
+        this.chapters.push({ title, images });
+    }
+
+    async build(metadata = {}) {
+        try {
+            const zip = new JSZip();
+            
+            // Kavita Compatibility: Images at root, no subfolders
+            // Note: As per new strategy, we only build one chapter per CBZ.
+            this.chapters.forEach((chapter) => {
+                chapter.images.forEach((img, idx) => {
+                    if (img && img.blob) {
+                        const filename = img.isMissing 
+                            ? `[PAGE_MISSING]_image_${String(idx).padStart(4, '0')}${img.ext}`
+                            : `image_${String(idx).padStart(4, '0')}${img.ext}`;
+                        zip.file(filename, img.blob);
+                    }
+                });
+            });
+
+            const comicInfo = this.generateComicInfo(metadata);
+            zip.file("ComicInfo.xml", comicInfo);
+
+            return zip;
+        } catch (e) {
+            const { LogBox } = await Promise.resolve(/* import() */).then(__webpack_require__.bind(__webpack_require__, 989));
+            LogBox.getInstance().critical(`CBZ 빌드 실패: ${e.message} (${metadata.title || 'unknown'})`, 'Builder:CBZ');
+            throw e;
+        }
+    }
+
+    generateComicInfo(metadata) {
+        const series = metadata.series || "Unknown Series";
+        const title = metadata.title || "";
+        const number = metadata.number || "";
+        const writer = metadata.writer || "";
+        const pageCount = this.chapters.reduce((acc, chap) => acc + chap.images.length, 0);
+
+        return `<?xml version="1.0" encoding="utf-8"?>
+<ComicInfo xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <Series>${this.escapeXml(series)}</Series>
+  <Number>${number}</Number>
+  <Title>${this.escapeXml(title)}</Title>
+  <Writer>${this.escapeXml(writer)}</Writer>
+  <LanguageISO>ko</LanguageISO>
+  <PageCount>${pageCount}</PageCount>
+  <Manga>YesAndRightToLeft</Manga>
+</ComicInfo>`;
+    }
+
+    escapeXml(unsafe) {
+        return unsafe.replace(/[<>&"']/g, (c) => {
+            switch (c) {
+                case '<': return '&lt;';
+                case '>': return '&gt;';
+                case '&': return '&amp;';
+                case '"': return '&quot;';
+                case "'": return '&apos;';
+            }
+        });
+    }
+}
+
+
+/***/ }),
+
 /***/ 419:
 /***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
 
@@ -2289,6 +2442,135 @@ async function getMergeIndexFragment(sourceId) {
 
 /***/ }),
 
+/***/ 523:
+/***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
+
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   s: function() { return /* binding */ EpubBuilder; }
+/* harmony export */ });
+class EpubBuilder {
+    constructor() {
+        this.chapters = [];
+    }
+
+    addChapter(title, textContent) {
+        // Simple text to HTML conversion
+        // Splits by newlines and wraps in <p>
+        const htmlContent = textContent
+            .split('\n')
+            .map(line => line.trim())
+            .filter(line => line.length > 0)
+            .map(line => `<p>${line}</p>`)
+            .join('\n');
+            
+        this.chapters.push({ title, content: htmlContent });
+    }
+
+    async build(metadata = {}) {
+        try {
+            const zip = new JSZip();
+            const title = metadata.title || "Unknown Title";
+            const author = metadata.author || "Unknown Author";
+            const uid = "urn:uuid:" + (crypto.randomUUID ? crypto.randomUUID() : Date.now());
+
+            // 1. mimetype (must be first, uncompressed)
+            zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
+
+            // 2. container.xml
+            zip.folder("META-INF").file("container.xml", `<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+    <rootfiles>
+        <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+    </rootfiles>
+</container>`);
+
+            // 3. OEBPS Folder
+            const oebps = zip.folder("OEBPS");
+
+            // styles.css
+            oebps.file("styles.css", `body { font-family: sans-serif; } p { text-indent: 1em; margin-bottom: 0.5em; }`);
+
+            // Chapters
+            this.chapters.forEach((chapter, index) => {
+                const filename = `chapter_${index + 1}.xhtml`;
+                const xhtml = `<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<title>${chapter.title}</title>
+<link rel="stylesheet" type="text/css" href="styles.css"/>
+</head>
+<body>
+<h2>${chapter.title}</h2>
+${chapter.content}
+</body>
+</html>`;
+                oebps.file(filename, xhtml);
+            });
+
+            // content.opf
+            let manifest = `<item id="style" href="styles.css" media-type="text/css"/>\n`;
+            let spine = ``;
+            let tocNav = `<navMap>\n`;
+
+            this.chapters.forEach((c, i) => {
+                const id = `chap${i + 1}`;
+                const href = `chapter_${i + 1}.xhtml`;
+                manifest += `<item id="${id}" href="${href}" media-type="application/xhtml+xml"/>\n`;
+                spine += `<itemref idref="${id}"/>\n`;
+                tocNav += `<navPoint id="${id}" playOrder="${i+1}"><navLabel><text>${c.title}</text></navLabel><content src="${href}"/></navPoint>\n`;
+            });
+            // Add NCX to manifest
+            manifest += `<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>`;
+
+            const opf = `<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="BookId" version="2.0">
+    <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
+        <dc:title>${title}</dc:title>
+        <dc:creator opf:role="aut">${author}</dc:creator>
+        <dc:language>ko</dc:language>
+        <dc:identifier id="BookId">${uid}</dc:identifier>
+    </metadata>
+    <manifest>
+        ${manifest}
+    </manifest>
+    <spine toc="ncx">
+        ${spine}
+    </spine>
+</package>`;
+
+            oebps.file("content.opf", opf);
+
+            // toc.ncx
+            const ncx = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN" "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd">
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+<head>
+    <meta name="dtb:uid" content="${uid}"/>
+    <meta name="dtb:depth" content="1"/>
+    <meta name="dtb:totalPageCount" content="0"/>
+    <meta name="dtb:maxPageNumber" content="0"/>
+</head>
+<docTitle><text>${title}</text></docTitle>
+${tocNav}
+</navMap>
+</ncx>`;
+
+            oebps.file("toc.ncx", ncx);
+
+            // Return the ZIP object (which IS the EPUB)
+            return zip; 
+        } catch (e) {
+            const { LogBox } = await Promise.resolve(/* import() */).then(__webpack_require__.bind(__webpack_require__, 989));
+            LogBox.getInstance().critical(`EPUB 빌드 실패: ${e.message} (${metadata.title || 'unknown'})`, 'Builder:EPUB');
+            throw e;
+        }
+    }
+}
+
+
+/***/ }),
+
 /***/ 543:
 /***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
 
@@ -2507,10 +2789,18 @@ class RuleManager {
 /* harmony import */ var _EventBus_js__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(31);
 /* harmony import */ var _config_js__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(899);
 /* harmony import */ var _gas_js__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(488);
+/* harmony import */ var _epub_js__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(523);
+/* harmony import */ var _cbz_js__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(416);
+/* harmony import */ var _txt_js__WEBPACK_IMPORTED_MODULE_8__ = __webpack_require__(409);
+/* harmony import */ var _utils_js__WEBPACK_IMPORTED_MODULE_9__ = __webpack_require__(924);
 /**
  * tokiSync - Unified Worker Controller
  * Manages single popup lifecycle and IPC routing for sequential download mode.
  */
+
+
+
+
 
 
 
@@ -2851,8 +3141,8 @@ function initBatchWorkerController() {
         }
     }, 2000);
 
-    const handleBatchSuccess = (matchedId, payload, sourceWindow) => {
-        console.log(`[WorkerController] 🎉 [배치] 수집 완료 처리 (ID: matchedId)`);
+    const handleBatchSuccess = async (matchedId, payload, sourceWindow) => {
+        console.log(`[WorkerController] 🎉 [배치] 수집 완료 처리 (ID: ${matchedId})`);
 
         // 자식에게 즉시 ACK 수락 신호 전송
         if (sourceWindow && !sourceWindow.closed) {
@@ -2863,21 +3153,113 @@ function initBatchWorkerController() {
             }
         }
 
-        // 수집된 바이너리/텍스트 데이터를 메모리 전역 큐 아이템 필드에 적재
+        // 1. 큐에서 상세 정보 획득
+        const queue = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getQueue */ .IS)();
+        const item = queue.find(i => i.id === matchedId);
+
+        if (!item) {
+            console.error(`[WorkerController] 대기열에서 매칭되는 아이템을 찾을 수 없습니다: ${matchedId}`);
+            return;
+        }
+
+        // 수집된 바이너리/텍스트 데이터를 임시로 메모리에 업데이트하고 상태를 UPLOADING으로 표시
         (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .updateQueueItem */ .Gg)(matchedId, {
-            status: 'completed',
-            progressPercent: 100,
-            stage: _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.COMPLETED,
+            stage: _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.UPLOADING,
+            progressPercent: 95,
             extractedContent: payload.content || null,
             extractedImages: payload.images || null
         });
+        _EventBus_js__WEBPACK_IMPORTED_MODULE_3__/* .EventBus */ .l.emit(_EventBus_js__WEBPACK_IMPORTED_MODULE_3__/* .EVT */ .c.UPDATE_PROGRESS);
+
+        try {
+            const { category, destination, novelFormat, episodeTitle, episodeNum, rootFolder, title, matchedRule } = item;
+            const isNovel = (category === 'Novel' || category === 'novel');
+            const siteName = matchedRule?.name || "TokiSync Parser";
+
+            let blob;
+            const extension = isNovel ? novelFormat : 'cbz';
+
+            // 2. 미디어 타입별 조립(Build) 진행
+            if (isNovel) {
+                if (!payload.content) {
+                    throw new Error("수집된 소설 본문 데이터가 없습니다.");
+                }
+                const builder = novelFormat === 'txt' ? new _txt_js__WEBPACK_IMPORTED_MODULE_8__/* .TxtBuilder */ .I() : new _epub_js__WEBPACK_IMPORTED_MODULE_6__/* .EpubBuilder */ .s();
+                builder.addChapter(episodeTitle, payload.content.trim());
+                
+                const innerZip = await builder.build({
+                    series: title || rootFolder,
+                    title: episodeTitle,
+                    number: episodeNum,
+                    writer: siteName
+                });
+                blob = await innerZip.generateAsync({ type: "blob" });
+            } else {
+                if (!payload.images || !Array.isArray(payload.images)) {
+                    throw new Error("수집된 만화 이미지 데이터가 없습니다.");
+                }
+                const builder = new _cbz_js__WEBPACK_IMPORTED_MODULE_7__/* .CbzBuilder */ .$();
+                const resolvedImages = payload.images.map(img => {
+                    const mimeType = img.ext?.includes('png') ? 'image/png' : (img.ext?.includes('webp') ? 'image/webp' : 'image/jpeg');
+                    return {
+                        url: img.url,
+                        blob: img.data ? new Blob([img.data], { type: mimeType }) : new Blob([]),
+                        ext: img.ext || '.jpg',
+                        isMissing: !!img.isMissing
+                    };
+                });
+                builder.addChapter(episodeTitle, resolvedImages);
+                
+                const innerZip = await builder.build({
+                    series: title || rootFolder,
+                    title: episodeTitle,
+                    number: episodeNum,
+                    writer: siteName
+                });
+                blob = await innerZip.generateAsync({ type: "blob" });
+            }
+
+            // 3. 파일 이름 결정 및 구글 드라이브 업로드 실행 (Drive 업로드는 4자리 제로패딩 포함)
+            const paddedNum = (episodeNum || '').toString().padStart(4, '0');
+            const fullFilename = `${paddedNum} - ${episodeTitle}`;
+
+            console.log(`[WorkerController] [배치 업로드] 파일 조립 완료. 구글 드라이브 전송 시작: ${fullFilename}.${extension}`);
+            
+            await (0,_utils_js__WEBPACK_IMPORTED_MODULE_9__/* .saveFile */ .OJ)(blob, fullFilename, destination, extension, {
+                folderName: rootFolder,
+                category: category
+            });
+
+            // 4. 업로드 완료 후 최종 성공 전이
+            (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .updateQueueItem */ .Gg)(matchedId, {
+                status: 'completed',
+                progressPercent: 100,
+                stage: _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.COMPLETED
+            });
+            console.log(`[WorkerController] 🎉 [배치] 업로드 및 완료 처리 성공 (ID: ${matchedId})`);
+
+        } catch (uploadErr) {
+            console.error(`[WorkerController] ❌ [배치] 업로드 처리 중 예외 발생:`, uploadErr);
+            const nextRetry = (item.retryCount || 0) + 1;
+            (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .updateQueueItem */ .Gg)(matchedId, {
+                status: nextRetry >= 3 ? 'failed' : 'pending',
+                retryCount: nextRetry,
+                errorMsg: uploadErr.message || '파일 빌드 및 업로드 실패'
+            });
+
+            _EventBus_js__WEBPACK_IMPORTED_MODULE_3__/* .EventBus */ .l.emit(_EventBus_js__WEBPACK_IMPORTED_MODULE_3__/* .EVT */ .c.LOG, {
+                msg: `❌ [배치 업로드 실패] [${item.episodeTitle}] ${uploadErr.message || '오류 발생'} (시도: ${nextRetry}/3)`,
+                tag: 'Queue',
+                level: 'error'
+            });
+        }
 
         const popupRef = _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.get(matchedId);
         if (popupRef) {
             const actualRef = popupRef.ref || popupRef;
             if (actualRef && !actualRef.closed) {
-                const queue = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getQueue */ .IS)();
-                const pendingExists = queue.some(i => i.status === 'pending');
+                const updatedQueue = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getQueue */ .IS)();
+                const pendingExists = updatedQueue.some(i => i.status === 'pending');
                 if (!pendingExists) {
                     actualRef.close();
                     _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.delete(matchedId);
@@ -5928,7 +6310,7 @@ class FormRuleEditor {
     }
 
     render() {
-        const scriptVer =  true ? "1.22.2" : 0;
+        const scriptVer =  true ? "1.22.3" : 0;
         this.overlay.innerHTML = `
             <div class="toki-modal toki-form-editor-modal">
                 <div class="toki-modal-header">
@@ -6685,264 +7067,12 @@ var extractor = __webpack_require__(929);
 var ParserFactory = __webpack_require__(969);
 // EXTERNAL MODULE: ./src/core/detector.js
 var detector = __webpack_require__(419);
-;// ./src/core/epub.js
-class EpubBuilder {
-    constructor() {
-        this.chapters = [];
-    }
-
-    addChapter(title, textContent) {
-        // Simple text to HTML conversion
-        // Splits by newlines and wraps in <p>
-        const htmlContent = textContent
-            .split('\n')
-            .map(line => line.trim())
-            .filter(line => line.length > 0)
-            .map(line => `<p>${line}</p>`)
-            .join('\n');
-            
-        this.chapters.push({ title, content: htmlContent });
-    }
-
-    async build(metadata = {}) {
-        try {
-            const zip = new JSZip();
-            const title = metadata.title || "Unknown Title";
-            const author = metadata.author || "Unknown Author";
-            const uid = "urn:uuid:" + (crypto.randomUUID ? crypto.randomUUID() : Date.now());
-
-            // 1. mimetype (must be first, uncompressed)
-            zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
-
-            // 2. container.xml
-            zip.folder("META-INF").file("container.xml", `<?xml version="1.0"?>
-<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
-    <rootfiles>
-        <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
-    </rootfiles>
-</container>`);
-
-            // 3. OEBPS Folder
-            const oebps = zip.folder("OEBPS");
-
-            // styles.css
-            oebps.file("styles.css", `body { font-family: sans-serif; } p { text-indent: 1em; margin-bottom: 0.5em; }`);
-
-            // Chapters
-            this.chapters.forEach((chapter, index) => {
-                const filename = `chapter_${index + 1}.xhtml`;
-                const xhtml = `<?xml version="1.0" encoding="utf-8"?>
-<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
-<html xmlns="http://www.w3.org/1999/xhtml">
-<head>
-<title>${chapter.title}</title>
-<link rel="stylesheet" type="text/css" href="styles.css"/>
-</head>
-<body>
-<h2>${chapter.title}</h2>
-${chapter.content}
-</body>
-</html>`;
-                oebps.file(filename, xhtml);
-            });
-
-            // content.opf
-            let manifest = `<item id="style" href="styles.css" media-type="text/css"/>\n`;
-            let spine = ``;
-            let tocNav = `<navMap>\n`;
-
-            this.chapters.forEach((c, i) => {
-                const id = `chap${i + 1}`;
-                const href = `chapter_${i + 1}.xhtml`;
-                manifest += `<item id="${id}" href="${href}" media-type="application/xhtml+xml"/>\n`;
-                spine += `<itemref idref="${id}"/>\n`;
-                tocNav += `<navPoint id="${id}" playOrder="${i+1}"><navLabel><text>${c.title}</text></navLabel><content src="${href}"/></navPoint>\n`;
-            });
-            // Add NCX to manifest
-            manifest += `<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>`;
-
-            const opf = `<?xml version="1.0" encoding="utf-8"?>
-<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="BookId" version="2.0">
-    <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
-        <dc:title>${title}</dc:title>
-        <dc:creator opf:role="aut">${author}</dc:creator>
-        <dc:language>ko</dc:language>
-        <dc:identifier id="BookId">${uid}</dc:identifier>
-    </metadata>
-    <manifest>
-        ${manifest}
-    </manifest>
-    <spine toc="ncx">
-        ${spine}
-    </spine>
-</package>`;
-
-            oebps.file("content.opf", opf);
-
-            // toc.ncx
-            const ncx = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN" "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd">
-<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
-<head>
-    <meta name="dtb:uid" content="${uid}"/>
-    <meta name="dtb:depth" content="1"/>
-    <meta name="dtb:totalPageCount" content="0"/>
-    <meta name="dtb:maxPageNumber" content="0"/>
-</head>
-<docTitle><text>${title}</text></docTitle>
-${tocNav}
-</navMap>
-</ncx>`;
-
-            oebps.file("toc.ncx", ncx);
-
-            // Return the ZIP object (which IS the EPUB)
-            return zip; 
-        } catch (e) {
-            const { LogBox } = await Promise.resolve(/* import() */).then(__webpack_require__.bind(__webpack_require__, 989));
-            LogBox.getInstance().critical(`EPUB 빌드 실패: ${e.message} (${metadata.title || 'unknown'})`, 'Builder:EPUB');
-            throw e;
-        }
-    }
-}
-
-;// ./src/core/cbz.js
-
-class CbzBuilder {
-    constructor() {
-        this.chapters = [];
-    }
-
-    addChapter(title, images) {
-        // images: array of { blob, ext }
-        this.chapters.push({ title, images });
-    }
-
-    async build(metadata = {}) {
-        try {
-            const zip = new JSZip();
-            
-            // Kavita Compatibility: Images at root, no subfolders
-            // Note: As per new strategy, we only build one chapter per CBZ.
-            this.chapters.forEach((chapter) => {
-                chapter.images.forEach((img, idx) => {
-                    if (img && img.blob) {
-                        const filename = img.isMissing 
-                            ? `[PAGE_MISSING]_image_${String(idx).padStart(4, '0')}${img.ext}`
-                            : `image_${String(idx).padStart(4, '0')}${img.ext}`;
-                        zip.file(filename, img.blob);
-                    }
-                });
-            });
-
-            const comicInfo = this.generateComicInfo(metadata);
-            zip.file("ComicInfo.xml", comicInfo);
-
-            return zip;
-        } catch (e) {
-            const { LogBox } = await Promise.resolve(/* import() */).then(__webpack_require__.bind(__webpack_require__, 989));
-            LogBox.getInstance().critical(`CBZ 빌드 실패: ${e.message} (${metadata.title || 'unknown'})`, 'Builder:CBZ');
-            throw e;
-        }
-    }
-
-    generateComicInfo(metadata) {
-        const series = metadata.series || "Unknown Series";
-        const title = metadata.title || "";
-        const number = metadata.number || "";
-        const writer = metadata.writer || "";
-        const pageCount = this.chapters.reduce((acc, chap) => acc + chap.images.length, 0);
-
-        return `<?xml version="1.0" encoding="utf-8"?>
-<ComicInfo xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <Series>${this.escapeXml(series)}</Series>
-  <Number>${number}</Number>
-  <Title>${this.escapeXml(title)}</Title>
-  <Writer>${this.escapeXml(writer)}</Writer>
-  <LanguageISO>ko</LanguageISO>
-  <PageCount>${pageCount}</PageCount>
-  <Manga>YesAndRightToLeft</Manga>
-</ComicInfo>`;
-    }
-
-    escapeXml(unsafe) {
-        return unsafe.replace(/[<>&"']/g, (c) => {
-            switch (c) {
-                case '<': return '&lt;';
-                case '>': return '&gt;';
-                case '&': return '&amp;';
-                case '"': return '&quot;';
-                case "'": return '&apos;';
-            }
-        });
-    }
-}
-
-;// ./src/core/txt.js
-/**
- * 소설 본문의 HTML 태그를 제거하고 가독성 좋게 줄바꿈을 문단 단위로 정제하는 함수
- */
-function cleanNovelParagraphs(html) {
-    if (!html) return "";
-
-    // 1. HTML 태그를 줄바꿈 및 공백으로 치환
-    let text = html
-        .replace(/<br\s*\/?>/gi, '\n')
-        .replace(/<\/p>/gi, '\n')
-        .replace(/<\/div>/gi, '\n')
-        .replace(/<(?:\/?(?:br|p|div|span|a|b|strong|i|em|u|font|img|style|script)(?:\s+[^>]*)?)>/gi, ''); // 나머지 HTML 태그 완전 제거
-
-    // 2. HTML 엔티티 치환
-    text = text
-        .replace(/&nbsp;/g, ' ')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&amp;/g, '&')
-        .replace(/&quot;/g, '"');
-
-    // 3. 각 줄의 좌우 공백 트리밍 및 유령 문자 정리
-    text = text
-        .split('\n')
-        .map(line => line.trim())
-        .join('\n');
-
-    // 4. 3개 이상 과도한 연속 줄바꿈을 2개(\n\n, 빈 줄 1개)로 제한
-    text = text.replace(/\n{3,}/g, '\n\n');
-
-    return text.trim();
-}
-
-class TxtBuilder {
-    constructor() {
-        this.content = "";
-    }
-
-    addChapter(title, textContent) {
-        this.content += `\n\n=== ${title} ===\n\n`;
-        this.content += cleanNovelParagraphs(textContent);
-    }
-
-    async build(metadata = {}) {
-        try {
-            // Return an object that duck-types JSZip's generateAsync
-            return {
-                generateAsync: async () => {
-                    // Prepend metadata title at the top if available
-                    let finalContent = this.content;
-                    if (metadata.title) {
-                        finalContent = `[ ${metadata.title} ]\n` + finalContent;
-                    }
-                    return new Blob([finalContent], { type: 'text/plain;charset=utf-8' });
-                }
-            };
-        } catch (e) {
-            const { LogBox } = await Promise.resolve(/* import() */).then(__webpack_require__.bind(__webpack_require__, 989));
-            LogBox.getInstance().critical(`TXT 빌드 실패: ${e.message} (${metadata.title || 'unknown'})`, 'Builder:TXT');
-            throw e;
-        }
-    }
-}
-
+// EXTERNAL MODULE: ./src/core/epub.js
+var epub = __webpack_require__(523);
+// EXTERNAL MODULE: ./src/core/cbz.js
+var cbz = __webpack_require__(416);
+// EXTERNAL MODULE: ./src/core/txt.js
+var txt = __webpack_require__(409);
 // EXTERNAL MODULE: ./src/core/ui.js + 1 modules
 var ui = __webpack_require__(989);
 // EXTERNAL MODULE: ./src/core/config.js
@@ -7649,7 +7779,7 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
         const isSingleVolume = isNovel && novelMode === 'singleVolume';
         let masterNovelBuilder = null;
         if (isSingleVolume) {
-            masterNovelBuilder = novelFormat === 'txt' ? new TxtBuilder() : new EpubBuilder();
+            masterNovelBuilder = novelFormat === 'txt' ? new txt/* TxtBuilder */.I() : new epub/* EpubBuilder */.s();
             logger.log(`📙 소설 단행본 합본 모드 활성화 (${novelFormat.toUpperCase()}) (마지막에 한 번에 저장됩니다)`);
         }
 
@@ -7688,8 +7818,8 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
             if (isSingleVolume) {
                 currentBuilder = masterNovelBuilder;
             } else {
-                if (isNovel) currentBuilder = novelFormat === 'txt' ? new TxtBuilder() : new EpubBuilder();
-                else currentBuilder = new CbzBuilder();
+                if (isNovel) currentBuilder = novelFormat === 'txt' ? new txt/* TxtBuilder */.I() : new epub/* EpubBuilder */.s();
+                else currentBuilder = new cbz/* CbzBuilder */.$();
             }
 
             // Process Item
@@ -8401,10 +8531,10 @@ async function main() {
                 let extension = 'cbz';
                 if (isNovel) {
                     const novelFormat = (0,core_config/* getConfig */.zj)().novelFormat || 'epub';
-                    builder = novelFormat === 'txt' ? new TxtBuilder() : new EpubBuilder(seriesTitle, { author: "TokiSync" });
+                    builder = novelFormat === 'txt' ? new txt/* TxtBuilder */.I() : new epub/* EpubBuilder */.s(seriesTitle, { author: "TokiSync" });
                     extension = novelFormat;
                 } else {
-                    builder = new CbzBuilder(title);
+                    builder = new cbz/* CbzBuilder */.$(title);
                 }
 
                 // 3. 임시 아이템 객체 생성 (processItem 호환용)
