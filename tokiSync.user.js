@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.22.3
+// @version      1.22.4
 // @description  Toki series sites -> Google Drive syncing tool (Bundled)
 // @author       pray4skylark
 // @updateURL    https://pray4skylark.github.io/tokiSync/tokiSync.user.js
@@ -508,6 +508,12 @@ const runSchedulerOnce = async () => {
     // 3. pending(대기 중) 상태인 첫 번째 에피소드 추출
     const nextItem = queue.find(item => item.status === 'pending');
     if (!nextItem) {
+      // 대기 중인 작업도 없고 현재 진행 중인 활성 작업도 없다면 안티 슬립 오디오를 정지시킵니다.
+      if (currentProcessing.length === 0) {
+        try {
+          stopSilentAudio();
+        } catch (e) {}
+      }
       isSchedulerRunning = false;
       return;
     }
@@ -521,6 +527,12 @@ const runSchedulerOnce = async () => {
 
     // 4. 인간 행동 모사를 위한 1.5초~3초 랜덤 지연 완충
     console.log(`[Queue Scheduler] 🛡️ 안전 지연 대기 시작 (Target: ${nextItem.episodeTitle})`);
+    
+    // 배치 수집 기동을 위해 안티 슬립 기동
+    try {
+      startSilentAudio();
+    } catch (e) {}
+
     await sleepJitter(1500, 3000);
 
     // 5. 팝업 실행 및 상태 갱신
@@ -569,7 +581,7 @@ const runSchedulerOnce = async () => {
             
             activeWorkers.set(nextItem.id, recycledPopup);
         } catch (err) {
-            console.error('[Queue Scheduler] 팝업 릴레이 강제 실패:', err);
+            console.warn('[Queue Scheduler] 팝업 직접 리다이렉트 제한 감지 (메시지 기반 간접 릴레이로 자동 위임됨):', err.message);
         }
     } else {
         // 가용 팝업이 없을 때만 물리적 open 수행 (최초 진입 시 2회만 동작)
@@ -3144,22 +3156,38 @@ function initBatchWorkerController() {
     const handleBatchSuccess = async (matchedId, payload, sourceWindow) => {
         console.log(`[WorkerController] 🎉 [배치] 수집 완료 처리 (ID: ${matchedId})`);
 
-        // 자식에게 즉시 ACK 수락 신호 전송
-        if (sourceWindow && !sourceWindow.closed) {
-            try {
-                (0,_ipc_broker_js__WEBPACK_IMPORTED_MODULE_1__/* .sendToWorker */ .eu)(sourceWindow, 'IPC_ACK', { queueId: matchedId });
-            } catch (ackErr) {
-                console.warn('[WorkerController] [배치] ACK 전송 실패:', ackErr);
-            }
-        }
-
-        // 1. 큐에서 상세 정보 획득
+        // 1. 큐에서 상세 정보 획득 및 다음 대기 중인 에피소드 사전 조회 (간접 릴레이용)
         const queue = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getQueue */ .IS)();
         const item = queue.find(i => i.id === matchedId);
 
         if (!item) {
             console.error(`[WorkerController] 대기열에서 매칭되는 아이템을 찾을 수 없습니다: ${matchedId}`);
             return;
+        }
+
+        const nextItem = queue.find(i => i.status === 'pending');
+        const ackPayload = { queueId: matchedId };
+
+        if (nextItem) {
+            ackPayload.nextUrl = nextItem.episodeUrl;
+            
+            // 중복 스케줄 기동 방지를 위해 즉시 processing 상태로 선점 마킹
+            (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .updateQueueItem */ .Gg)(nextItem.id, { status: 'processing' });
+            
+            // activeWorkers 맵의 키를 nextItem.id로 팝업 참조와 함께 갱신 이전
+            if (sourceWindow) {
+                _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.delete(matchedId);
+                _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.set(nextItem.id, sourceWindow);
+            }
+        }
+
+        // 자식에게 즉시 ACK 수락 신호 전송
+        if (sourceWindow && !sourceWindow.closed) {
+            try {
+                (0,_ipc_broker_js__WEBPACK_IMPORTED_MODULE_1__/* .sendToWorker */ .eu)(sourceWindow, 'IPC_ACK', ackPayload);
+            } catch (ackErr) {
+                console.warn('[WorkerController] [배치] ACK 전송 실패:', ackErr);
+            }
         }
 
         // 수집된 바이너리/텍스트 데이터를 임시로 메모리에 업데이트하고 상태를 UPLOADING으로 표시
@@ -3715,7 +3743,7 @@ async function fetchNovelTextViaApi(episodeUrl, config = {}, _isRetry = false) {
 /* harmony export */   rn: function() { return /* binding */ CFG_REMOTE_RULE_URL; },
 /* harmony export */   zj: function() { return /* binding */ getConfig; }
 /* harmony export */ });
-/* unused harmony exports CFG_URL_KEY, CFG_ID_KEY, CFG_FOLDER_ID, CFG_POLICY_KEY, CFG_API_KEY, CFG_SLEEP_MODE, CFG_SMART_SKIP_RATIO, CFG_NOVEL_MODE, CFG_NOVEL_FORMAT, CFG_SCAN_SPEED, CFG_LOCAL_NAME_TEMPLATE, CFG_LOCAL_EPISODE_PADDING */
+/* unused harmony exports CFG_URL_KEY, CFG_ID_KEY, CFG_FOLDER_ID, CFG_POLICY_KEY, CFG_API_KEY, CFG_SLEEP_MODE, CFG_SMART_SKIP_RATIO, CFG_NOVEL_MODE, CFG_NOVEL_FORMAT, CFG_SCAN_SPEED, CFG_LOCAL_NAME_TEMPLATE, CFG_LOCAL_EPISODE_PADDING, CFG_LOG_LEVEL */
 const CFG_URL_KEY = "TOKI_GAS_URL"; // legacy
 const CFG_ID_KEY = "TOKI_GAS_ID";
 const CFG_FOLDER_ID = "TOKI_FOLDER_ID";
@@ -3730,10 +3758,11 @@ const CFG_CUSTOM_RULES = "TOKI_CUSTOM_RULES";
 const CFG_SCAN_SPEED = "TOKI_SCAN_SPEED";
 const CFG_LOCAL_NAME_TEMPLATE = "TOKI_LOCAL_NAME_TEMPLATE";
 const CFG_LOCAL_EPISODE_PADDING = "TOKI_LOCAL_EPISODE_PADDING";
+const CFG_LOG_LEVEL = "TOKI_LOG_LEVEL";
 
 /**
  * Get current configuration
- * @returns {{gasId: string, gasUrl: string, folderId: string, policy: string, apiKey: string, sleepMode: string, smartSkipRatio: number}}
+ * @returns {{gasId: string, gasUrl: string, folderId: string, policy: string, apiKey: string, sleepMode: string, smartSkipRatio: number, logLevel: string}}
  */
 function getConfig() {
     let gasId = GM_getValue(CFG_ID_KEY, "");
@@ -3782,7 +3811,8 @@ function getConfig() {
             return Math.round(val);
         })(),
         localNameTemplate: GM_getValue(CFG_LOCAL_NAME_TEMPLATE, "{number} - {title}"),
-        localEpisodePadding: GM_getValue(CFG_LOCAL_EPISODE_PADDING, "4")
+        localEpisodePadding: GM_getValue(CFG_LOCAL_EPISODE_PADDING, "4"),
+        logLevel: GM_getValue(CFG_LOG_LEVEL, "info")
     };
 }
 
@@ -4697,6 +4727,8 @@ __webpack_require__.d(__webpack_exports__, {
 
 // UNUSED EXPORTS: FormRuleEditor, TreeRuleEditor
 
+// EXTERNAL MODULE: ./src/core/config.js
+var config = __webpack_require__(899);
 // EXTERNAL MODULE: ./src/core/EventBus.js
 var EventBus = __webpack_require__(31);
 // EXTERNAL MODULE: ./src/core/parsers/ParserFactory.js
@@ -4767,6 +4799,8 @@ class LogBox {
                 this.warn(msg, tag);
             } else if (level === 'success') {
                 this.success(msg, tag);
+            } else if (level === 'info') {
+                this.info(msg, tag);
             } else {
                 this.log(msg, 'normal', tag);
             }
@@ -4784,8 +4818,15 @@ class LogBox {
     }
 
     openDashboard(defaultTab = '') {
+        // Node.js 테스트 환경 등 윈도우 객체가 완전하지 않은 환경에서의 안전 차단
+        if (typeof window === 'undefined' || typeof window.open !== 'function') {
+            return;
+        }
+
         if (this.popupWindow && !this.popupWindow.closed) {
-            this.popupWindow.focus();
+            if (typeof this.popupWindow.focus === 'function') {
+                this.popupWindow.focus();
+            }
             if (defaultTab) {
                 this.switchTab(defaultTab);
             }
@@ -4796,17 +4837,28 @@ class LogBox {
         
         const width = 750;
         const height = 850;
-        const left = (window.screen.width - width) / 2;
-        const top = (window.screen.height - height) / 2;
+        const screenWidth = window.screen ? window.screen.width : 1920;
+        const screenHeight = window.screen ? window.screen.height : 1080;
+        const left = (screenWidth - width) / 2;
+        const top = (screenHeight - height) / 2;
         
-        this.popupWindow = window.open(
-            "", 
-            "TokiSync_Dashboard", 
-            `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
-        );
+        try {
+            this.popupWindow = window.open(
+                "", 
+                "TokiSync_Dashboard", 
+                `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
+            );
+        } catch (e) {
+            console.warn('[TokiSync UI] Dashboard window.open 실패:', e.message);
+            return;
+        }
 
-        if (!this.popupWindow) {
-            alert("⚠️ 팝업창을 띄우지 못했습니다. 브라우저의 팝업 차단 설정을 해제해 주세요!");
+        if (!this.popupWindow || !this.popupWindow.document) {
+            if (typeof alert === 'function') {
+                alert("⚠️ 팝업창을 띄우지 못했습니다. 브라우저의 팝업 차단 설정을 해제해 주세요!");
+            } else {
+                console.warn("⚠️ 팝업창을 띄우지 못했습니다. (alert 미지원 환경)");
+            }
             return;
         }
 
@@ -4900,7 +4952,7 @@ class LogBox {
     }
 
     updateProgressUI() {
-        if (!this.popupWindow || this.popupWindow.closed) return;
+        if (!this.popupWindow || this.popupWindow.closed || !this.popupWindow.document) return;
 
         const doc = this.popupWindow.document;
         const progressContainer = doc.getElementById('toki-logbox-progress');
@@ -5053,13 +5105,26 @@ class LogBox {
             console.log(`[TokiSync] ${prefix}${msg}`);
         }
 
-        // 2. 사소한 자잘한 일반 로그는 대시보드 화면에 뿌리지 않음 (핵심 요약 필터링)
-        if (type === 'normal') {
+        // 2. 설정된 로그 수준에 따라 로그 필터링 적용
+        const LEVEL_PRIORITY = {
+            'normal': 1,
+            'debug': 1,
+            'info': 2,
+            'success': 2,
+            'warn': 3,
+            'error': 4,
+            'critical': 4
+        };
+        const currentLogLevel = (0,config/* getConfig */.zj)().logLevel || 'info';
+        const currentPriority = LEVEL_PRIORITY[currentLogLevel] || 2;
+        const msgPriority = LEVEL_PRIORITY[type] || 1;
+
+        if (msgPriority < currentPriority) {
             return;
         }
 
         // 팝업이 활성화되어 있으면 실시간 렌더링
-        if (this.popupWindow && !this.popupWindow.closed) {
+        if (this.popupWindow && !this.popupWindow.closed && this.popupWindow.document) {
             const doc = this.popupWindow.document;
             const logContentEl = doc.getElementById('toki-logbox-content');
             if (logContentEl) {
@@ -5313,6 +5378,16 @@ class MenuModal {
                         </select>
                     </div>
 
+                    <div class="toki-control-group">
+                        <label class="toki-label">로그 상세 수준</label>
+                        <select id="toki-sel-loglevel" class="toki-select">
+                            <option value="normal">디버그 (전체 로그)</option>
+                            <option value="info">정보 (기본 정보)</option>
+                            <option value="warn">경고 (경고 및 에러)</option>
+                            <option value="error">오류 (오류만)</option>
+                        </select>
+                    </div>
+
                     <div class="toki-section-title">Cloud & Storage</div>
                     <div class="toki-control-group">
                         <label class="toki-label">GAS Script ID</label>
@@ -5525,6 +5600,7 @@ class MenuModal {
         const selNovelFormat = doc.getElementById('toki-sel-novel-format');
         const selNovelTerm = doc.getElementById('toki-sel-novel-mode');
         const selSmartSkip = doc.getElementById('toki-sel-smartskip');
+        const selLogLevel = doc.getElementById('toki-sel-loglevel');
 
         if (this.handlers.getConfig) {
             const cfg = this.handlers.getConfig();
@@ -5550,6 +5626,7 @@ class MenuModal {
             if (selNovelFormat) selNovelFormat.value = cfg.novelFormat || 'epub';
             if (selNovelTerm) selNovelTerm.value = cfg.novelMode || 'perChapter';
             if (selSmartSkip) selSmartSkip.value = cfg.smartSkipRatio !== undefined ? String(cfg.smartSkipRatio) : '50';
+            if (selLogLevel) selLogLevel.value = cfg.logLevel || 'info';
         }
 
         if (selPolicy) {
@@ -5762,6 +5839,7 @@ class MenuModal {
                 const newNovelFormat = selNovelFormat ? selNovelFormat.value : 'epub';
                 const newNovelMode = selNovelTerm ? selNovelTerm.value : 'perChapter';
                 const newSmartSkip = selSmartSkip ? selSmartSkip.value : '50';
+                const newLogLevel = selLogLevel ? selLogLevel.value : 'info';
                 // URL 입력 시 ID 추출 로직 병합
                 let finalGasId = newGasId;
                 const urlMatch = newGasId.match(/\/s\/([^\/]+)\/exec/);
@@ -5779,6 +5857,7 @@ class MenuModal {
                     this.handlers.setConfig('TOKI_NOVEL_FORMAT', newNovelFormat);
                     this.handlers.setConfig('TOKI_NOVEL_MODE', newNovelMode);
                     this.handlers.setConfig('TOKI_SMART_SKIP_RATIO', newSmartSkip);
+                    this.handlers.setConfig('TOKI_LOG_LEVEL', newLogLevel);
                 }
 
                 popupWindow.alert('설정이 저장되었습니다.');
@@ -6310,7 +6389,7 @@ class FormRuleEditor {
     }
 
     render() {
-        const scriptVer =  true ? "1.22.3" : 0;
+        const scriptVer =  true ? "1.22.4" : 0;
         this.overlay.innerHTML = `
             <div class="toki-modal toki-form-editor-modal">
                 <div class="toki-modal-header">
@@ -7089,7 +7168,7 @@ let audioContext = null;
 let audioEl = null;
 let oscillator = null;
 
-function startSilentAudio() {
+function core_startSilentAudio() {
     if (audioContext && audioContext.state === 'running') {
         console.log('[Anti-Sleep] Already running');
         return;
@@ -7136,7 +7215,7 @@ function startSilentAudio() {
     }
 }
 
-function stopSilentAudio() {
+function core_stopSilentAudio() {
     try {
         if (oscillator) {
             oscillator.stop();
@@ -7370,7 +7449,7 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
 
     // Auto-start Anti-Sleep mode
     try {
-        startSilentAudio();
+        core_startSilentAudio();
         logger.success('[Anti-Sleep] 백그라운드 모드 자동 활성화');
     } catch (e) {
         logger.log('[Anti-Sleep] 자동 시작 실패 (사용자 상호작용 필요)', 'error');
@@ -7381,14 +7460,14 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
     const siteInfo = await (0,detector/* detectSite */.T)();
     if (!siteInfo) {
         EventBus/* EventBus */.l.emit(EventBus/* EVT */.c.NOTIFY_ERROR, { msg: "지원하지 않는 사이트이거나 다운로드 페이지가 아닙니다." });
-        stopSilentAudio();
+        core_stopSilentAudio();
         return;
     }
 
     const parser = await ParserFactory/* ParserFactory */.O.getParser();
     if (!parser) {
         EventBus/* EventBus */.l.emit(EventBus/* EVT */.c.NOTIFY_ERROR, { msg: "파서를 초기화할 수 없습니다." });
-        stopSilentAudio();
+        core_stopSilentAudio();
         return;
     }
 
@@ -7688,7 +7767,7 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
         if (pendingEpisodes.length === 0) {
             if (destination === 'drive' && !currentIsSingleVolume) {
                 logger.success('✅ 모든 에피소드가 이미 드라이브에 존재하여 수집을 조기 완료합니다.', 'Queue');
-                stopSilentAudio();
+                core_stopSilentAudio();
                 return;
             }
         } else {
@@ -7759,7 +7838,7 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                 (0,queue/* initQueueScheduler */.$8)();
             } else {
                 logger.error(`❌ 선제 확보된 자식 창이 없어 큐 수집을 중지합니다.`, 'Queue');
-                stopSilentAudio();
+                core_stopSilentAudio();
             }
 
             return; // 큐 엔진에 스케줄 위임 후 early exit
@@ -8130,7 +8209,7 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
         alert(`다운로드 중 오류 발생:\n${error.message}`);
     } finally {
         // Auto-stop Anti-Sleep mode
-        stopSilentAudio();
+        core_stopSilentAudio();
         logger.log('[Anti-Sleep] 백그라운드 모드 자동 종료');
         
         // [Cleanup 팝업 세션] 다운로드 종료 후 액티브 팝업 폐쇄
@@ -8675,6 +8754,7 @@ var novel_decryptor = __webpack_require__(602);
 
 
 
+
 // Define localized stage reporting helper
 function reportProgress(queueId, percent, stage) {
     (0,queue/* updateQueueItem */.Gg)(queueId, {
@@ -8710,6 +8790,13 @@ function initWorkerExtractor() {
     const cleanupIpc = (0,ipc_broker/* registerIpcListener */.Q_)(async (msg) => {
         if (msg.type === 'START_EXTRACTION') {
             const { queueId } = msg.payload;
+
+            // 안티 슬립 오디오 기동 (백그라운드 스로틀링 회피)
+            try {
+                core_startSilentAudio();
+            } catch (e) {
+                console.warn('[TokiSync:Worker] 안티 슬립 기동 실패 (무시 가능):', e.message);
+            }
 
             // CF Challenge Check
             const isCloudflare = document.title.includes('Just a moment') ||
@@ -8957,7 +9044,7 @@ function initWorkerExtractor() {
                 let ackTimeout = null;
                 const ackCleanup = (0,ipc_broker/* registerIpcListener */.Q_)(async (ackMsg) => {
                     if (ackMsg.type === 'IPC_ACK' && ackMsg.payload?.queueId === queueId) {
-                        console.log(`[TokiSync:Worker] 🎉 부모의 ACK 수신 완료! 안전하게 세션을 종료합니다.`);
+                        console.log(`[TokiSync:Worker] 🎉 부모의 ACK 수신 완료!`);
                         if (ackTimeout) clearTimeout(ackTimeout);
                         ackCleanup();
                         
@@ -8970,17 +9057,25 @@ function initWorkerExtractor() {
                         reportProgress(queueId, 100, queue/* WORKER_STAGE */.WB.COMPLETED);
                         
                         cleanupIpc();
-                        
-                        // 팝업 닫기 세이프가드
-                        setTimeout(() => {
-                            window.close();
-                        }, 500);
+                        core_stopSilentAudio();
+
+                        // 릴레이 타겟 URL 검증 후 자가 이동 혹은 종료
+                        const nextUrl = ackMsg.payload?.nextUrl;
+                        if (nextUrl) {
+                            console.log(`[TokiSync:Worker] ♻️ 다음 에피소드로 간접 릴레이 이동합니다: ${nextUrl}`);
+                            window.location.replace(nextUrl);
+                        } else {
+                            console.log(`[TokiSync:Worker] 🏁 더 이상 대기열이 없습니다. 창을 닫습니다.`);
+                            setTimeout(() => {
+                                window.close();
+                            }, 500);
+                        }
                     }
                 });
 
                 // ACK 대기 타임아웃 (15초간 부모 무반응 시 강제 종료)
                 ackTimeout = setTimeout(() => {
-                    console.warn(`[TokiSync:Worker] ⚠️ 부모 ACK 대기 타임아웃 (15초). 강제 완료 처리합니다.`);
+                    console.warn(`[TokiSync:Worker] ⚠️ 부모 ACK 대기 타임아웃 (15초). 강제 완료 처리 후 세션을 종료합니다.`);
                     ackCleanup();
                     (0,queue/* updateQueueItem */.Gg)(queueId, { 
                         status: 'completed', 
@@ -8989,6 +9084,7 @@ function initWorkerExtractor() {
                     });
                     reportProgress(queueId, 100, queue/* WORKER_STAGE */.WB.COMPLETED);
                     cleanupIpc();
+                    core_stopSilentAudio();
                     window.close();
                 }, 15000);
 
@@ -8996,6 +9092,7 @@ function initWorkerExtractor() {
 
             } catch (err) {
                 console.error(`[TokiSync:Worker] ❌ 에피소드 수집 중 치명적 오류 발생:`, err);
+                core_stopSilentAudio();
                 
                 (0,queue/* updateQueueItem */.Gg)(queueId, { 
                     status: 'failed', 
