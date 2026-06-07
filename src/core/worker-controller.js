@@ -349,22 +349,38 @@ export function initBatchWorkerController() {
     const handleBatchSuccess = async (matchedId, payload, sourceWindow) => {
         console.log(`[WorkerController] 🎉 [배치] 수집 완료 처리 (ID: ${matchedId})`);
 
-        // 자식에게 즉시 ACK 수락 신호 전송
-        if (sourceWindow && !sourceWindow.closed) {
-            try {
-                sendToWorker(sourceWindow, 'IPC_ACK', { queueId: matchedId });
-            } catch (ackErr) {
-                console.warn('[WorkerController] [배치] ACK 전송 실패:', ackErr);
-            }
-        }
-
-        // 1. 큐에서 상세 정보 획득
+        // 1. 큐에서 상세 정보 획득 및 다음 대기 중인 에피소드 사전 조회 (간접 릴레이용)
         const queue = getQueue();
         const item = queue.find(i => i.id === matchedId);
 
         if (!item) {
             console.error(`[WorkerController] 대기열에서 매칭되는 아이템을 찾을 수 없습니다: ${matchedId}`);
             return;
+        }
+
+        const nextItem = queue.find(i => i.status === 'pending');
+        const ackPayload = { queueId: matchedId };
+
+        if (nextItem) {
+            ackPayload.nextUrl = nextItem.episodeUrl;
+            
+            // 중복 스케줄 기동 방지를 위해 즉시 processing 상태로 선점 마킹
+            updateQueueItem(nextItem.id, { status: 'processing' });
+            
+            // activeWorkers 맵의 키를 nextItem.id로 팝업 참조와 함께 갱신 이전
+            if (sourceWindow) {
+                activeWorkers.delete(matchedId);
+                activeWorkers.set(nextItem.id, sourceWindow);
+            }
+        }
+
+        // 자식에게 즉시 ACK 수락 신호 전송
+        if (sourceWindow && !sourceWindow.closed) {
+            try {
+                sendToWorker(sourceWindow, 'IPC_ACK', ackPayload);
+            } catch (ackErr) {
+                console.warn('[WorkerController] [배치] ACK 전송 실패:', ackErr);
+            }
         }
 
         // 수집된 바이너리/텍스트 데이터를 임시로 메모리에 업데이트하고 상태를 UPLOADING으로 표시

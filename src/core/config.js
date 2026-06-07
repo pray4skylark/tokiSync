@@ -12,10 +12,11 @@ export const CFG_CUSTOM_RULES = "TOKI_CUSTOM_RULES";
 export const CFG_SCAN_SPEED = "TOKI_SCAN_SPEED";
 export const CFG_LOCAL_NAME_TEMPLATE = "TOKI_LOCAL_NAME_TEMPLATE";
 export const CFG_LOCAL_EPISODE_PADDING = "TOKI_LOCAL_EPISODE_PADDING";
+export const CFG_LOG_LEVEL = "TOKI_LOG_LEVEL";
 
 /**
  * Get current configuration
- * @returns {{gasId: string, gasUrl: string, folderId: string, policy: string, apiKey: string, sleepMode: string, smartSkipRatio: number}}
+ * @returns {{gasId: string, gasUrl: string, folderId: string, policy: string, apiKey: string, sleepMode: string, smartSkipRatio: number, logLevel: string}}
  */
 export function getConfig() {
     let gasId = GM_getValue(CFG_ID_KEY, "");
@@ -64,7 +65,8 @@ export function getConfig() {
             return Math.round(val);
         })(),
         localNameTemplate: GM_getValue(CFG_LOCAL_NAME_TEMPLATE, "{number} - {title}"),
-        localEpisodePadding: GM_getValue(CFG_LOCAL_EPISODE_PADDING, "4")
+        localEpisodePadding: GM_getValue(CFG_LOCAL_EPISODE_PADDING, "4"),
+        logLevel: GM_getValue(CFG_LOG_LEVEL, "info")
     };
 }
 

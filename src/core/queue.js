@@ -402,6 +402,12 @@ export const runSchedulerOnce = async () => {
     // 3. pending(대기 중) 상태인 첫 번째 에피소드 추출
     const nextItem = queue.find(item => item.status === 'pending');
     if (!nextItem) {
+      // 대기 중인 작업도 없고 현재 진행 중인 활성 작업도 없다면 안티 슬립 오디오를 정지시킵니다.
+      if (currentProcessing.length === 0) {
+        try {
+          stopSilentAudio();
+        } catch (e) {}
+      }
       isSchedulerRunning = false;
       return;
     }
@@ -415,6 +421,12 @@ export const runSchedulerOnce = async () => {
 
     // 4. 인간 행동 모사를 위한 1.5초~3초 랜덤 지연 완충
     console.log(`[Queue Scheduler] 🛡️ 안전 지연 대기 시작 (Target: ${nextItem.episodeTitle})`);
+    
+    // 배치 수집 기동을 위해 안티 슬립 기동
+    try {
+      startSilentAudio();
+    } catch (e) {}
+
     await sleepJitter(1500, 3000);
 
     // 5. 팝업 실행 및 상태 갱신
@@ -463,7 +475,7 @@ export const runSchedulerOnce = async () => {
             
             activeWorkers.set(nextItem.id, recycledPopup);
         } catch (err) {
-            console.error('[Queue Scheduler] 팝업 릴레이 강제 실패:', err);
+            console.warn('[Queue Scheduler] 팝업 직접 리다이렉트 제한 감지 (메시지 기반 간접 릴레이로 자동 위임됨):', err.message);
         }
     } else {
         // 가용 팝업이 없을 때만 물리적 open 수행 (최초 진입 시 2회만 동작)

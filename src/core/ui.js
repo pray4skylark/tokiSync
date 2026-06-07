@@ -53,6 +53,8 @@ export class LogBox {
                 this.warn(msg, tag);
             } else if (level === 'success') {
                 this.success(msg, tag);
+            } else if (level === 'info') {
+                this.info(msg, tag);
             } else {
                 this.log(msg, 'normal', tag);
             }
@@ -70,8 +72,15 @@ export class LogBox {
     }
 
     openDashboard(defaultTab = '') {
+        // Node.js 테스트 환경 등 윈도우 객체가 완전하지 않은 환경에서의 안전 차단
+        if (typeof window === 'undefined' || typeof window.open !== 'function') {
+            return;
+        }
+
         if (this.popupWindow && !this.popupWindow.closed) {
-            this.popupWindow.focus();
+            if (typeof this.popupWindow.focus === 'function') {
+                this.popupWindow.focus();
+            }
             if (defaultTab) {
                 this.switchTab(defaultTab);
             }
@@ -82,17 +91,28 @@ export class LogBox {
         
         const width = 750;
         const height = 850;
-        const left = (window.screen.width - width) / 2;
-        const top = (window.screen.height - height) / 2;
+        const screenWidth = window.screen ? window.screen.width : 1920;
+        const screenHeight = window.screen ? window.screen.height : 1080;
+        const left = (screenWidth - width) / 2;
+        const top = (screenHeight - height) / 2;
         
-        this.popupWindow = window.open(
-            "", 
-            "TokiSync_Dashboard", 
-            `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
-        );
+        try {
+            this.popupWindow = window.open(
+                "", 
+                "TokiSync_Dashboard", 
+                `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
+            );
+        } catch (e) {
+            console.warn('[TokiSync UI] Dashboard window.open 실패:', e.message);
+            return;
+        }
 
-        if (!this.popupWindow) {
-            alert("⚠️ 팝업창을 띄우지 못했습니다. 브라우저의 팝업 차단 설정을 해제해 주세요!");
+        if (!this.popupWindow || !this.popupWindow.document) {
+            if (typeof alert === 'function') {
+                alert("⚠️ 팝업창을 띄우지 못했습니다. 브라우저의 팝업 차단 설정을 해제해 주세요!");
+            } else {
+                console.warn("⚠️ 팝업창을 띄우지 못했습니다. (alert 미지원 환경)");
+            }
             return;
         }
 
@@ -186,7 +206,7 @@ export class LogBox {
     }
 
     updateProgressUI() {
-        if (!this.popupWindow || this.popupWindow.closed) return;
+        if (!this.popupWindow || this.popupWindow.closed || !this.popupWindow.document) return;
 
         const doc = this.popupWindow.document;
         const progressContainer = doc.getElementById('toki-logbox-progress');
@@ -339,13 +359,26 @@ export class LogBox {
             console.log(`[TokiSync] ${prefix}${msg}`);
         }
 
-        // 2. 사소한 자잘한 일반 로그는 대시보드 화면에 뿌리지 않음 (핵심 요약 필터링)
-        if (type === 'normal') {
+        // 2. 설정된 로그 수준에 따라 로그 필터링 적용
+        const LEVEL_PRIORITY = {
+            'normal': 1,
+            'debug': 1,
+            'info': 2,
+            'success': 2,
+            'warn': 3,
+            'error': 4,
+            'critical': 4
+        };
+        const currentLogLevel = getConfig().logLevel || 'info';
+        const currentPriority = LEVEL_PRIORITY[currentLogLevel] || 2;
+        const msgPriority = LEVEL_PRIORITY[type] || 1;
+
+        if (msgPriority < currentPriority) {
             return;
         }
 
         // 팝업이 활성화되어 있으면 실시간 렌더링
-        if (this.popupWindow && !this.popupWindow.closed) {
+        if (this.popupWindow && !this.popupWindow.closed && this.popupWindow.document) {
             const doc = this.popupWindow.document;
             const logContentEl = doc.getElementById('toki-logbox-content');
             if (logContentEl) {
@@ -599,6 +632,16 @@ export class MenuModal {
                         </select>
                     </div>
 
+                    <div class="toki-control-group">
+                        <label class="toki-label">로그 상세 수준</label>
+                        <select id="toki-sel-loglevel" class="toki-select">
+                            <option value="normal">디버그 (전체 로그)</option>
+                            <option value="info">정보 (기본 정보)</option>
+                            <option value="warn">경고 (경고 및 에러)</option>
+                            <option value="error">오류 (오류만)</option>
+                        </select>
+                    </div>
+
                     <div class="toki-section-title">Cloud & Storage</div>
                     <div class="toki-control-group">
                         <label class="toki-label">GAS Script ID</label>
@@ -811,6 +854,7 @@ export class MenuModal {
         const selNovelFormat = doc.getElementById('toki-sel-novel-format');
         const selNovelTerm = doc.getElementById('toki-sel-novel-mode');
         const selSmartSkip = doc.getElementById('toki-sel-smartskip');
+        const selLogLevel = doc.getElementById('toki-sel-loglevel');
 
         if (this.handlers.getConfig) {
             const cfg = this.handlers.getConfig();
@@ -836,6 +880,7 @@ export class MenuModal {
             if (selNovelFormat) selNovelFormat.value = cfg.novelFormat || 'epub';
             if (selNovelTerm) selNovelTerm.value = cfg.novelMode || 'perChapter';
             if (selSmartSkip) selSmartSkip.value = cfg.smartSkipRatio !== undefined ? String(cfg.smartSkipRatio) : '50';
+            if (selLogLevel) selLogLevel.value = cfg.logLevel || 'info';
         }
 
         if (selPolicy) {
@@ -1048,6 +1093,7 @@ export class MenuModal {
                 const newNovelFormat = selNovelFormat ? selNovelFormat.value : 'epub';
                 const newNovelMode = selNovelTerm ? selNovelTerm.value : 'perChapter';
                 const newSmartSkip = selSmartSkip ? selSmartSkip.value : '50';
+                const newLogLevel = selLogLevel ? selLogLevel.value : 'info';
                 // URL 입력 시 ID 추출 로직 병합
                 let finalGasId = newGasId;
                 const urlMatch = newGasId.match(/\/s\/([^\/]+)\/exec/);
@@ -1065,6 +1111,7 @@ export class MenuModal {
                     this.handlers.setConfig('TOKI_NOVEL_FORMAT', newNovelFormat);
                     this.handlers.setConfig('TOKI_NOVEL_MODE', newNovelMode);
                     this.handlers.setConfig('TOKI_SMART_SKIP_RATIO', newSmartSkip);
+                    this.handlers.setConfig('TOKI_LOG_LEVEL', newLogLevel);
                 }
 
                 popupWindow.alert('설정이 저장되었습니다.');

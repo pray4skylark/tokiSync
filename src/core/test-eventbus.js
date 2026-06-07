@@ -1,6 +1,9 @@
 import { EventBus, EVT } from './EventBus.js';
 import { addEpisodesToQueue, initQueueScheduler, activeWorkers, getQueue, clearQueue, getQueueItemId } from './queue.js';
 import { initBatchWorkerController } from './worker-controller.js';
+import JSZip from 'jszip';
+
+globalThis.JSZip = JSZip;
 
 let passCount = 0;
 let failCount = 0;

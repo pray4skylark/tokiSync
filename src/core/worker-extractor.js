@@ -8,6 +8,7 @@ import { updateQueueItem, WORKER_STAGE } from './queue.js';
 import { registerIpcListener, sendToParent } from './ipc-broker.js';
 import { GenericParser } from './parsers/GenericParser.js';
 import { fetchNovelTextViaApi } from './novel-decryptor.js';
+import { startSilentAudio, stopSilentAudio } from './anti_sleep.js';
 
 // Define localized stage reporting helper
 function reportProgress(queueId, percent, stage) {
@@ -44,6 +45,13 @@ export function initWorkerExtractor() {
     const cleanupIpc = registerIpcListener(async (msg) => {
         if (msg.type === 'START_EXTRACTION') {
             const { queueId } = msg.payload;
+
+            // 안티 슬립 오디오 기동 (백그라운드 스로틀링 회피)
+            try {
+                startSilentAudio();
+            } catch (e) {
+                console.warn('[TokiSync:Worker] 안티 슬립 기동 실패 (무시 가능):', e.message);
+            }
 
             // CF Challenge Check
             const isCloudflare = document.title.includes('Just a moment') ||
@@ -291,7 +299,7 @@ export function initWorkerExtractor() {
                 let ackTimeout = null;
                 const ackCleanup = registerIpcListener(async (ackMsg) => {
                     if (ackMsg.type === 'IPC_ACK' && ackMsg.payload?.queueId === queueId) {
-                        console.log(`[TokiSync:Worker] 🎉 부모의 ACK 수신 완료! 안전하게 세션을 종료합니다.`);
+                        console.log(`[TokiSync:Worker] 🎉 부모의 ACK 수신 완료!`);
                         if (ackTimeout) clearTimeout(ackTimeout);
                         ackCleanup();
                         
@@ -304,17 +312,25 @@ export function initWorkerExtractor() {
                         reportProgress(queueId, 100, WORKER_STAGE.COMPLETED);
                         
                         cleanupIpc();
-                        
-                        // 팝업 닫기 세이프가드
-                        setTimeout(() => {
-                            window.close();
-                        }, 500);
+                        stopSilentAudio();
+
+                        // 릴레이 타겟 URL 검증 후 자가 이동 혹은 종료
+                        const nextUrl = ackMsg.payload?.nextUrl;
+                        if (nextUrl) {
+                            console.log(`[TokiSync:Worker] ♻️ 다음 에피소드로 간접 릴레이 이동합니다: ${nextUrl}`);
+                            window.location.replace(nextUrl);
+                        } else {
+                            console.log(`[TokiSync:Worker] 🏁 더 이상 대기열이 없습니다. 창을 닫습니다.`);
+                            setTimeout(() => {
+                                window.close();
+                            }, 500);
+                        }
                     }
                 });
 
                 // ACK 대기 타임아웃 (15초간 부모 무반응 시 강제 종료)
                 ackTimeout = setTimeout(() => {
-                    console.warn(`[TokiSync:Worker] ⚠️ 부모 ACK 대기 타임아웃 (15초). 강제 완료 처리합니다.`);
+                    console.warn(`[TokiSync:Worker] ⚠️ 부모 ACK 대기 타임아웃 (15초). 강제 완료 처리 후 세션을 종료합니다.`);
                     ackCleanup();
                     updateQueueItem(queueId, { 
                         status: 'completed', 
@@ -323,6 +339,7 @@ export function initWorkerExtractor() {
                     });
                     reportProgress(queueId, 100, WORKER_STAGE.COMPLETED);
                     cleanupIpc();
+                    stopSilentAudio();
                     window.close();
                 }, 15000);
 
@@ -330,6 +347,7 @@ export function initWorkerExtractor() {
 
             } catch (err) {
                 console.error(`[TokiSync:Worker] ❌ 에피소드 수집 중 치명적 오류 발생:`, err);
+                stopSilentAudio();
                 
                 updateQueueItem(queueId, { 
                     status: 'failed', 
