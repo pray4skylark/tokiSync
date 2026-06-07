@@ -113,6 +113,9 @@ AI Agents MUST apply or be prompted with the appropriate expert skills correspon
   - Check for logical contradictions with existing project principles (Stateless GAS, etc.).
   - Identify potential edge cases (e.g., empty Drive folders, timeout scenarios).
   - Ensure cross-browser and mobile compatibility of UI changes.
+- **sem Semantic Verification & Impact Analysis (v1.22.2+)**:
+  - **Pre-change**: When planning edits to a function or class, run `sem impact <entity>` to identify potential side effects on other parts of the codebase.
+  - **Post-change**: Run `sem diff` to verify that only the target structural logic changes are introduced, discarding cosmetic/formatting noise.
 - **Verification Reporting**: The agent must report the outcome of its self-audit.
   - Include a summary of "What was verified" and "Potential risks" in the `documentation/reports/walkthrough.md` or final summary.
 - **Atomic Changelog Protocol**: All technical changes MUST be recorded in `CHANGELOG.md` immediately upon completion of the sub-task, ensuring no history is lost.
