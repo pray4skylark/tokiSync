@@ -1,8 +1,8 @@
 {
   "name": "tokisync",
-  "version": "1.22.2",
+  "version": "1.22.3",
   "components": {
-    "script": "1.22.2",
+    "script": "1.22.3",
     "viewer": "1.22.0",
     "gas": "1.22.0"
   },
