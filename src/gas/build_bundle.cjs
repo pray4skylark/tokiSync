@@ -6,8 +6,8 @@
 const fs = require("fs");
 const path = require("path");
 
-const SOURCE_DIR = path.join(__dirname, "TokiSync");
-const OUTPUT_FILE = path.join(__dirname, "TokiSync_Server_Bundle.gs");
+const SOURCE_DIR = __dirname;
+const OUTPUT_FILE = path.resolve(__dirname, "../../dist/TokiSync_Server_Bundle.gs");
 
 // Order matters!
 const FILES = [
@@ -21,11 +21,18 @@ const FILES = [
   "View_LibraryService.gs",
   "View_HistoryService.gs",
   "View_Utils.gs",
+  "Migrate_Service.gs",
   "Debug.gs",
 ];
 
 function build() {
   console.log(`📦 Bundling GAS files from ${SOURCE_DIR}...`);
+
+  // Ensure output directory exists
+  const destDir = path.dirname(OUTPUT_FILE);
+  if (!fs.existsSync(destDir)) {
+    fs.mkdirSync(destDir, { recursive: true });
+  }
 
   let bundleContent = `/* ⚙️ TokiSync Server Code Bundle v1.0.0 (Generated: ${new Date().toISOString()}) */\n\n`;
 

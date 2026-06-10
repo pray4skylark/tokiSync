@@ -4,7 +4,7 @@
  */
 
 import { sleep, waitForContent, scrollToLoad, fetchBlobWithXHR, blobToArrayBuffer } from './utils.js';
-import { updateQueueItem, WORKER_STAGE } from './queue.js';
+import { WORKER_STAGE, getQueue } from './queue.js';
 import { registerIpcListener, sendToParent } from './ipc-broker.js';
 import { GenericParser } from './parsers/GenericParser.js';
 import { fetchNovelTextViaApi } from './novel-decryptor.js';
@@ -12,10 +12,6 @@ import { startSilentAudio, stopSilentAudio } from './anti_sleep.js';
 
 // Define localized stage reporting helper
 function reportProgress(queueId, percent, stage) {
-    updateQueueItem(queueId, {
-        progressPercent: Math.min(100, Math.max(0, Math.round(percent))),
-        stage: stage
-    });
     // Send lightweight progress update to parent UI
     sendToParent('WORKER_PROGRESS', {
         queueId,
@@ -43,6 +39,14 @@ export function initWorkerExtractor() {
 
     // Register listener for commands from parent
     const cleanupIpc = registerIpcListener(async (msg) => {
+        if (msg.type === 'EMERGENCY_STOP') {
+            console.warn('[TokiSync:Worker] ⏹️ 긴급 정지 명령 수신 (EMERGENCY_STOP)');
+            cleanupIpc();
+            stopSilentAudio();
+            window.close();
+            return;
+        }
+
         if (msg.type === 'START_EXTRACTION') {
             const { queueId } = msg.payload;
 
@@ -82,7 +86,8 @@ export function initWorkerExtractor() {
                 episodeNum, 
                 matchedRule,
                 protocolDomain,
-                scanSpeedMultiplier = 1.0
+                scanSpeedMultiplier = 1.0,
+                speedMultiplier = 1.0
             } = msg.payload;
 
             console.log(`🚀 [TokiSync:Worker] 동작 지시문 수신 (ID: ${queueId}, 유형: ${targetType})`);
@@ -99,6 +104,99 @@ export function initWorkerExtractor() {
                 // --- 1. SOSEL EXTRACTION ---
                 if (targetType === 'novel') {
                     reportProgress(queueId, 20, WORKER_STAGE.DOM_READY);
+
+                    // [v1.21.9] 소설 가상 스크롤 시뮬레이션 작동 (인간 행동 분석 우회)
+                    console.log("[TokiSync:Worker] 소설 가상 스크롤 시뮬레이션 작동...");
+                    sendToParent('WORKER_LOG', { msg: `소설 가상 스크롤 시뮬레이션 시작...`, level: 'info' });
+                    reportProgress(queueId, 30, WORKER_STAGE.SCROLLING);
+
+                    const findScrollContainer = () => {
+                        const candidates = [
+                            document.querySelector('.viewer-container'),
+                            document.querySelector('.episode-body'),
+                            document.querySelector('main'),
+                            document.body,
+                            document.documentElement
+                        ];
+                        return candidates.find(el => el && el.scrollHeight > el.clientHeight) || document.documentElement;
+                    };
+
+                    const container = findScrollContainer();
+                    console.log(`[TokiSync:Worker] 감지된 스크롤 컨테이너:`, container.tagName, container.className);
+                    sendToParent('WORKER_LOG', { msg: `스크롤 컨테이너 감지: <${container.tagName.toLowerCase()}> (전체 높이: ${container.scrollHeight}px)`, level: 'info' });
+
+                    const totalHeight = container.scrollHeight || 3000;
+                    const scrollSteps = 5;
+                    const behavior = 'smooth';
+
+                    for (let step = 1; step <= scrollSteps; step++) {
+                        // 중단 여부 체크 (스토리지에서 큐 상태 확인)
+                        const queue = getQueue();
+                        const currentItem = queue.find(q => q.id === queueId);
+                        if (!currentItem || currentItem.status === 'failed') {
+                            console.warn('[TokiSync:Worker] ⏹️ 소설 가상 스크롤 중 대기열 중단 감지 -> 즉시 정지');
+                            cleanupIpc();
+                            stopSilentAudio();
+                            window.close();
+                            return;
+                        }
+
+                        const targetY = (totalHeight / scrollSteps) * step;
+                        
+                        // 1. 강제 스크롤 대입 및 scrollTo 병행
+                        if (container === document.documentElement || container === document.body) {
+                            window.scrollTo({ top: targetY });
+                            document.documentElement.scrollTop = targetY;
+                            document.body.scrollTop = targetY;
+                        } else {
+                            container.scrollTo({ top: targetY });
+                            container.scrollTop = targetY;
+                        }
+
+                        // 2. 키보드 이벤트 시뮬레이션 디스패치 (PageDown, ArrowDown)
+                        const simulateKey = (target, keyStr, code) => {
+                            try {
+                                target.dispatchEvent(new KeyboardEvent('keydown', { key: keyStr, keyCode: code, which: code, bubbles: true, cancelable: true }));
+                                target.dispatchEvent(new KeyboardEvent('keypress', { key: keyStr, keyCode: code, which: code, bubbles: true, cancelable: true }));
+                                target.dispatchEvent(new KeyboardEvent('keyup', { key: keyStr, keyCode: code, which: code, bubbles: true, cancelable: true }));
+                            } catch (e) {}
+                        };
+                        simulateKey(container, 'PageDown', 34);
+                        simulateKey(container, 'ArrowDown', 40);
+                        simulateKey(window, 'PageDown', 34);
+                        simulateKey(window, 'ArrowDown', 40);
+
+                        container.dispatchEvent(new Event('scroll'));
+                        window.dispatchEvent(new Event('scroll'));
+
+                        sendToParent('WORKER_LOG', { msg: `가상 스크롤 진행 중: ${Math.round((step / scrollSteps) * 100)}%`, level: 'info' });
+                        await sleep(800 * speedMultiplier);
+                    }
+
+                    // 최종 스크롤 아래로 고정
+                    if (container === document.documentElement || container === document.body) {
+                        window.scrollTo({ top: totalHeight });
+                        document.documentElement.scrollTop = totalHeight;
+                        document.body.scrollTop = totalHeight;
+                    } else {
+                        container.scrollTo({ top: totalHeight });
+                        container.scrollTop = totalHeight;
+                    }
+                    
+                    // 최종 키보드 이벤트 디스패치
+                    const finalSimulateKey = (target, keyStr, code) => {
+                        try {
+                            target.dispatchEvent(new KeyboardEvent('keydown', { key: keyStr, keyCode: code, which: code, bubbles: true, cancelable: true }));
+                            target.dispatchEvent(new KeyboardEvent('keyup', { key: keyStr, keyCode: code, which: code, bubbles: true, cancelable: true }));
+                        } catch (e) {}
+                    };
+                    finalSimulateKey(container, 'PageDown', 34);
+                    finalSimulateKey(window, 'PageDown', 34);
+
+                    container.dispatchEvent(new Event('scroll'));
+                    window.dispatchEvent(new Event('scroll'));
+                    await sleep(300 * speedMultiplier);
+
                     let attempt = 0;
                     const maxAttempts = 10;
 
@@ -133,7 +231,7 @@ export function initWorkerExtractor() {
                             }
                             break;
                         }
-                        await sleep(500);
+                        await sleep(200 * speedMultiplier);
                     }
 
                     // Fallback to Plan C: Decryption API
@@ -178,6 +276,17 @@ export function initWorkerExtractor() {
                         reportProgress(queueId, 0, WORKER_STAGE.DOWNLOADING);
 
                         for (let i = 0; i < imageUrls.length; i += CONCURRENCY_LIMIT) {
+                            // [v1.21.8] 다운로드 루프 중 중단 여부 체크 (스토리지에서 큐 상태 확인)
+                            const queue = getQueue();
+                            const currentItem = queue.find(q => q.id === queueId);
+                            if (!currentItem || currentItem.status === 'failed') {
+                                console.warn('[TokiSync:Worker] ⏹️ 이미지 다운로드 중 대기열 중단 감지 -> 즉시 정지');
+                                cleanupIpc();
+                                stopSilentAudio();
+                                window.close();
+                                return [];
+                            }
+
                             const chunk = imageUrls.slice(i, i + CONCURRENCY_LIMIT);
                             const chunkPromises = chunk.map(async (url, index) => {
                                 const globalIndex = i + index;
@@ -303,14 +412,6 @@ export function initWorkerExtractor() {
                         if (ackTimeout) clearTimeout(ackTimeout);
                         ackCleanup();
                         
-                        // 최종 큐 상태 업데이트
-                        updateQueueItem(queueId, { 
-                            status: 'completed', 
-                            stage: WORKER_STAGE.COMPLETED, 
-                            progressPercent: 100 
-                        });
-                        reportProgress(queueId, 100, WORKER_STAGE.COMPLETED);
-                        
                         cleanupIpc();
                         stopSilentAudio();
 
@@ -330,14 +431,8 @@ export function initWorkerExtractor() {
 
                 // ACK 대기 타임아웃 (15초간 부모 무반응 시 강제 종료)
                 ackTimeout = setTimeout(() => {
-                    console.warn(`[TokiSync:Worker] ⚠️ 부모 ACK 대기 타임아웃 (15초). 강제 완료 처리 후 세션을 종료합니다.`);
+                    console.warn(`[TokiSync:Worker] ⚠️ 부모 ACK 대기 타임아웃 (15초). 세션을 강제 종료합니다.`);
                     ackCleanup();
-                    updateQueueItem(queueId, { 
-                        status: 'completed', 
-                        stage: WORKER_STAGE.COMPLETED, 
-                        progressPercent: 100 
-                    });
-                    reportProgress(queueId, 100, WORKER_STAGE.COMPLETED);
                     cleanupIpc();
                     stopSilentAudio();
                     window.close();
@@ -348,14 +443,6 @@ export function initWorkerExtractor() {
             } catch (err) {
                 console.error(`[TokiSync:Worker] ❌ 에피소드 수집 중 치명적 오류 발생:`, err);
                 stopSilentAudio();
-                
-                updateQueueItem(queueId, { 
-                    status: 'failed', 
-                    stage: WORKER_STAGE.FAILED, 
-                    errorMsg: err.message 
-                });
-                
-                reportProgress(queueId, 0, WORKER_STAGE.FAILED);
                 
                 // Notify parent that task failed
                 sendToParent('TASK_FAILED', { queueId, errorMsg: err.message });

@@ -40,8 +40,7 @@ jobs:
       - name: Prepare Distribution Directory
         run: |
           mkdir -p ./deploy_dist
-          cp -r docs/* ./deploy_dist/
-          cp google_app_script/TokiSync_Server_Bundle.gs ./deploy_dist/
+          cp -r dist/* ./deploy_dist/
 
       - name: Deploy Dev to gh-pages
         if: github.ref == 'refs/heads/develop'

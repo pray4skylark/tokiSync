@@ -6,22 +6,13 @@ import { EpubBuilder } from './epub.js';
 import { CbzBuilder } from './cbz.js';
 import { TxtBuilder } from './txt.js';
 import { LogBox, Notifier, showProgressModal } from './ui.js';
-import { getConfig, isConfigValid } from './config.js';
+import { getConfig, isConfigValid, SLEEP_MULTIPLIERS } from './config.js';
 import { EventBus, EVT } from './EventBus.js';
 import { startSilentAudio, stopSilentAudio } from './anti_sleep.js';
 import { fetchHistory, refreshCacheAfterUpload, getBooksByCacheId, initUpdateUploadViaGASRelay, getMergeIndexFragment } from './gas.js';
 import { fetchHistoryDirect, checkSingleHistoryDirect, getOAuthToken, getOrCreateFolder } from './network.js';
 import { fetchNovelText, fetchComicImages, closeActiveWorker, initBatchWorkerController } from './worker-controller.js';
 import { addEpisodesToQueue, initQueueScheduler, activeWorkers, WORKER_STAGE, updateQueueItem, getQueue, removeQueueItem, getQueueItemId, clearQueue, stopAllWorkers } from './queue.js';
-
-// Sleep Policy Presets
-const SLEEP_POLICIES = {
-    agile: { min: 1000, max: 3000 },      // 빠름 (1-3초)
-    cautious: { min: 2000, max: 5000 },   // 신중 (2-5초)
-    thorough: { min: 3000, max: 8000 },   // 철저 (3-8초)
-    slow: { min: 5000, max: 15000 },      // 느림 (5-15초)
-    very_slow: { min: 10000, max: 30000 } // 매우 느림 (10-30초)
-};
 
 export async function processItem(item, builder, siteInfo, iframe, parser, seriesTitle = "", targetDoc = null, rootFolder = "", destination = "local") {
     const { category } = siteInfo;
@@ -30,7 +21,7 @@ export async function processItem(item, builder, siteInfo, iframe, parser, serie
 
     const logger = LogBox.getInstance();
     const config = getConfig();
-    let policy = SLEEP_POLICIES[config.sleepMode] || SLEEP_POLICIES.agile;
+    const multiplier = SLEEP_MULTIPLIERS[config.sleepMode] || SLEEP_MULTIPLIERS.cautious;
 
     const id = getQueueItemId(seriesTitle, item.num ? item.num.toString() : '');
     
@@ -73,7 +64,7 @@ export async function processItem(item, builder, siteInfo, iframe, parser, serie
                 updateQueueItem(id, { status: 'completed', progressPercent: 100, stage: WORKER_STAGE.COMPLETED });
                 EventBus.emit(EVT.UPDATE_PROGRESS);
                 
-                await sleep(policy.min, policy.max);
+                await sleep(1500 * multiplier, 1000 * multiplier);
                 return false; // 부모 측에서 일괄 빌드 및 최종 저장을 하도록 false 반환
             } else {
                 throw new Error(`추출 실패 (소설 본문 응답 없음)`);
@@ -117,7 +108,7 @@ export async function processItem(item, builder, siteInfo, iframe, parser, serie
                 updateQueueItem(id, { status: 'completed', progressPercent: 100, stage: WORKER_STAGE.COMPLETED });
                 EventBus.emit(EVT.UPDATE_PROGRESS);
 
-                await sleep(policy.min, policy.max);
+                await sleep(1500 * multiplier, 1000 * multiplier);
                 return false; // 부모 측에서 일괄 저장하므로 false 반환
             } else {
                 throw new Error(`추출 실패 (만화 팝업 수집 실패)`);

@@ -62,8 +62,8 @@ export default defineConfig(({ mode }) => {
     },
 
     build: {
-      // 루트 기준 docs 폴더로 빌드 결과물 내보내기
-      outDir: '../../docs', 
+      // 루트 기준 dist 폴더로 빌드 결과물 내보내기
+      outDir: '../../dist', 
       emptyOutDir: true,
       assetsDir: 'assets',
       rollupOptions: {

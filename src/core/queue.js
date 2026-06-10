@@ -311,6 +311,11 @@ export const stopAllWorkers = () => {
   for (const [id, popupRef] of activeWorkers.entries()) {
     try {
       if (popupRef && !popupRef.closed) {
+        // [v1.21.8] 워커에 긴급 정지 postMessage 메시지 전파
+        const actualRef = popupRef.ref || popupRef;
+        if (actualRef && typeof actualRef.postMessage === 'function') {
+          actualRef.postMessage({ type: 'EMERGENCY_STOP', payload: { queueId: id } }, '*');
+        }
         popupRef.close();
       }
     } catch (e) {
@@ -335,8 +340,15 @@ export const stopAllWorkers = () => {
   });
   saveRawQueue(updatedQueue);
 
-  // 3. 일시 정지 해제
+  // 3. 일시 정지 해제 및 크로스 탭 정지 동기화 트리거
   setQueuePaused(false);
+  try {
+    if (typeof GM_setValue !== 'undefined') {
+      GM_setValue('tokisync_queue_stopped_trigger', Date.now());
+    } else if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('tokisync_queue_stopped_trigger', String(Date.now()));
+    }
+  } catch (e) {}
 };
 
 let isSchedulerRunning = false;
@@ -419,7 +431,7 @@ export const runSchedulerOnce = async () => {
       return;
     }
 
-    // 4. 인간 행동 모사를 위한 1.5초~3초 랜덤 지연 완충
+    // 4. 인간 행동 모사를 위한 2.0초~4.0초 랜덤 지연 완충
     console.log(`[Queue Scheduler] 🛡️ 안전 지연 대기 시작 (Target: ${nextItem.episodeTitle})`);
     
     // 배치 수집 기동을 위해 안티 슬립 기동
@@ -427,7 +439,16 @@ export const runSchedulerOnce = async () => {
       startSilentAudio();
     } catch (e) {}
 
-    await sleepJitter(1500, 3000);
+    await sleepJitter(2000, 4000);
+
+    // [v1.21.8] 대기 지터 완료 후 사용자의 정지/일시정지 클릭 및 상태 정합성 재검증
+    const freshQueue = getRawQueue();
+    const freshItem = freshQueue.find(item => item.id === nextItem.id);
+    if (!freshItem || freshItem.status !== 'pending' || getQueuePaused()) {
+      console.log(`[Queue Scheduler] ⏹️ 지터 대기 중 중단/일시정지 또는 상태 변경 감지 -> 기동 취소: ${nextItem.episodeTitle}`);
+      isSchedulerRunning = false;
+      return;
+    }
 
     // 5. 팝업 실행 및 상태 갱신
     console.log(`[Queue Scheduler] 🚀 팝업 릴레이 기동: ${nextItem.episodeTitle} (${nextItem.episodeUrl})`);
@@ -535,12 +556,53 @@ export const initQueueScheduler = () => {
       // 대기열 변동 이벤트가 오면 1회성 스케줄러 즉시 발동
       runSchedulerOnce();
     });
+    // [v1.21.8] 크로스 탭 정지 동기화 감지기 추가
+    GM_addValueChangeListener('tokisync_queue_stopped_trigger', (key, oldValue, newValue, remote) => {
+      if (remote) {
+        console.log('[Queue] ⏹️ 타 탭의 중단 신호 감지 -> 현재 탭의 자식 워커 강제 폐쇄 및 클린업');
+        for (const [id, popupRef] of activeWorkers.entries()) {
+          try {
+            if (popupRef && !popupRef.closed) {
+              const actualRef = popupRef.ref || popupRef;
+              if (actualRef && typeof actualRef.postMessage === 'function') {
+                actualRef.postMessage({ type: 'EMERGENCY_STOP', payload: { queueId: id } }, '*');
+              }
+              popupRef.close();
+            }
+          } catch (e) {}
+        }
+        activeWorkers.clear();
+        closedCounts.clear();
+      }
+    });
     console.log('[TokiSync Queue] 🚦 이벤트 기반(Event-Driven) 고성능 스케줄러가 활성화되었습니다.');
   } else {
     // Fallback: GM API가 없는 가상 유닛 테스트/샌드박스 환경에서는 2초 주기 폴링 작동
     setInterval(() => {
       runSchedulerOnce();
     }, 2000);
+    // Fallback: LocalStorage를 사용하는 멀티 탭 정지 감시
+    let lastStoppedTrigger = localStorage.getItem('tokisync_queue_stopped_trigger') || '0';
+    setInterval(() => {
+      const currentTrigger = localStorage.getItem('tokisync_queue_stopped_trigger') || '0';
+      if (currentTrigger !== lastStoppedTrigger) {
+        lastStoppedTrigger = currentTrigger;
+        console.log('[Queue] ⏹️ 타 탭의 중단 신호 감지(Fallback) -> 현재 탭의 자식 워커 강제 폐쇄 및 클린업');
+        for (const [id, popupRef] of activeWorkers.entries()) {
+          try {
+            if (popupRef && !popupRef.closed) {
+              const actualRef = popupRef.ref || popupRef;
+              if (actualRef && typeof actualRef.postMessage === 'function') {
+                actualRef.postMessage({ type: 'EMERGENCY_STOP', payload: { queueId: id } }, '*');
+              }
+              popupRef.close();
+            }
+          } catch (e) {}
+        }
+        activeWorkers.clear();
+        closedCounts.clear();
+      }
+    }, 1000);
     console.warn('[TokiSync Queue] ⚠️ GM_addValueChangeListener 미지원 환경. 2초 폴링 스케줄러로 기동합니다.');
   }
 

@@ -9,15 +9,8 @@ node_modules/
 .clasp.json
 *.env
 
-# Google Apps Script Old Files
-google_app_script/old/
 # Analysis Files (Local only)
 old_*
-docs/js/backup/*
-
-# Old Logic Directories
-docs_old/
-src/old_core/
 
 # Local Analysis Documents (Private)
 doc_refactoring_report.md
@@ -26,13 +19,12 @@ walkthrough.md
 
 # Temporary build artifacts
 dist/
-docs/
 
 # Consolidated Handover File
 PROJECT_HANDOVER_MASTER.md
 .DS_Store
 # Generated GAS Bundle (CI가 빌드 후 GitHub Pages에 배포)
-google_app_script/TokiSync_Server_Bundle.gs
+dist/TokiSync_Server_Bundle.gs
 
 # AI Agent Context & Brain (Local only)
 brain/
@@ -45,3 +37,4 @@ graphify-out/*
 .sem/
 
 scratch/
+tools/

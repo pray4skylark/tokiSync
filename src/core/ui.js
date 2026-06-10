@@ -333,6 +333,45 @@ export class LogBox {
                 `;
             }).join('');
         }
+
+        // [v1.21.9] 다운로드 탭 인라인 진행 상태 업데이트 및 버튼 가시성 제어
+        const dlActions = doc.getElementById('toki-download-actions');
+        const inlineProgress = doc.getElementById('toki-inline-progress');
+        
+        if (dlActions && inlineProgress) {
+            const hasActiveTasks = queue.some(item => item.status === 'processing' || item.status === 'pending');
+            if (hasActiveTasks) {
+                dlActions.style.display = 'none';
+                inlineProgress.style.display = 'block';
+                
+                const inlineText = doc.getElementById('toki-inline-text');
+                const inlinePercent = doc.getElementById('toki-inline-percent');
+                const inlineBar = doc.getElementById('toki-inline-bar');
+                const inlinePause = doc.getElementById('toki-inline-pause');
+                
+                if (inlineText) {
+                    const pauseText = isPaused ? ' ⏸️ [일시 정지됨]' : '';
+                    inlineText.textContent = `진행률: ${overallPercent}% (${stats.completed + stats.failed} / ${stats.total})${pauseText}`;
+                }
+                if (inlinePercent) {
+                    inlinePercent.textContent = `${overallPercent}%`;
+                }
+                if (inlineBar) {
+                    inlineBar.style.width = `${overallPercent}%`;
+                    if (isPaused) {
+                        inlineBar.classList.add('toki-progress-bar-paused');
+                    } else {
+                        inlineBar.classList.remove('toki-progress-bar-paused');
+                    }
+                }
+                if (inlinePause) {
+                    inlinePause.innerHTML = isPaused ? '<span>▶️ 재개</span>' : '<span>⏸️ 일시 정지</span>';
+                }
+            } else {
+                dlActions.style.display = 'block';
+                inlineProgress.style.display = 'none';
+            }
+        }
     }
 
     static getInstance() {
@@ -512,32 +551,45 @@ export class MenuModal {
             <div class="toki-modal-body">
                 <!-- 1. Download Tab -->
                 <div class="toki-tab-content active" id="toki-tab-download">
-                    <div class="toki-control-group">
-                        <label class="toki-label">빠른 작업</label>
-                        <button class="toki-btn-action toki-btn-gradient-green" id="toki-btn-down-current">
-                            <span>🚀 현재 회차 즉시 다운로드</span>
-                        </button>
+                    <div id="toki-download-actions">
+                        <div class="toki-control-group">
+                            <label class="toki-label">에피소드 범위 지정</label>
+                            <input type="text" id="toki-range-input" class="toki-input" placeholder="예: 1,2,4-10,15 (비우면 전체)">
+                            <div class="toki-text-xs toki-mt-8 toki-ml-4">쉼표(,)로 개별 번호, 하이픈(-)으로 연속 범위 지정</div>
+                        </div>
+                        <div class="toki-control-group toki-mb-24">
+                            <label class="toki-checkbox-wrapper">
+                                <input type="checkbox" id="toki-chk-force-overwrite" class="toki-checkbox-input">
+                                <span class="toki-checkbox"></span>
+                                <span class="toki-checkbox-label">⚠️ 강제 재다운로드 (파일 덮어쓰기)</span>
+                            </label>
+                        </div>
+                        <div class="toki-btn-group-row">
+                            <button class="toki-btn-action toki-flex-1-4" id="toki-btn-down-range">
+                                <span>선택 다운로드</span>
+                            </button>
+                            <button class="toki-btn-action toki-btn-secondary" id="toki-btn-down-all">
+                                <span>전체 다운로드</span>
+                            </button>
+                        </div>
                     </div>
-                    <hr class="toki-divider">
-                    <div class="toki-control-group">
-                        <label class="toki-label">에피소드 범위 지정</label>
-                        <input type="text" id="toki-range-input" class="toki-input" placeholder="예: 1,2,4-10,15 (비우면 전체)">
-                        <div class="toki-text-xs toki-mt-8 toki-ml-4">쉼표(,)로 개별 번호, 하이픈(-)으로 연속 범위 지정</div>
-                    </div>
-                    <div class="toki-control-group toki-mb-24">
-                        <label class="toki-checkbox-wrapper">
-                            <input type="checkbox" id="toki-chk-force-overwrite" class="toki-checkbox-input">
-                            <span class="toki-checkbox"></span>
-                            <span class="toki-checkbox-label">⚠️ 강제 재다운로드 (파일 덮어쓰기)</span>
-                        </label>
-                    </div>
-                    <div class="toki-btn-group-row">
-                        <button class="toki-btn-action toki-flex-1-4" id="toki-btn-down-range">
-                            <span>선택 다운로드</span>
-                        </button>
-                        <button class="toki-btn-action toki-btn-secondary" id="toki-btn-down-all">
-                            <span>전체</span>
-                        </button>
+                    
+                    <div id="toki-inline-progress" style="display: none; padding: 12px; background: rgba(0,0,0,0.04); border-radius: 8px; margin-top: 12px; border: 1px solid rgba(0,0,0,0.06);">
+                        <div style="font-weight: 600; margin-bottom: 8px; font-size: 13px; display: flex; justify-content: space-between;" id="toki-inline-header">
+                            <span id="toki-inline-text">수집 준비 중...</span>
+                            <span id="toki-inline-percent" style="color: var(--toki-primary, #6366f1);">0%</span>
+                        </div>
+                        <div class="toki-progress-bar-container" style="background: rgba(0,0,0,0.08); border-radius: 4px; height: 8px; overflow: hidden; margin-bottom: 12px; position: relative;">
+                            <div id="toki-inline-bar" class="toki-progress-overall-bar-fill" style="width: 0%; height: 100%; background: var(--toki-primary, #6366f1); transition: width 0.3s ease;"></div>
+                        </div>
+                        <div class="toki-btn-group-row" style="gap: 8px;">
+                            <button class="toki-btn-action toki-btn-secondary toki-flex-1" id="toki-inline-pause" style="height: 36px; padding: 0;">
+                                <span>⏸️ 일시 정지</span>
+                            </button>
+                            <button class="toki-btn-action toki-btn-danger toki-flex-1" id="toki-inline-stop" style="background: #ef4444; color: white; height: 36px; padding: 0; border: none;">
+                                <span>⏹️ 수집 중단</span>
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -586,11 +638,10 @@ export class MenuModal {
                     <div class="toki-control-group">
                         <label class="toki-label">다운로드 속도</label>
                         <select id="toki-sel-speed" class="toki-select">
-                            <option value="agile">빠름 (1-3초)</option>
-                            <option value="cautious">신중 (2-5초)</option>
-                            <option value="thorough">철저 (3-8초)</option>
-                            <option value="slow">느림 (5-15초)</option>
-                            <option value="very_slow">매우 느림 (10-30초)</option>
+                            <option value="cautious">신중 (3-6초)</option>
+                            <option value="thorough">철저 (5-9초)</option>
+                            <option value="slow">느림 (7-14초)</option>
+                            <option value="very_slow">매우 느림 (10-20초)</option>
                         </select>
                     </div>
 
@@ -828,10 +879,25 @@ export class MenuModal {
             };
         }
 
-        const downCurrentBtn = doc.getElementById('toki-btn-down-current');
-        if (downCurrentBtn) {
-            downCurrentBtn.onclick = () => {
-                if (this.handlers.downloadCurrent) this.handlers.downloadCurrent();
+        const inlinePause = doc.getElementById('toki-inline-pause');
+        if (inlinePause) {
+            inlinePause.onclick = () => {
+                const isPaused = getQueuePaused();
+                setQueuePaused(!isPaused);
+                LogBox.getInstance().updateProgressUI();
+                if (isPaused) {
+                    runSchedulerOnce();
+                }
+            };
+        }
+
+        const inlineStop = doc.getElementById('toki-inline-stop');
+        if (inlineStop) {
+            inlineStop.onclick = () => {
+                if (popupWindow.confirm('⚠️ 모든 배치 작업을 중단하시겠습니까?')) {
+                    stopAllWorkers();
+                    LogBox.getInstance().updateProgressUI();
+                }
             };
         }
 
@@ -867,7 +933,7 @@ export class MenuModal {
             }
             if (selNameTemplate) selNameTemplate.value = cfg.localNameTemplate || '';
             if (selLocalPadding) selLocalPadding.value = cfg.localEpisodePadding !== undefined ? String(cfg.localEpisodePadding) : '4';
-            if (selSpeed) selSpeed.value = cfg.sleepMode || 'agile';
+            if (selSpeed) selSpeed.value = cfg.sleepMode || 'cautious';
             if (selScanSpeed) {
                 selScanSpeed.value = cfg.scanSpeed !== undefined ? String(cfg.scanSpeed) : '1000';
                 const valSpan = doc.getElementById('toki-scan-speed-val');
