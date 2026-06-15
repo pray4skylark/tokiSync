@@ -163,6 +163,7 @@ function View_Dispatcher(data) {
                     url: existingMeta.url || "", 
                     category: data.category || existingMeta.category || "Unknown",
                     author: existingMeta.author || extraMeta.author || "",
+                    vendor: data.vendor || existingMeta.vendor || extraMeta.vendor || "",
                     status: normalizeStatus(existingMeta.status || extraMeta.status || "연재중"),
                     summary: existingMeta.summary || extraMeta.summary || "",
                     thumbnail: existingMeta.thumbnail || extraMeta.thumbnail || "",

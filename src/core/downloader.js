@@ -323,7 +323,8 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
         const seriesMetadata = {
             ...parser.getSeriesMetadata(),
             title: seriesTitle || rootFolder,
-            thumbnail: parser.getThumbnailUrl() || ""
+            thumbnail: parser.getThumbnailUrl() || "",
+            vendor: parser.getSeriesMetadata().vendor || (matchedRule?.name || "").toLowerCase().replace(/[^a-z0-9]/g, '')
         };
 
         // [Fix] Append Range [Start-End] for Local Merged Files (folderInCbz / zipOfCbzs)
@@ -713,17 +714,23 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                 // Final Filename: Dynamic based on Template or Drive fallback
                 let fullFilename;
                 if (destination !== 'drive') {
-                    const paddingVal = parseInt(config.localEpisodePadding, 10);
-                    const paddedNum = paddingVal > 0 
-                        ? (item.num || '').toString().padStart(paddingVal, '0') 
-                        : (item.num || '').toString();
+                    const template = config.localNameTemplate || "{number:4} - {title}";
+                    
+                    // 1. Dynamic padding {number:X} support
+                    fullFilename = template.replace(/\{number:(\d)\}/g, (match, p1) => {
+                        const padSize = parseInt(p1, 10);
+                        return padSize > 0 
+                            ? (item.num || '').toString().padStart(padSize, '0') 
+                            : (item.num || '').toString();
+                    });
 
-                    const template = config.localNameTemplate || "{number} - {title}";
-                    fullFilename = template
-                        .replace(/{number}/g, paddedNum)
-                        .replace(/{rawNumber}/g, (item.num || '').toString())
-                        .replace(/{series}/g, seriesTitle || rootFolder || '')
-                        .replace(/{title}/g, chapterTitle || '');
+                    // 2. Legacy {number} & {rawNumber} fallback
+                    const legacyPaddedNum = (item.num || '').toString().padStart(4, '0');
+                    fullFilename = fullFilename
+                        .replace(/\{number\}/g, legacyPaddedNum)
+                        .replace(/\{rawNumber\}/g, (item.num || '').toString())
+                        .replace(/\{series\}/g, seriesTitle || rootFolder || '')
+                        .replace(/\{title\}/g, chapterTitle || '');
                 } else {
                     const paddedNum = (item.num || '').toString().padStart(4, '0');
                     fullFilename = `${paddedNum} - ${chapterTitle}`;

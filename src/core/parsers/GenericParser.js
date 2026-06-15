@@ -164,9 +164,7 @@ export class GenericParser extends BaseParser {
         let num = numRaw;
         const match = numRaw.match(/(\d+)/);
         if (match) {
-            num = match[1].padStart(4, '0');
-        } else {
-            num = numRaw.padStart(4, '0');
+            num = match[1];
         }
 
         if (subRaw) {
@@ -296,7 +294,8 @@ export class GenericParser extends BaseParser {
         return {
             author: this._extractValue(document, meta.author) || "",
             status: this._extractValue(document, meta.status) || "연재중",
-            summary: this._extractValue(document, meta.summary) || ""
+            summary: this._extractValue(document, meta.summary) || "",
+            vendor: (this.rule.name || "").toLowerCase().replace(/[^a-z0-9]/g, '')
         };
     }
 
@@ -310,9 +309,7 @@ export class GenericParser extends BaseParser {
         // Clean up episodeNum
         const match = episodeNum.match(/(\d+)/);
         if (match) {
-            episodeNum = match[1].padStart(4, '0');
-        } else {
-            episodeNum = episodeNum.padStart(4, '0');
+            episodeNum = match[1];
         }
 
         return {
