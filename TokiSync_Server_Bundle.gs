@@ -1,4 +1,4 @@
-/* ⚙️ TokiSync Server Code Bundle v1.0.0 (Generated: 2026-06-07T17:45:59.425Z) */
+/* ⚙️ TokiSync Server Code Bundle v1.0.0 (Generated: 2026-06-15T07:16:58.769Z) */
 
 /* ========================================================================== */
 /* FILE: Main.gs */
@@ -607,11 +607,13 @@ function saveSeriesInfo(data, rootFolderId) {
   const infoData = {
     id: data.id,
     title: data.title,
+    vendor: data.vendor || "",
     metadata: {
       authors: [data.author || "Unknown"],
       status: data.status || "Unknown",
       category: data.category || "Unknown",
       publisher: data.site || "",
+      vendor: data.vendor || "",
     },
     thumbnail: data.thumbnail || "",
     url: data.url,
@@ -1159,6 +1161,7 @@ function View_Dispatcher(data) {
                     url: existingMeta.url || "", 
                     category: data.category || existingMeta.category || "Unknown",
                     author: existingMeta.author || extraMeta.author || "",
+                    vendor: data.vendor || existingMeta.vendor || extraMeta.vendor || "",
                     status: normalizeStatus(existingMeta.status || extraMeta.status || "연재중"),
                     summary: existingMeta.summary || extraMeta.summary || "",
                     thumbnail: existingMeta.thumbnail || extraMeta.thumbnail || "",
@@ -1789,11 +1792,13 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
         hasCover: !!tid,
         lastModified: metaData.lastUpdated || folder.modifiedTime,
         category: metaData.category || categoryContext,
+        vendor: metaData.vendor || "",
         metadata: {
             category: metaData.category || categoryContext,
             status: normalizeStatus(metaData.status) || "연재중",
             authors: metaData.author ? [metaData.author] : [],
-            summary: metaData.summary || ""
+            summary: metaData.summary || "",
+            vendor: metaData.vendor || ""
         }
       };
     } catch (e) {
@@ -1838,6 +1843,9 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
         metadata.authors = parsed.metadata.authors;
       else if (parsed.author) metadata.authors = [parsed.author];
 
+      if (parsed.vendor) metadata.vendor = parsed.vendor;
+      else if (parsed.metadata && parsed.metadata.vendor) metadata.vendor = parsed.metadata.vendor;
+
       if (parsed.thumbnail) thumbnailOld = parsed.thumbnail;
     } catch (e) {}
   } else {
@@ -1869,6 +1877,7 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
     name: seriesName,
     booksCount: booksCount,
     metadata: metadata,
+    vendor: metadata.vendor || "",
     thumbnail: finalThumbnail,
     thumbnailId: thumbnailId,
     hasCover: !!thumbnailId,
@@ -1912,6 +1921,7 @@ function View_updateMetadata(seriesId, metadata, rootFolderId) {
     name: metadata.name !== undefined ? metadata.name : (existingMeta.name || folderName.replace(/^\[\d+\]\s*/, '').trim()),
     category: metadata.category !== undefined ? metadata.category : (existingMeta.category || "Unknown"),
     author: metadata.author !== undefined ? metadata.author : (existingMeta.author || ""),
+    vendor: metadata.vendor !== undefined ? metadata.vendor : (existingMeta.vendor || ""),
     status: metadata.status !== undefined ? normalizeStatus(metadata.status) : (normalizeStatus(existingMeta.status) || "연재중"),
     summary: metadata.summary !== undefined ? metadata.summary : (existingMeta.summary || ""),
     thumbnail: metadata.thumbnail !== undefined ? metadata.thumbnail : (existingMeta.thumbnail || ""),
@@ -1945,11 +1955,13 @@ function View_updateMetadata(seriesId, metadata, rootFolderId) {
             list[idx].thumbnail = updatedMeta.thumbnail;
             list[idx].thumbnailId = updatedMeta.thumbnailId;
             list[idx].lastModified = updatedMeta.lastUpdated;
+            list[idx].vendor = updatedMeta.vendor;
             if (!list[idx].metadata) list[idx].metadata = {};
             list[idx].metadata.category = updatedMeta.category;
             list[idx].metadata.status = updatedMeta.status;
             list[idx].metadata.authors = updatedMeta.author ? [updatedMeta.author] : [];
             list[idx].metadata.summary = updatedMeta.summary;
+            list[idx].metadata.vendor = updatedMeta.vendor;
             
             View_saveIndex(rootFolderId, list);
           }
@@ -2137,6 +2149,153 @@ function View_saveReadHistory(data, folderId) {
 function View_authorizeCheck() {
   DriveAccessService.getRootId();
   console.log("✅ [Viewer] Auth Check Complete");
+}
+
+
+/* ========================================================================== */
+/* FILE: Migrate_Service.gs */
+/* ========================================================================== */
+
+/**
+ * 🛠️ Migration Service
+ * Handles one-time data migration tasks for system updates.
+ */
+
+// Centralized Thumbnail Folder Name provided by View_LibraryService.gs
+// const THUMB_FOLDER_NAME = "_Thumbnails";
+
+/**
+ * [Migration] Moves 'cover.jpg' from series folders to '_Thumbnails/{SeriesID}.jpg'
+ * This is a heavy operation and should be run carefully.
+ *
+ * @param {string} rootFolderId - Root folder ID of the library
+ */
+function Migrate_MoveThumbnails(rootFolderId) {
+  const thumbFolderId = DriveAccessService.ensureFolder(rootFolderId, THUMB_FOLDER_NAME);
+  
+  const logs = [];
+  logs.push(`[Start] Migration started... Target: ${THUMB_FOLDER_NAME} (${thumbFolderId})`);
+
+  const CATS = ["Webtoon", "Manga", "Novel"];
+  const folders = DriveAccessService.list(rootFolderId, {
+      query: "mimeType = 'application/vnd.google-apps.folder'",
+      fields: "files(id, name)"
+  });
+
+  // Iterate Categories
+  for (const catFolder of folders) {
+    if (!CATS.includes(catFolder.name)) continue;
+
+    logs.push(`[Scan] Category: ${catFolder.name}`);
+
+    // Iterate Series
+    const seriesFolders = DriveAccessService.list(catFolder.id, {
+        query: "mimeType = 'application/vnd.google-apps.folder'",
+        fields: "files(id, name)"
+    });
+
+    for (const sFolder of seriesFolders) {
+      const sName = sFolder.name;
+
+      // Extract Series ID: "[12345] Title" -> "12345"
+      const match = sName.match(/^\[(\d+)\]/);
+      if (!match) continue;
+
+      const seriesId = match[1];
+
+      // Check for 'cover.jpg'
+      const covers = DriveAccessService.list(sFolder.id, {
+          query: "name = 'cover.jpg'",
+          fields: "files(id, parents)"
+      });
+
+      if (covers.length > 0) {
+        const coverFile = covers[0];
+        try {
+          // Move (V3 Style)
+          DriveAccessService.move(coverFile.id, sFolder.id, thumbFolderId);
+          // Rename
+          DriveAccessService.patch(coverFile.id, { name: `${seriesId}.jpg` });
+          
+          logs.push(`  ✅ Moved: ${sName} -> ${seriesId}.jpg`);
+        } catch (e) {
+          logs.push(`  ❌ Failed: ${sName} - ${e.toString()}`);
+        }
+      }
+    }
+  }
+
+  logs.push("[Done] Migration completed.");
+  return logs;
+}
+
+/**
+ * [Migration] Rename files to include Series Title
+ * Target: "0001 - 1화.cbz" -> "0001 - SeriesTitle 1화.cbz"
+ *
+ * @param {string} seriesId
+ * @param {string} rootFolderId
+ */
+function Migrate_RenameFiles(seriesId, rootFolderId) {
+  let targetSeriesFolderId = null;
+  let targetSeriesFolderName = "";
+  let seriesTitle = "";
+
+  // 1. Find Series Folder: "[ID] Title"
+  const CATS = ["Webtoon", "Manga", "Novel"];
+  const folders = DriveAccessService.list(rootFolderId, {
+      query: "mimeType = 'application/vnd.google-apps.folder'",
+      fields: "files(id, name)"
+  });
+
+  for (const catFolder of folders) {
+    if (!CATS.includes(catFolder.name)) continue;
+
+    const seriesFolders = DriveAccessService.list(catFolder.id, {
+        query: "mimeType = 'application/vnd.google-apps.folder'",
+        fields: "files(id, name)"
+    });
+
+    for (const sFolder of seriesFolders) {
+      if (sFolder.name.includes(`[${seriesId}]`)) {
+        targetSeriesFolderId = sFolder.id;
+        targetSeriesFolderName = sFolder.name;
+        seriesTitle = sFolder.name.replace(/^\[\d+\]\s*/, "").trim();
+        break;
+      }
+    }
+    if (targetSeriesFolderId) break;
+  }
+
+  if (!targetSeriesFolderId) return ["Error: Series Folder Not Found"];
+
+  const logs = [];
+  logs.push(`[Start] Renaming files in: ${targetSeriesFolderName} (Title: ${seriesTitle})`);
+
+  const files = DriveAccessService.list(targetSeriesFolderId, {
+      fields: "files(id, name)"
+  });
+  let count = 0;
+
+  for (const file of files) {
+    const name = file.name;
+
+    if (name.match(/^\d{4}\s-\s/) && !name.includes(seriesTitle)) {
+      const parts = name.split(" - ");
+      if (parts.length >= 2) {
+        const numPart = parts[0]; 
+        const restPart = parts.slice(1).join(" - "); 
+
+        const newName = `${numPart} - ${seriesTitle} ${restPart}`;
+        DriveAccessService.patch(file.id, { name: newName });
+        logs.push(`  Renamed: ${name} -> ${newName}`);
+        count++;
+      }
+    }
+  }
+
+  logs.push(`[Done] ${count} files renamed.`);
+  return logs;
 }
 
 
