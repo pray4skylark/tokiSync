@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.23.0
+// @version      1.24.0
 // @description  Toki series sites -> Google Drive syncing tool (Bundled)
 // @author       pray4skylark
 // @updateURL    https://pray4skylark.github.io/tokiSync/tokiSync.user.js
@@ -1918,9 +1918,7 @@ class GenericParser extends BaseParser {
         let num = numRaw;
         const match = numRaw.match(/(\d+)/);
         if (match) {
-            num = match[1].padStart(4, '0');
-        } else {
-            num = numRaw.padStart(4, '0');
+            num = match[1];
         }
 
         if (subRaw) {
@@ -2050,7 +2048,8 @@ class GenericParser extends BaseParser {
         return {
             author: this._extractValue(document, meta.author) || "",
             status: this._extractValue(document, meta.status) || "연재중",
-            summary: this._extractValue(document, meta.summary) || ""
+            summary: this._extractValue(document, meta.summary) || "",
+            vendor: (this.rule.name || "").toLowerCase().replace(/[^a-z0-9]/g, '')
         };
     }
 
@@ -2064,9 +2063,7 @@ class GenericParser extends BaseParser {
         // Clean up episodeNum
         const match = episodeNum.match(/(\d+)/);
         if (match) {
-            episodeNum = match[1].padStart(4, '0');
-        } else {
-            episodeNum = episodeNum.padStart(4, '0');
+            episodeNum = match[1];
         }
 
         return {
@@ -2522,6 +2519,20 @@ async function getMergeIndexFragment(sourceId) {
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
 /* harmony export */   s: function() { return /* binding */ EpubBuilder; }
 /* harmony export */ });
+function escapeXml(unsafe) {
+    if (typeof unsafe !== 'string') return '';
+    return unsafe.replace(/[<>&'"]/g, function (c) {
+        switch (c) {
+            case '<': return '&lt;';
+            case '>': return '&gt;';
+            case '&': return '&amp;';
+            case '\'': return '&apos;';
+            case '"': return '&quot;';
+            default: return c;
+        }
+    });
+}
+
 class EpubBuilder {
     constructor() {
         this.chapters = [];
@@ -2534,17 +2545,17 @@ class EpubBuilder {
             .split('\n')
             .map(line => line.trim())
             .filter(line => line.length > 0)
-            .map(line => `<p>${line}</p>`)
+            .map(line => `<p>${escapeXml(line)}</p>`)
             .join('\n');
             
-        this.chapters.push({ title, content: htmlContent });
+        this.chapters.push({ title: escapeXml(title), content: htmlContent });
     }
 
     async build(metadata = {}) {
         try {
             const zip = new JSZip();
-            const title = metadata.title || "Unknown Title";
-            const author = metadata.author || "Unknown Author";
+            const title = escapeXml(metadata.title || "Unknown Title");
+            const author = escapeXml(metadata.author || "Unknown Author");
             const uid = "urn:uuid:" + (crypto.randomUUID ? crypto.randomUUID() : Date.now());
 
             // 1. mimetype (must be first, uncompressed)
@@ -2993,8 +3004,7 @@ async function fetchMediaViaWorkerSingleAttempt(episodeUrl, targetType = 'novel'
                             protocolDomain: config.protocolDomain || window.location.origin,
                             scanSpeedMultiplier: config.scanSpeedMultiplier || 1.0,
                             speedMultiplier: localMultiplier, // 속도 배율 전달
-                            localNameTemplate: config.localNameTemplate || "{number} - {title}",
-                            localEpisodePadding: config.localEpisodePadding || "4"
+                            localNameTemplate: config.localNameTemplate || "{number:4} - {title}"
                         });
                     }
                 }
@@ -3329,7 +3339,7 @@ function initBatchWorkerController() {
         _EventBus_js__WEBPACK_IMPORTED_MODULE_3__/* .EventBus */ .l.emit(_EventBus_js__WEBPACK_IMPORTED_MODULE_3__/* .EVT */ .c.UPDATE_PROGRESS);
 
         try {
-            const { category, destination, novelFormat, episodeTitle, episodeNum, rootFolder, title, matchedRule } = item;
+            const { category, destination, novelFormat, episodeTitle, episodeNum, rootFolder, title, matchedRule, localNameTemplate } = item;
             const isNovel = (category === 'Novel' || category === 'novel');
             const siteName = matchedRule?.name || "TokiSync Parser";
 
@@ -3376,9 +3386,20 @@ function initBatchWorkerController() {
                 blob = await innerZip.generateAsync({ type: "blob" });
             }
 
-            // 3. 파일 이름 결정 및 구글 드라이브 업로드 실행 (Drive 업로드는 4자리 제로패딩 포함)
-            const paddedNum = (episodeNum || '').toString().padStart(4, '0');
-            const fullFilename = `${paddedNum} - ${episodeTitle}`;
+            // 3. 파일 이름 결정: localNameTemplate 기반 (없으면 4자리 패딩 기본값)
+            const template = localNameTemplate || '{number:4} - {title}';
+            let fullFilename = template.replace(/\{number:(\d)\}/g, (_, p1) => {
+                const padSize = parseInt(p1, 10);
+                return padSize > 0
+                    ? (episodeNum || '').toString().padStart(padSize, '0')
+                    : (episodeNum || '').toString();
+            });
+            const legacyPaddedNum = (episodeNum || '').toString().padStart(4, '0');
+            fullFilename = fullFilename
+                .replace(/\{number\}/g, legacyPaddedNum)
+                .replace(/\{rawNumber\}/g, (episodeNum || '').toString())
+                .replace(/\{series\}/g, title || rootFolder || '')
+                .replace(/\{title\}/g, episodeTitle || '');
 
             console.log(`[WorkerController] [배치 업로드] 파일 조립 완료. 구글 드라이브 전송 시작: ${fullFilename}.${extension}`);
             
@@ -3527,8 +3548,7 @@ function initBatchWorkerController() {
                         protocolDomain: item.protocolDomain || window.location.origin,
                         scanSpeedMultiplier: config.scanSpeed / 750,
                         speedMultiplier: multiplier, // 속도 배율 전달
-                        localNameTemplate: config.localNameTemplate || "{number} - {title}",
-                        localEpisodePadding: config.localEpisodePadding || "4"
+                        localNameTemplate: config.localNameTemplate || "{number:4} - {title}"
                     });
                 }
             } else {
@@ -3913,7 +3933,7 @@ async function fetchNovelTextViaApi(episodeUrl, config = {}, _isRetry = false) {
 /* harmony export */   rn: function() { return /* binding */ CFG_REMOTE_RULE_URL; },
 /* harmony export */   zj: function() { return /* binding */ getConfig; }
 /* harmony export */ });
-/* unused harmony exports CFG_URL_KEY, CFG_ID_KEY, CFG_FOLDER_ID, CFG_POLICY_KEY, CFG_API_KEY, CFG_SLEEP_MODE, CFG_SMART_SKIP_RATIO, CFG_NOVEL_MODE, CFG_NOVEL_FORMAT, CFG_SCAN_SPEED, CFG_LOCAL_NAME_TEMPLATE, CFG_LOCAL_EPISODE_PADDING, CFG_LOG_LEVEL */
+/* unused harmony exports CFG_URL_KEY, CFG_ID_KEY, CFG_FOLDER_ID, CFG_POLICY_KEY, CFG_API_KEY, CFG_SLEEP_MODE, CFG_SMART_SKIP_RATIO, CFG_NOVEL_MODE, CFG_NOVEL_FORMAT, CFG_SCAN_SPEED, CFG_LOCAL_NAME_TEMPLATE, CFG_LOG_LEVEL */
 const SLEEP_MULTIPLIERS = {
     cautious: 1.0,   // 신중 (1.0배율)
     thorough: 1.5,   // 철저 (1.5배율)
@@ -3934,7 +3954,6 @@ const CFG_REMOTE_RULE_URL = "TOKI_REMOTE_RULE_URL";
 const CFG_CUSTOM_RULES = "TOKI_CUSTOM_RULES";
 const CFG_SCAN_SPEED = "TOKI_SCAN_SPEED";
 const CFG_LOCAL_NAME_TEMPLATE = "TOKI_LOCAL_NAME_TEMPLATE";
-const CFG_LOCAL_EPISODE_PADDING = "TOKI_LOCAL_EPISODE_PADDING";
 const CFG_LOG_LEVEL = "TOKI_LOG_LEVEL";
 
 /**
@@ -3987,8 +4006,7 @@ function getConfig() {
             }
             return Math.round(val);
         })(),
-        localNameTemplate: GM_getValue(CFG_LOCAL_NAME_TEMPLATE, "{number} - {title}"),
-        localEpisodePadding: GM_getValue(CFG_LOCAL_EPISODE_PADDING, "4"),
+        localNameTemplate: GM_getValue(CFG_LOCAL_NAME_TEMPLATE, "{number:4} - {title}"),
         logLevel: GM_getValue(CFG_LOG_LEVEL, "info")
     };
 }
@@ -5540,22 +5558,17 @@ class MenuModal {
 
                     <div class="toki-control-group">
                         <label class="toki-label">로컬 파일명 템플릿</label>
-                        <input type="text" id="toki-sel-nametemplate" class="toki-input" placeholder="{number} - {title}">
-                        <div class="toki-hint" style="font-size: 11px; color: #888; margin-top: 4px;">
-                            로컬 저장 시 파일명 포맷입니다. 
-                            (치환자: <b>{number}</b>=패딩번호, <b>{rawNumber}</b>=원본번호, <b>{series}</b>=작품명, <b>{title}</b>=회차제목)<br>
+                        <div style="display: flex; gap: 8px; margin-bottom: 6px;">
+                            <input type="text" id="toki-sel-nametemplate" class="toki-input" placeholder="{number:4} - {title}" style="flex: 1;">
+                            <button class="toki-btn-action toki-btn-secondary toki-btn-sm" id="toki-btn-kavita-preset" style="white-space: nowrap; height: 36px; padding: 0 12px;">
+                                💡 Kavita 프리셋
+                            </button>
+                        </div>
+                        <div class="toki-hint" style="font-size: 11px; color: #888;">
+                            로컬 저장 시 파일명 포맷입니다.<br>
+                            치환자: <b>{number:X}</b>=X자리패딩(0~9), <b>{number}</b>=4자리패딩, <b>{rawNumber}</b>=원본번호, <b>{series}</b>=작품명, <b>{title}</b>=회차제목<br>
                             ※ 구글 드라이브 업로드 시에는 기존 포맷으로 고정됩니다.
                         </div>
-                    </div>
-
-                    <div class="toki-control-group">
-                        <label class="toki-label">로컬 화수 패딩 자릿수</label>
-                        <select id="toki-sel-localpadding" class="toki-select">
-                            <option value="0">패딩 없음 (1, 2, 10)</option>
-                            <option value="2">2자리 패딩 (01, 02, 10)</option>
-                            <option value="3">3자리 패딩 (001, 002, 010)</option>
-                            <option value="4">4자리 패딩 (0001, 0002, 0010)</option>
-                        </select>
                     </div>
 
                     <div class="toki-control-group">
@@ -5837,7 +5850,12 @@ class MenuModal {
         const selApiKey = doc.getElementById('toki-sel-apikey');
         const selPolicy = doc.getElementById('toki-sel-policy');
         const selNameTemplate = doc.getElementById('toki-sel-nametemplate');
-        const selLocalPadding = doc.getElementById('toki-sel-localpadding');
+        const btnKavitaPreset = doc.getElementById('toki-btn-kavita-preset');
+        if (btnKavitaPreset && selNameTemplate) {
+            btnKavitaPreset.onclick = () => {
+                selNameTemplate.value = "{series} - {number:4} - {title}";
+            };
+        }
         const selSpeed = doc.getElementById('toki-sel-speed');
         const selScanSpeed = doc.getElementById('toki-sel-scanspeed');
         const selNovelFormat = doc.getElementById('toki-sel-novel-format');
@@ -5855,7 +5873,6 @@ class MenuModal {
                 this.updateNativeHelper(doc, selPolicy.value);
             }
             if (selNameTemplate) selNameTemplate.value = cfg.localNameTemplate || '';
-            if (selLocalPadding) selLocalPadding.value = cfg.localEpisodePadding !== undefined ? String(cfg.localEpisodePadding) : '4';
             if (selSpeed) selSpeed.value = cfg.sleepMode || 'cautious';
             if (selScanSpeed) {
                 selScanSpeed.value = cfg.scanSpeed !== undefined ? String(cfg.scanSpeed) : '1000';
@@ -6075,8 +6092,7 @@ class MenuModal {
                 const newFolder = selFolderId ? selFolderId.value.trim() : '';
                 const newApiKey = selApiKey ? selApiKey.value.trim() : '';
                 const newPolicy = selPolicy ? selPolicy.value : 'individual';
-                const newNameTemplate = selNameTemplate ? selNameTemplate.value.trim() || "{number} - {title}" : "{number} - {title}";
-                const newLocalPadding = selLocalPadding ? selLocalPadding.value : '4';
+                const newNameTemplate = selNameTemplate ? selNameTemplate.value.trim() || "{number:4} - {title}" : "{number:4} - {title}";
                 const newSleepMode = selSpeed ? selSpeed.value : 'agile';
                 const newScanSpeed = selScanSpeed ? selScanSpeed.value : '1000';
                 const newNovelFormat = selNovelFormat ? selNovelFormat.value : 'epub';
@@ -6094,7 +6110,6 @@ class MenuModal {
                     this.handlers.setConfig('TOKI_API_KEY', newApiKey);
                     this.handlers.setConfig('TOKI_DOWNLOAD_POLICY', newPolicy);
                     this.handlers.setConfig('TOKI_LOCAL_NAME_TEMPLATE', newNameTemplate);
-                    this.handlers.setConfig('TOKI_LOCAL_EPISODE_PADDING', newLocalPadding);
                     this.handlers.setConfig('TOKI_SLEEP_MODE', newSleepMode);
                     this.handlers.setConfig('TOKI_SCAN_SPEED', newScanSpeed);
                     this.handlers.setConfig('TOKI_NOVEL_FORMAT', newNovelFormat);
@@ -6632,7 +6647,7 @@ class FormRuleEditor {
     }
 
     render() {
-        const scriptVer =  true ? "1.23.0" : 0;
+        const scriptVer =  true ? "1.24.0" : 0;
         this.overlay.innerHTML = `
             <div class="toki-modal toki-form-editor-modal">
                 <div class="toki-modal-header">
@@ -7820,7 +7835,8 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
         const seriesMetadata = {
             ...parser.getSeriesMetadata(),
             title: seriesTitle || rootFolder,
-            thumbnail: parser.getThumbnailUrl() || ""
+            thumbnail: parser.getThumbnailUrl() || "",
+            vendor: parser.getSeriesMetadata().vendor || (matchedRule?.name || "").toLowerCase().replace(/[^a-z0-9]/g, '')
         };
 
         // [Fix] Append Range [Start-End] for Local Merged Files (folderInCbz / zipOfCbzs)
@@ -8210,17 +8226,23 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                 // Final Filename: Dynamic based on Template or Drive fallback
                 let fullFilename;
                 if (destination !== 'drive') {
-                    const paddingVal = parseInt(config.localEpisodePadding, 10);
-                    const paddedNum = paddingVal > 0 
-                        ? (item.num || '').toString().padStart(paddingVal, '0') 
-                        : (item.num || '').toString();
+                    const template = config.localNameTemplate || "{number:4} - {title}";
+                    
+                    // 1. Dynamic padding {number:X} support
+                    fullFilename = template.replace(/\{number:(\d)\}/g, (match, p1) => {
+                        const padSize = parseInt(p1, 10);
+                        return padSize > 0 
+                            ? (item.num || '').toString().padStart(padSize, '0') 
+                            : (item.num || '').toString();
+                    });
 
-                    const template = config.localNameTemplate || "{number} - {title}";
-                    fullFilename = template
-                        .replace(/{number}/g, paddedNum)
-                        .replace(/{rawNumber}/g, (item.num || '').toString())
-                        .replace(/{series}/g, seriesTitle || rootFolder || '')
-                        .replace(/{title}/g, chapterTitle || '');
+                    // 2. Legacy {number} & {rawNumber} fallback
+                    const legacyPaddedNum = (item.num || '').toString().padStart(4, '0');
+                    fullFilename = fullFilename
+                        .replace(/\{number\}/g, legacyPaddedNum)
+                        .replace(/\{rawNumber\}/g, (item.num || '').toString())
+                        .replace(/\{series\}/g, seriesTitle || rootFolder || '')
+                        .replace(/\{title\}/g, chapterTitle || '');
                 } else {
                     const paddedNum = (item.num || '').toString().padStart(4, '0');
                     fullFilename = `${paddedNum} - ${chapterTitle}`;
