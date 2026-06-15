@@ -1,3 +1,17 @@
+function escapeXml(unsafe) {
+    if (typeof unsafe !== 'string') return '';
+    return unsafe.replace(/[<>&'"]/g, function (c) {
+        switch (c) {
+            case '<': return '&lt;';
+            case '>': return '&gt;';
+            case '&': return '&amp;';
+            case '\'': return '&apos;';
+            case '"': return '&quot;';
+            default: return c;
+        }
+    });
+}
+
 export class EpubBuilder {
     constructor() {
         this.chapters = [];
@@ -10,17 +24,17 @@ export class EpubBuilder {
             .split('\n')
             .map(line => line.trim())
             .filter(line => line.length > 0)
-            .map(line => `<p>${line}</p>`)
+            .map(line => `<p>${escapeXml(line)}</p>`)
             .join('\n');
             
-        this.chapters.push({ title, content: htmlContent });
+        this.chapters.push({ title: escapeXml(title), content: htmlContent });
     }
 
     async build(metadata = {}) {
         try {
             const zip = new JSZip();
-            const title = metadata.title || "Unknown Title";
-            const author = metadata.author || "Unknown Author";
+            const title = escapeXml(metadata.title || "Unknown Title");
+            const author = escapeXml(metadata.author || "Unknown Author");
             const uid = "urn:uuid:" + (crypto.randomUUID ? crypto.randomUUID() : Date.now());
 
             // 1. mimetype (must be first, uncompressed)

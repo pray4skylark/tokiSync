@@ -64,11 +64,13 @@ function saveSeriesInfo(data, rootFolderId) {
   const infoData = {
     id: data.id,
     title: data.title,
+    vendor: data.vendor || "",
     metadata: {
       authors: [data.author || "Unknown"],
       status: data.status || "Unknown",
       category: data.category || "Unknown",
       publisher: data.site || "",
+      vendor: data.vendor || "",
     },
     thumbnail: data.thumbnail || "",
     url: data.url,

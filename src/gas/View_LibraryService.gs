@@ -321,11 +321,13 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
         hasCover: !!tid,
         lastModified: metaData.lastUpdated || folder.modifiedTime,
         category: metaData.category || categoryContext,
+        vendor: metaData.vendor || "",
         metadata: {
             category: metaData.category || categoryContext,
             status: normalizeStatus(metaData.status) || "연재중",
             authors: metaData.author ? [metaData.author] : [],
-            summary: metaData.summary || ""
+            summary: metaData.summary || "",
+            vendor: metaData.vendor || ""
         }
       };
     } catch (e) {
@@ -370,6 +372,9 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
         metadata.authors = parsed.metadata.authors;
       else if (parsed.author) metadata.authors = [parsed.author];
 
+      if (parsed.vendor) metadata.vendor = parsed.vendor;
+      else if (parsed.metadata && parsed.metadata.vendor) metadata.vendor = parsed.metadata.vendor;
+
       if (parsed.thumbnail) thumbnailOld = parsed.thumbnail;
     } catch (e) {}
   } else {
@@ -401,6 +406,7 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
     name: seriesName,
     booksCount: booksCount,
     metadata: metadata,
+    vendor: metadata.vendor || "",
     thumbnail: finalThumbnail,
     thumbnailId: thumbnailId,
     hasCover: !!thumbnailId,
@@ -444,6 +450,7 @@ function View_updateMetadata(seriesId, metadata, rootFolderId) {
     name: metadata.name !== undefined ? metadata.name : (existingMeta.name || folderName.replace(/^\[\d+\]\s*/, '').trim()),
     category: metadata.category !== undefined ? metadata.category : (existingMeta.category || "Unknown"),
     author: metadata.author !== undefined ? metadata.author : (existingMeta.author || ""),
+    vendor: metadata.vendor !== undefined ? metadata.vendor : (existingMeta.vendor || ""),
     status: metadata.status !== undefined ? normalizeStatus(metadata.status) : (normalizeStatus(existingMeta.status) || "연재중"),
     summary: metadata.summary !== undefined ? metadata.summary : (existingMeta.summary || ""),
     thumbnail: metadata.thumbnail !== undefined ? metadata.thumbnail : (existingMeta.thumbnail || ""),
@@ -477,11 +484,13 @@ function View_updateMetadata(seriesId, metadata, rootFolderId) {
             list[idx].thumbnail = updatedMeta.thumbnail;
             list[idx].thumbnailId = updatedMeta.thumbnailId;
             list[idx].lastModified = updatedMeta.lastUpdated;
+            list[idx].vendor = updatedMeta.vendor;
             if (!list[idx].metadata) list[idx].metadata = {};
             list[idx].metadata.category = updatedMeta.category;
             list[idx].metadata.status = updatedMeta.status;
             list[idx].metadata.authors = updatedMeta.author ? [updatedMeta.author] : [];
             list[idx].metadata.summary = updatedMeta.summary;
+            list[idx].metadata.vendor = updatedMeta.vendor;
             
             View_saveIndex(rootFolderId, list);
           }

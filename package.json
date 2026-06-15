@@ -1,31 +1,31 @@
 {
   "name": "tokisync",
-  "version": "1.22.4",
+  "version": "1.24.0",
   "components": {
-    "script": "1.22.4",
+    "script": "1.24.0",
     "viewer": "1.22.0",
-    "gas": "1.22.0"
+    "gas": "1.24.0"
   },
   "description": "**북토끼, 뉴토끼, 마나토끼**의 콘텐츠를 **구글 드라이브로 직접 업로드**하고, **전용 웹 뷰어**를 통해 편리하게 관리/열람할 수 있는 올인원 솔루션입니다.",
   "type": "module",
-  "main": "tokiSyncCore.js",
+  "main": "src/core/index.js",
   "directories": {
-    "doc": "docs"
+    "doc": "documentation"
   },
   "scripts": {
     "test": "node src/core/run-test.js",
-    "serve-docs": "npx http-server docs --cors",
+    "serve-dist": "npx http-server dist --cors",
     "build": "npm run build:viewer && npm run build:core && npm run build:gas",
     "build:core": "npx webpack --config webpack.core.config.cjs",
     "build:viewer": "npx vite build",
-    "build:gas": "npx node google_app_script/build_bundle.cjs",
+    "build:gas": "npx node src/gas/build_bundle.cjs",
     "dev:viewer": "npx vite --host",
     "watch:viewer": "npx vite build --watch",
     "gas:login": "npx clasp login",
     "gas:clone": "npx clasp clone",
-    "gas:push": "npx clasp push -P google_app_script/TokiSync",
-    "gas:deploy": "npx clasp deploy -P google_app_script/TokiSync",
-    "gas:deploy:auto": "npx clasp deploy -P google_app_script/TokiSync -i $(node -p \"require('./google_app_script/TokiSync/.clasp.json').deployId\") -d \"npm Auto \""
+    "gas:push": "npx clasp push -P src/gas",
+    "gas:deploy": "npx clasp deploy -P src/gas -i $(node -p \"require('./src/gas/.clasp.json').deployId\") -d \"npm Deploy\"",
+    "gas:deploy:auto": "npx clasp deploy -P src/gas"
   },
   "repository": {
     "type": "git",

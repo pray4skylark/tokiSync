@@ -1,3 +1,10 @@
+export const SLEEP_MULTIPLIERS = {
+    cautious: 1.0,   // 신중 (1.0배율)
+    thorough: 1.5,   // 철저 (1.5배율)
+    slow: 2.2,       // 느림 (2.2배율)
+    very_slow: 3.0   // 매우 느림 (3.0배율)
+};
+
 export const CFG_URL_KEY = "TOKI_GAS_URL"; // legacy
 export const CFG_ID_KEY = "TOKI_GAS_ID";
 export const CFG_FOLDER_ID = "TOKI_FOLDER_ID";
@@ -11,7 +18,6 @@ export const CFG_REMOTE_RULE_URL = "TOKI_REMOTE_RULE_URL";
 export const CFG_CUSTOM_RULES = "TOKI_CUSTOM_RULES";
 export const CFG_SCAN_SPEED = "TOKI_SCAN_SPEED";
 export const CFG_LOCAL_NAME_TEMPLATE = "TOKI_LOCAL_NAME_TEMPLATE";
-export const CFG_LOCAL_EPISODE_PADDING = "TOKI_LOCAL_EPISODE_PADDING";
 export const CFG_LOG_LEVEL = "TOKI_LOG_LEVEL";
 
 /**
@@ -49,7 +55,7 @@ export function getConfig() {
         folderId: GM_getValue(CFG_FOLDER_ID, ""),
         policy: GM_getValue(CFG_POLICY_KEY, "folderInCbz"),
         apiKey: GM_getValue(CFG_API_KEY, ""),
-        sleepMode: GM_getValue(CFG_SLEEP_MODE, "agile"), // default: agile
+        sleepMode: GM_getValue(CFG_SLEEP_MODE, "cautious"), // default: cautious
         smartSkipRatio: parseInt(GM_getValue(CFG_SMART_SKIP_RATIO, "50"), 10), // default 50% of Max
         novelMode: GM_getValue(CFG_NOVEL_MODE, "perChapter"), // default: chapter-by-chapter
         novelFormat: GM_getValue(CFG_NOVEL_FORMAT, "epub"), // default: EPUB
@@ -64,8 +70,7 @@ export function getConfig() {
             }
             return Math.round(val);
         })(),
-        localNameTemplate: GM_getValue(CFG_LOCAL_NAME_TEMPLATE, "{number} - {title}"),
-        localEpisodePadding: GM_getValue(CFG_LOCAL_EPISODE_PADDING, "4"),
+        localNameTemplate: GM_getValue(CFG_LOCAL_NAME_TEMPLATE, "{number:4} - {title}"),
         logLevel: GM_getValue(CFG_LOG_LEVEL, "info")
     };
 }
