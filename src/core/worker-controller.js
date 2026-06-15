@@ -124,8 +124,7 @@ async function fetchMediaViaWorkerSingleAttempt(episodeUrl, targetType = 'novel'
                             protocolDomain: config.protocolDomain || window.location.origin,
                             scanSpeedMultiplier: config.scanSpeedMultiplier || 1.0,
                             speedMultiplier: localMultiplier, // 속도 배율 전달
-                            localNameTemplate: config.localNameTemplate || "{number} - {title}",
-                            localEpisodePadding: config.localEpisodePadding || "4"
+                            localNameTemplate: config.localNameTemplate || "{number:4} - {title}"
                         });
                     }
                 }
@@ -460,7 +459,7 @@ export function initBatchWorkerController() {
         EventBus.emit(EVT.UPDATE_PROGRESS);
 
         try {
-            const { category, destination, novelFormat, episodeTitle, episodeNum, rootFolder, title, matchedRule } = item;
+            const { category, destination, novelFormat, episodeTitle, episodeNum, rootFolder, title, matchedRule, localNameTemplate } = item;
             const isNovel = (category === 'Novel' || category === 'novel');
             const siteName = matchedRule?.name || "TokiSync Parser";
 
@@ -507,9 +506,20 @@ export function initBatchWorkerController() {
                 blob = await innerZip.generateAsync({ type: "blob" });
             }
 
-            // 3. 파일 이름 결정 및 구글 드라이브 업로드 실행 (Drive 업로드는 4자리 제로패딩 포함)
-            const paddedNum = (episodeNum || '').toString().padStart(4, '0');
-            const fullFilename = `${paddedNum} - ${episodeTitle}`;
+            // 3. 파일 이름 결정: localNameTemplate 기반 (없으면 4자리 패딩 기본값)
+            const template = localNameTemplate || '{number:4} - {title}';
+            let fullFilename = template.replace(/\{number:(\d)\}/g, (_, p1) => {
+                const padSize = parseInt(p1, 10);
+                return padSize > 0
+                    ? (episodeNum || '').toString().padStart(padSize, '0')
+                    : (episodeNum || '').toString();
+            });
+            const legacyPaddedNum = (episodeNum || '').toString().padStart(4, '0');
+            fullFilename = fullFilename
+                .replace(/\{number\}/g, legacyPaddedNum)
+                .replace(/\{rawNumber\}/g, (episodeNum || '').toString())
+                .replace(/\{series\}/g, title || rootFolder || '')
+                .replace(/\{title\}/g, episodeTitle || '');
 
             console.log(`[WorkerController] [배치 업로드] 파일 조립 완료. 구글 드라이브 전송 시작: ${fullFilename}.${extension}`);
             
@@ -658,8 +668,7 @@ export function initBatchWorkerController() {
                         protocolDomain: item.protocolDomain || window.location.origin,
                         scanSpeedMultiplier: config.scanSpeed / 750,
                         speedMultiplier: multiplier, // 속도 배율 전달
-                        localNameTemplate: config.localNameTemplate || "{number} - {title}",
-                        localEpisodePadding: config.localEpisodePadding || "4"
+                        localNameTemplate: config.localNameTemplate || "{number:4} - {title}"
                     });
                 }
             } else {

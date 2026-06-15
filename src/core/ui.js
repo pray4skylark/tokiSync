@@ -617,22 +617,17 @@ export class MenuModal {
 
                     <div class="toki-control-group">
                         <label class="toki-label">로컬 파일명 템플릿</label>
-                        <input type="text" id="toki-sel-nametemplate" class="toki-input" placeholder="{number} - {title}">
-                        <div class="toki-hint" style="font-size: 11px; color: #888; margin-top: 4px;">
-                            로컬 저장 시 파일명 포맷입니다. 
-                            (치환자: <b>{number}</b>=패딩번호, <b>{rawNumber}</b>=원본번호, <b>{series}</b>=작품명, <b>{title}</b>=회차제목)<br>
+                        <div style="display: flex; gap: 8px; margin-bottom: 6px;">
+                            <input type="text" id="toki-sel-nametemplate" class="toki-input" placeholder="{number:4} - {title}" style="flex: 1;">
+                            <button class="toki-btn-action toki-btn-secondary toki-btn-sm" id="toki-btn-kavita-preset" style="white-space: nowrap; height: 36px; padding: 0 12px;">
+                                💡 Kavita 프리셋
+                            </button>
+                        </div>
+                        <div class="toki-hint" style="font-size: 11px; color: #888;">
+                            로컬 저장 시 파일명 포맷입니다.<br>
+                            치환자: <b>{number:X}</b>=X자리패딩(0~9), <b>{number}</b>=4자리패딩, <b>{rawNumber}</b>=원본번호, <b>{series}</b>=작품명, <b>{title}</b>=회차제목<br>
                             ※ 구글 드라이브 업로드 시에는 기존 포맷으로 고정됩니다.
                         </div>
-                    </div>
-
-                    <div class="toki-control-group">
-                        <label class="toki-label">로컬 화수 패딩 자릿수</label>
-                        <select id="toki-sel-localpadding" class="toki-select">
-                            <option value="0">패딩 없음 (1, 2, 10)</option>
-                            <option value="2">2자리 패딩 (01, 02, 10)</option>
-                            <option value="3">3자리 패딩 (001, 002, 010)</option>
-                            <option value="4">4자리 패딩 (0001, 0002, 0010)</option>
-                        </select>
                     </div>
 
                     <div class="toki-control-group">
@@ -914,7 +909,12 @@ export class MenuModal {
         const selApiKey = doc.getElementById('toki-sel-apikey');
         const selPolicy = doc.getElementById('toki-sel-policy');
         const selNameTemplate = doc.getElementById('toki-sel-nametemplate');
-        const selLocalPadding = doc.getElementById('toki-sel-localpadding');
+        const btnKavitaPreset = doc.getElementById('toki-btn-kavita-preset');
+        if (btnKavitaPreset && selNameTemplate) {
+            btnKavitaPreset.onclick = () => {
+                selNameTemplate.value = "{series} - {number:4} - {title}";
+            };
+        }
         const selSpeed = doc.getElementById('toki-sel-speed');
         const selScanSpeed = doc.getElementById('toki-sel-scanspeed');
         const selNovelFormat = doc.getElementById('toki-sel-novel-format');
@@ -932,7 +932,6 @@ export class MenuModal {
                 this.updateNativeHelper(doc, selPolicy.value);
             }
             if (selNameTemplate) selNameTemplate.value = cfg.localNameTemplate || '';
-            if (selLocalPadding) selLocalPadding.value = cfg.localEpisodePadding !== undefined ? String(cfg.localEpisodePadding) : '4';
             if (selSpeed) selSpeed.value = cfg.sleepMode || 'cautious';
             if (selScanSpeed) {
                 selScanSpeed.value = cfg.scanSpeed !== undefined ? String(cfg.scanSpeed) : '1000';
@@ -1152,8 +1151,7 @@ export class MenuModal {
                 const newFolder = selFolderId ? selFolderId.value.trim() : '';
                 const newApiKey = selApiKey ? selApiKey.value.trim() : '';
                 const newPolicy = selPolicy ? selPolicy.value : 'individual';
-                const newNameTemplate = selNameTemplate ? selNameTemplate.value.trim() || "{number} - {title}" : "{number} - {title}";
-                const newLocalPadding = selLocalPadding ? selLocalPadding.value : '4';
+                const newNameTemplate = selNameTemplate ? selNameTemplate.value.trim() || "{number:4} - {title}" : "{number:4} - {title}";
                 const newSleepMode = selSpeed ? selSpeed.value : 'agile';
                 const newScanSpeed = selScanSpeed ? selScanSpeed.value : '1000';
                 const newNovelFormat = selNovelFormat ? selNovelFormat.value : 'epub';
@@ -1171,7 +1169,6 @@ export class MenuModal {
                     this.handlers.setConfig('TOKI_API_KEY', newApiKey);
                     this.handlers.setConfig('TOKI_DOWNLOAD_POLICY', newPolicy);
                     this.handlers.setConfig('TOKI_LOCAL_NAME_TEMPLATE', newNameTemplate);
-                    this.handlers.setConfig('TOKI_LOCAL_EPISODE_PADDING', newLocalPadding);
                     this.handlers.setConfig('TOKI_SLEEP_MODE', newSleepMode);
                     this.handlers.setConfig('TOKI_SCAN_SPEED', newScanSpeed);
                     this.handlers.setConfig('TOKI_NOVEL_FORMAT', newNovelFormat);
