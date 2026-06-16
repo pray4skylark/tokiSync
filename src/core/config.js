@@ -14,8 +14,7 @@ export const CFG_SLEEP_MODE = "TOKI_SLEEP_MODE";
 export const CFG_SMART_SKIP_RATIO = "TOKI_SMART_SKIP_RATIO";
 export const CFG_NOVEL_MODE = "TOKI_NOVEL_MODE";
 export const CFG_NOVEL_FORMAT = "TOKI_NOVEL_FORMAT";
-export const CFG_REMOTE_RULE_URL = "TOKI_REMOTE_RULE_URL";
-export const CFG_CUSTOM_RULES = "TOKI_CUSTOM_RULES";
+export const CFG_PARSER_RULES = "TOKI_PARSER_RULES";
 export const CFG_SCAN_SPEED = "TOKI_SCAN_SPEED";
 export const CFG_LOCAL_NAME_TEMPLATE = "TOKI_LOCAL_NAME_TEMPLATE";
 export const CFG_LOG_LEVEL = "TOKI_LOG_LEVEL";
@@ -44,11 +43,6 @@ export function getConfig() {
         ? `https://script.google.com/macros/s/${finalGasId}/exec` 
         : gasUrl;
 
-    let remoteRuleUrl = GM_getValue(CFG_REMOTE_RULE_URL, "");
-    if (!remoteRuleUrl || remoteRuleUrl.trim() === "") {
-        remoteRuleUrl = "https://pray4skylark.github.io/tokiSync/rules.json";
-    }
-
     return {
         gasId: finalGasId,
         gasUrl: finalGasUrl,
@@ -59,8 +53,6 @@ export function getConfig() {
         smartSkipRatio: parseInt(GM_getValue(CFG_SMART_SKIP_RATIO, "50"), 10), // default 50% of Max
         novelMode: GM_getValue(CFG_NOVEL_MODE, "perChapter"), // default: chapter-by-chapter
         novelFormat: GM_getValue(CFG_NOVEL_FORMAT, "epub"), // default: EPUB
-        remoteRuleUrl: remoteRuleUrl,
-        customRules: GM_getValue(CFG_CUSTOM_RULES, "[]"),
         scanSpeed: (() => {
             let val = parseFloat(GM_getValue(CFG_SCAN_SPEED, "1000"));
             if (isNaN(val)) val = 1000;

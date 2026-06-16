@@ -291,11 +291,13 @@ export class GenericParser extends BaseParser {
 
     getSeriesMetadata() {
         const meta = this.rule.meta || {};
+        const vendorSlug = (this.rule.name || "").toLowerCase().replace(/[^a-z0-9]/g, '');
         return {
             author: this._extractValue(document, meta.author) || "",
             status: this._extractValue(document, meta.status) || "연재중",
             summary: this._extractValue(document, meta.summary) || "",
-            vendor: (this.rule.name || "").toLowerCase().replace(/[^a-z0-9]/g, '')
+            vendor: vendorSlug,
+            vendorId: this.rule.id || vendorSlug
         };
     }
 

@@ -59,7 +59,25 @@ export function sendToParent(type, payload = {}) {
  * @param {Function} callback Handler function (eventData) => {}
  * @returns {Function} Cleanup function to remove event listener
  */
-export function registerIpcListener(callback) {
+export function registerIpcListener(callback, listenerId = 'default') {
+    const targetWindow = typeof window !== 'undefined' ? (window.top || window) : null;
+    
+    if (targetWindow) {
+        if (!targetWindow.__tokisync_ipc_listeners) {
+            targetWindow.__tokisync_ipc_listeners = {};
+        }
+
+        if (targetWindow.__tokisync_ipc_listeners[listenerId]) {
+            console.log(`[IPC:Broker] 기존 등록된 중복 리스너 해제 수행 (ID: ${listenerId})`);
+            try {
+                targetWindow.removeEventListener('message', targetWindow.__tokisync_ipc_listeners[listenerId]);
+            } catch (e) {
+                console.warn(`[IPC:Broker] 리스너 해제 실패 (ID: ${listenerId}):`, e);
+            }
+            delete targetWindow.__tokisync_ipc_listeners[listenerId];
+        }
+    }
+
     const handler = (event) => {
         if (!event.data || typeof event.data !== 'object') return;
         
@@ -77,6 +95,27 @@ export function registerIpcListener(callback) {
         });
     };
 
-    window.addEventListener('message', handler);
-    return () => window.removeEventListener('message', handler);
+    if (targetWindow) {
+        targetWindow.addEventListener('message', handler);
+        targetWindow.__tokisync_ipc_listeners[listenerId] = handler;
+        console.log(`[IPC:Broker] 신규 IPC 리스너 등록 완료 (ID: ${listenerId})`);
+    } else {
+        if (typeof window !== 'undefined') {
+            window.addEventListener('message', handler);
+        }
+    }
+
+    return () => {
+        if (targetWindow) {
+            if (targetWindow.__tokisync_ipc_listeners[listenerId] === handler) {
+                targetWindow.removeEventListener('message', handler);
+                delete targetWindow.__tokisync_ipc_listeners[listenerId];
+                console.log(`[IPC:Broker] IPC 리스너 명시적 해제 완료 (ID: ${listenerId})`);
+            }
+        } else {
+            if (typeof window !== 'undefined') {
+                window.removeEventListener('message', handler);
+            }
+        }
+    };
 }

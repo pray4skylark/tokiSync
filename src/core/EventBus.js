@@ -6,7 +6,9 @@ export const EventBus = {
     },
     on(event, fn) {
         if (!_listeners[event]) _listeners[event] = [];
-        _listeners[event].push(fn);
+        if (!_listeners[event].includes(fn)) {
+            _listeners[event].push(fn);
+        }
         // 등록 해제 함수를 반환하여 메모리 누수 방지
         return () => this.off(event, fn);
     },

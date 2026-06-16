@@ -21,6 +21,7 @@ export class LogBox {
         this.logs = [];
         this.MAX_LOGS = 500;
         this.popupWindow = null;
+        this.isEventRegistered = false;
         this.init();
         LogBox.instance = this;
     }
@@ -38,31 +39,34 @@ export class LogBox {
         }
 
         // ── EventBus 구독 등록 ───────────────────────────────
-        EventBus.on(EVT.NOTIFY_ERROR, ({ msg }) => {
-            if (this.popupWindow && !this.popupWindow.closed) {
-                this.popupWindow.alert(msg);
-            } else {
-                alert(msg);
-            }
-        });
+        if (!this.isEventRegistered) {
+            this.isEventRegistered = true;
+            EventBus.on(EVT.NOTIFY_ERROR, ({ msg }) => {
+                if (this.popupWindow && !this.popupWindow.closed) {
+                    this.popupWindow.alert(msg);
+                } else {
+                    alert(msg);
+                }
+            });
 
-        EventBus.on(EVT.LOG, ({ msg, tag, level }) => {
-            if (level === 'error') {
-                this.error(msg, tag);
-            } else if (level === 'warn') {
-                this.warn(msg, tag);
-            } else if (level === 'success') {
-                this.success(msg, tag);
-            } else if (level === 'info') {
-                this.info(msg, tag);
-            } else {
-                this.log(msg, 'normal', tag);
-            }
-        });
+            EventBus.on(EVT.LOG, ({ msg, tag, level }) => {
+                if (level === 'error') {
+                    this.error(msg, tag);
+                } else if (level === 'warn') {
+                    this.warn(msg, tag);
+                } else if (level === 'success') {
+                    this.success(msg, tag);
+                } else if (level === 'info') {
+                    this.info(msg, tag);
+                } else {
+                    this.log(msg, 'normal', tag);
+                }
+            });
 
-        EventBus.on(EVT.UPDATE_PROGRESS, () => {
-            this.updateProgressUI();
-        });
+            EventBus.on(EVT.UPDATE_PROGRESS, () => {
+                this.updateProgressUI();
+            });
+        }
         // ─────────────────────────────────────────────────────
 
         // 📊 [멀티큐] 팝업이 켜져 있을 때 주기적인 1초 동기화
@@ -602,7 +606,8 @@ export class MenuModal {
                             <option value="individual">개별 파일 (Individual)</option>
                             <option value="zipOfCbzs">챕터 묶음 (ZIP of CBZs)</option>
                             <option value="native">자동 분류 (Native)</option>
-                            <option value="drive">드라이브 업로드 (GoogleDrive)</option>
+                            <option value="drive">드라이브 업로드 (GoogleDrive 레거시)</option>
+                            <option value="drive_kavita">드라이브 업로드 (Kavita 호환)</option>
                         </select>
                     </div>
 
@@ -617,16 +622,11 @@ export class MenuModal {
 
                     <div class="toki-control-group">
                         <label class="toki-label">로컬 파일명 템플릿</label>
-                        <div style="display: flex; gap: 8px; margin-bottom: 6px;">
-                            <input type="text" id="toki-sel-nametemplate" class="toki-input" placeholder="{number:4} - {title}" style="flex: 1;">
-                            <button class="toki-btn-action toki-btn-secondary toki-btn-sm" id="toki-btn-kavita-preset" style="white-space: nowrap; height: 36px; padding: 0 12px;">
-                                💡 Kavita 프리셋
-                            </button>
-                        </div>
-                        <div class="toki-hint" style="font-size: 11px; color: #888;">
+                        <input type="text" id="toki-sel-nametemplate" class="toki-input" placeholder="{number:4} - {title}" style="height: 36px; padding: 8px 14px; border-radius: 12px; font-size: 13px; width: 100%;">
+                        <div class="toki-hint" style="font-size: 11px; color: #888; margin-top: 6px;">
                             로컬 저장 시 파일명 포맷입니다.<br>
                             치환자: <b>{number:X}</b>=X자리패딩(0~9), <b>{number}</b>=4자리패딩, <b>{rawNumber}</b>=원본번호, <b>{series}</b>=작품명, <b>{title}</b>=회차제목<br>
-                            ※ 구글 드라이브 업로드 시에는 기존 포맷으로 고정됩니다.
+                            ※ 구글 드라이브(kavita 호환) 업로드 시에도 적용됩니다 (레거시 모드는 제외).
                         </div>
                     </div>
 
@@ -909,12 +909,7 @@ export class MenuModal {
         const selApiKey = doc.getElementById('toki-sel-apikey');
         const selPolicy = doc.getElementById('toki-sel-policy');
         const selNameTemplate = doc.getElementById('toki-sel-nametemplate');
-        const btnKavitaPreset = doc.getElementById('toki-btn-kavita-preset');
-        if (btnKavitaPreset && selNameTemplate) {
-            btnKavitaPreset.onclick = () => {
-                selNameTemplate.value = "{series} - {number:4} - {title}";
-            };
-        }
+
         const selSpeed = doc.getElementById('toki-sel-speed');
         const selScanSpeed = doc.getElementById('toki-sel-scanspeed');
         const selNovelFormat = doc.getElementById('toki-sel-novel-format');
@@ -1275,7 +1270,7 @@ export async function markDownloadedItems(historyList) {
  */
 export class TreeRuleEditor {
     constructor() {
-        this.rules = RuleManager.getCustomRules();
+        this.rules = RuleManager.getParserRules();
         this.overlay = null;
         this.hints = {
             'id': '사이트 고유 ID (영문/숫자)',
@@ -1522,7 +1517,7 @@ export class TreeRuleEditor {
         };
 
         overlay.querySelector('#tree-btn-save').onclick = () => {
-            RuleManager.saveCustomRules(this.rules);
+            RuleManager.saveParserRules(this.rules);
             alert('파싱 규칙이 성공적으로 저장되었습니다.');
             overlay.remove();
         };
@@ -1538,40 +1533,6 @@ export class TreeRuleEditor {
         };
 
         overlay.querySelector('#tree-btn-import').onclick = () => {
-            const selectOverlay = document.createElement('div');
-            selectOverlay.className = 'toki-modal-overlay';
-            selectOverlay.style.zIndex = '20002'; // Above Tree Editor
-            selectOverlay.onclick = (e) => { if(e.target === selectOverlay) selectOverlay.remove(); };
-            
-            selectOverlay.innerHTML = `
-                <div class="toki-modal toki-compact-modal" style="max-width: 400px; padding: 24px;">
-                    <div class="toki-modal-header" style="margin-bottom: 20px;">
-                        <div class="toki-modal-title" style="font-size: 16px;">📥 규칙 가져오기 방식 선택</div>
-                        <button class="toki-modal-close" id="import-select-close" title="닫기">&times;</button>
-                    </div>
-                    <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px;">
-                        <button class="toki-btn-action toki-btn-lavender" id="import-choose-file">
-                            📂 로컬 JSON 파일 선택
-                        </button>
-                        <button class="toki-btn-action toki-btn-secondary" id="import-choose-url">
-                            🌐 원격 URL 주소 입력
-                        </button>
-                    </div>
-                    <div id="import-url-input-container" class="toki-hidden" style="margin-top: 16px; border-top: 1px solid rgba(255, 255, 255, 0.1); padding-top: 16px;">
-                        <div class="toki-control-group" style="margin-bottom: 16px;">
-                            <label class="toki-label">원격 규칙 URL 주소</label>
-                            <input type="text" id="import-url-input" class="toki-input" placeholder="https://..." value="https://pray4skylark.github.io/tokiSync/rules.json">
-                        </div>
-                        <button class="toki-btn-action" id="import-btn-fetch" style="width: 100%;">
-                            <span>가져오기 실행</span>
-                        </button>
-                    </div>
-                </div>
-            `;
-            document.body.appendChild(selectOverlay);
-
-            selectOverlay.querySelector('#import-select-close').onclick = () => selectOverlay.remove();
-
             const handleRulesImport = (rules) => {
                 const rulesArr = Array.isArray(rules) ? rules : (rules.rules || []);
                 if (!Array.isArray(rulesArr) || rulesArr.length === 0) {
@@ -1581,67 +1542,32 @@ export class TreeRuleEditor {
                 const mode = confirm('기존 규칙과 합치시겠습니까? (취소 시 전체 덮어쓰기)') ? 'merge' : 'overwrite';
                 if (mode === 'overwrite') {
                     this.rules = rulesArr;
+                    RuleManager.saveParserRules(rulesArr);
                 } else {
                     RuleManager.bulkImport(rulesArr, 'merge');
-                    this.rules = RuleManager.getCustomRules();
+                    this.rules = RuleManager.getParserRules();
                 }
                 this.render();
-                selectOverlay.remove();
             };
 
-            // File selection
-            selectOverlay.querySelector('#import-choose-file').onclick = () => {
-                const input = document.createElement('input');
-                input.type = 'file';
-                input.accept = '.json';
-                input.onchange = (e) => {
-                    const file = e.target.files[0];
-                    if (!file) return;
-                    const reader = new FileReader();
-                    reader.onload = (ev) => {
-                        try {
-                            const imported = JSON.parse(ev.target.result);
-                            handleRulesImport(imported);
-                        } catch (err) {
-                            alert('JSON 파싱 오류: ' + err.message);
-                        }
-                    };
-                    reader.readAsText(file);
-                };
-                input.click();
-            };
-
-            // URL input toggle
-            selectOverlay.querySelector('#import-choose-url').onclick = () => {
-                const container = selectOverlay.querySelector('#import-url-input-container');
-                container.classList.remove('toki-hidden');
-            };
-
-            // Fetch remote URL
-            selectOverlay.querySelector('#import-btn-fetch').onclick = async () => {
-                const url = selectOverlay.querySelector('#import-url-input').value.trim();
-                if (!url) {
-                    alert('URL을 입력해주세요.');
-                    return;
-                }
-                const fetchBtn = selectOverlay.querySelector('#import-btn-fetch');
-                fetchBtn.disabled = true;
-                fetchBtn.innerHTML = '<span>⏳ 가져오는 중...</span>';
-                
-                try {
-                    const fetched = await RuleManager.fetchRemoteRules(url);
-                    if (fetched) {
-                        handleRulesImport(fetched);
-                    } else {
-                        alert('원격 규칙을 가져오는데 실패했습니다. URL 주소 및 네트워크 상태를 확인하세요.');
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+            input.onchange = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    try {
+                        const imported = JSON.parse(ev.target.result);
+                        handleRulesImport(imported);
+                    } catch (err) {
+                        alert('JSON 파싱 오류: ' + err.message);
                     }
-                } catch (err) {
-                    alert('오류 발생: ' + err.message);
-                } finally {
-                    fetchBtn.disabled = false;
-                    fetchBtn.innerHTML = '<span>가져오기 실행</span>';
-                }
+                };
+                reader.readAsText(file);
             };
+            input.click();
         };
 
         overlay.querySelector('#tree-btn-test').onclick = async () => {
@@ -1674,7 +1600,7 @@ export class TreeRuleEditor {
  */
 export class FormRuleEditor {
     constructor() {
-        this.rules = RuleManager.getCustomRules() || [];
+        this.rules = RuleManager.getParserRules() || [];
         this.overlay = null;
         this.currentRuleIndex = 0;
         this.isDropperActive = false;
@@ -2184,7 +2110,7 @@ export class FormRuleEditor {
         // Save Button
         this.overlay.querySelector('#form-btn-save').onclick = () => {
             this.updateJsonPreview();
-            RuleManager.saveCustomRules(this.rules);
+            RuleManager.saveParserRules(this.rules);
             const status = this.overlay.querySelector('#form-json-status');
             status.textContent = '💾 저장됨!';
             status.className = 'toki-badge-match ok';
@@ -2219,7 +2145,7 @@ export class FormRuleEditor {
                         const parsed = JSON.parse(evt.target.result);
                         const list = Array.isArray(parsed) ? parsed : (parsed.rules || [parsed]);
                         this.rules = list;
-                        RuleManager.saveCustomRules(this.rules);
+                        RuleManager.saveParserRules(this.rules);
                         this.currentRuleIndex = 0;
                         
                         // Reset select box options

@@ -25,9 +25,10 @@ function View_getBooksByCacheId(cacheFileId) {
  *
  * @param {string} seriesId - 시리즈 폴더 ID
  * @param {boolean} bypassCache - 캐시 무시 여부 (새로고침)
+ * @param {Object} [episodeTitles=null] - 클라이언트가 제공한 회차별 제목 맵
  * @returns {Array<Object>} 책 목록
  */
-function View_getBooks(seriesId, bypassCache = false) {
+function View_getBooks(seriesId, bypassCache = false, episodeTitles = null) {
   try {
     if (!seriesId) throw new Error("Series ID is required");
 
@@ -59,17 +60,49 @@ function View_getBooks(seriesId, bypassCache = false) {
     const books = [];
     let totalItems = 0;
 
-    const createBook = (item, type) => {
+    const createBook = (item, type, episodeTitlesMap = null) => {
       const name = item.name;
       let number = 0;
-      const match = name.match(/(\d+)/);
-      if (match) number = parseFloat(match[1]);
+      
+      // 1. 에피소드 번호 파싱 (Kavita c000 패턴 우선 추출)
+      const kavitaMatch = name.match(/[-_ ]c(?:h)?(\d+)/i);
+      if (kavitaMatch) {
+        number = parseFloat(kavitaMatch[1]);
+      } else {
+        const hwaMatch = name.match(/(\d+)화/);
+        if (hwaMatch) {
+          number = parseFloat(hwaMatch[1]);
+        } else {
+          const match = name.match(/(\d+)/);
+          if (match) number = parseFloat(match[1]);
+        }
+      }
+      
+      // 2. 에피소드 상세 부제목 (episodeTitle) 추출
+      let epTitle = "";
+      const numKey = Math.floor(number).toString();
+      
+      if (episodeTitlesMap && episodeTitlesMap[numKey]) {
+        epTitle = episodeTitlesMap[numKey].trim();
+      } else {
+        // Fallback: 파일명 기반 파싱 방식 적용
+        const cleanName = name.replace(/\.[^/.]+$/, "");
+        const parts = cleanName.split(" - ");
+        if (parts.length >= 3) {
+          epTitle = parts.slice(2).join(" - ").trim();
+        } else if (parts.length >= 2) {
+          epTitle = parts[1].trim();
+        } else {
+          epTitle = cleanName;
+        }
+      }
 
       return {
         id: item.id,
         seriesId: seriesId,
         name: name,
         number: number,
+        episodeTitle: epTitle,
         url: "", // webViewLink is not returned by default in list, but we can synthesize it or leave empty for frontend to solve
         size: type === "file" ? parseInt(item.size || 0) : 0,
         media: {
@@ -86,7 +119,7 @@ function View_getBooks(seriesId, bypassCache = false) {
 
     for (const f of folders) {
         if (f.name === "info.json" || f.name === CACHE_FILE_NAME || f.name === INDEX_FILE_NAME) continue;
-        books.push(createBook(f, "folder"));
+        books.push(createBook(f, "folder", episodeTitles));
     }
 
     for (const f of files) {
@@ -114,7 +147,7 @@ function View_getBooks(seriesId, bypassCache = false) {
         mime.includes("archive") ||
         mime.includes("epub")
       ) {
-        books.push(createBook(f, "file"));
+        books.push(createBook(f, "file", episodeTitles));
       }
     }
 

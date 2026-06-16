@@ -230,9 +230,9 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
         } else if (policy === 'native') {
             buildingPolicy = 'individual'; // 빌딩은 개별 CBZ 단위로 동일
             destination = 'native';        // 저장 대상만 GM_download로 변경
-        } else if (policy === 'drive') {
+        } else if (policy === 'drive' || policy === 'drive_kavita') {
             buildingPolicy = 'individual'; // 빌딩은 개별 CBZ 단위
-            destination = 'drive';         // 저장 대상은 Google Drive
+            destination = policy;          // 저장 대상은 Google Drive (kavita 여부 유지)
         // 하위 호환: 구버전 정책 명칭 지원
         } else if (policy === 'gasUpload') {
             buildingPolicy = 'individual';
@@ -245,7 +245,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
         }
 
         // [v1.8.2] Graceful Fallback for missing Drive configuration
-        if (destination === 'drive' && !isConfigValid()) {
+        if ((destination === 'drive' || destination === 'drive_kavita') && !isConfigValid()) {
             EventBus.emit(EVT.NOTIFY_ERROR, { msg: '구글 드라이브 설정(Folder ID 등)이 누락되었습니다. 임시로 개별 로컬 다운로드 정책으로 전환합니다.' });
             logger.warn('⚠️ 구글 드라이브 설정 누락 감지. 정책을 개별 로컬 다운로드로 자동 전환합니다.', 'System');
             buildingPolicy = 'individual';
@@ -315,14 +315,30 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
 
         // Determine Root Folder Name & Series Title
         const rootFolder = parser.getFormattedTitle(seriesId, first.title, last.title, getCommonPrefix);
-        // Extract raw title from rootFolder (e.g., "[1234] Title" -> "Title")
-        const seriesTitle = rootFolder.replace(/^\[[0-9]+\]\s*/, '');
+        const seriesTitle = rootFolder.replace(/^\[[a-zA-Z0-9_\-]+\]\s*/, '');
         const listPrefixTitle = (list.length > 1) ? getCommonPrefix(first.title, last.title) : "";
+
+        // [v1.24.0] 수집 시점의 각 챕터별 원본 상세 제목 매핑 객체 구축
+        const episodeTitles = {};
+        list.forEach(item => {
+            try {
+                const ep = parser.parseListItem(item);
+                if (ep && ep.num) {
+                    const numKey = parseInt(ep.num).toString();
+                    episodeTitles[numKey] = ep.title || "";
+                }
+            } catch (e) {}
+        });
 
         // [v1.7.0] Collect detailed metadata for Phase 3 Persistence
         const seriesMetadata = {
             ...parser.getSeriesMetadata(),
+            id: seriesId,
+            sourceId: seriesId,
+            vendorId: parser.rule?.id || parser.getSeriesMetadata().vendorId || (matchedRule?.name || "").toLowerCase().replace(/[^a-z0-9]/g, ''),
             title: seriesTitle || rootFolder,
+            originalSeriesTitle: parser.getSeriesTitle() || "",
+            episodeTitles: episodeTitles, // [추가] 클라이언트 획득 에피소드 제목 목록
             thumbnail: parser.getThumbnailUrl() || "",
             vendor: parser.getSeriesMetadata().vendor || (matchedRule?.name || "").toLowerCase().replace(/[^a-z0-9]/g, '')
         };
@@ -337,7 +353,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
         }
 
         // [v1.4.0] Upload Series Thumbnail (if uploading to Drive)
-        if (destination === 'drive') {
+        if (destination === 'drive' || destination === 'drive_kavita') {
             try {
                 const thumbnailUrl = parser.getThumbnailUrl();
                 if (thumbnailUrl) {
@@ -368,13 +384,15 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
         let historyCheckTimeoutFlag = false;
         let historyFolderId = null;
 
-        if (destination === 'drive') {
+        if (destination === 'drive' || destination === 'drive_kavita') {
             try {
                 if (forceOverwrite) {
                     logger.log('⚠️ 강제 재다운로드 옵션 활성화: 기존 업로드 기록 무시 (전체 덮어쓰기)');
                 } else {
                     logger.log('☁️ 드라이브 업로드 기록 및 용량 확인 중 (Smart Skip)...');
-                    const histResult = await fetchHistoryDirect(rootFolder, category);
+                    const cleanFolder = rootFolder.replace(/^\[\d+\]\s*/, '');
+                    const targetFolder = destination === 'drive_kavita' ? cleanFolder : rootFolder;
+                    const histResult = await fetchHistoryDirect(targetFolder, category);
                     
                     if (histResult.success) {
                         historyFolderId = histResult.folderId;
@@ -476,7 +494,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
             const numPlain = parseInt(numStr).toString();
             
             // 구글 드라이브 스킵 필터 (드라이브 전용)
-            if (destination === 'drive' && !currentIsSingleVolume) {
+            if ((destination === 'drive' || destination === 'drive_kavita') && !currentIsSingleVolume) {
                 if (uploadedHistorySet.size > 0 && (uploadedHistorySet.has(numStr) || uploadedHistorySet.has(numPlain))) {
                     continue;
                 }
@@ -503,7 +521,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
         }
 
         if (pendingEpisodes.length === 0) {
-            if (destination === 'drive' && !currentIsSingleVolume) {
+            if ((destination === 'drive' || destination === 'drive_kavita') && !currentIsSingleVolume) {
                 logger.success('✅ 모든 에피소드가 이미 드라이브에 존재하여 수집을 조기 완료합니다.', 'Queue');
                 stopSilentAudio();
                 return;
@@ -511,11 +529,13 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
         } else {
             // [v1.21.4] 구글 드라이브 업로드 모드 시, 큐 등록 전 작품 폴더를 선제 생성/확정하여 큐 전파 (경쟁적 중복 폴더 생성 차단)
             let activeFolderId = historyFolderId;
-            if (destination === 'drive' && !activeFolderId) {
-                logger.log(`📁 [Drive] 신규 작품 폴더 선제 생성 중: ${seriesTitle}`);
+            if ((destination === 'drive' || destination === 'drive_kavita') && !activeFolderId) {
+                const cleanSeries = seriesTitle.replace(/^\[\d+\]\s*/, '');
+                const targetFolder = destination === 'drive_kavita' ? cleanSeries : seriesTitle;
+                logger.log(`📁 [Drive] 신규 작품 폴더 선제 생성 중: ${targetFolder}`);
                 try {
                     const token = await getOAuthToken();
-                    activeFolderId = await getOrCreateFolder(seriesTitle, getConfig().folderId, token, category);
+                    activeFolderId = await getOrCreateFolder(targetFolder, getConfig().folderId, token, category);
                     logger.success(`📁 [Drive] 신규 작품 폴더 선제 생성 완료 -> ID: ${activeFolderId}`);
                 } catch (folderErr) {
                     logger.error(`❌ [Drive] 폴더 선제 생성 중 에러 발생: ${folderErr.message}`);
@@ -533,11 +553,11 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
         }
 
         // [v1.21.0] 차세대 자율형 멀티큐 배치 수집기 기동 가교 (구글 드라이브 업로드 전용 비동기 스케줄러 라우팅)
-        if (destination === 'drive' && !currentIsSingleVolume) {
+        if ((destination === 'drive' || destination === 'drive_kavita') && !currentIsSingleVolume) {
             logger.log(`🚦 [멀티큐] 차세대 자율형 멀티큐 배치 수집기(v1.21.0) 가동 준비...`, 'Queue');
 
             // 팝업 차단 회피용 동기적 자식 창 사전 오픈 (Pre-open)
-            const MAX_CONCURRENCY = 2;
+            const MAX_CONCURRENCY = 1;
             const openCount = Math.min(MAX_CONCURRENCY, pendingEpisodes.length);
             logger.log(`🛡️ 팝업 차단 필터 우회를 위한 자식 창 ${openCount}개 선제 확보(Pre-open) 중...`, 'Queue');
 
@@ -608,7 +628,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
 
             // [v1.5.0 Smart Skip] Skip already-uploaded episodes (Drive policy only)
             // [v1.7.1] Bypass skipping in Single Volume mode (we need all chapters)
-            if (!isSingleVolume && destination === 'drive') {
+            if (!isSingleVolume && (destination === 'drive' || destination === 'drive_kavita')) {
                 const numStr = item.num ? item.num.toString() : '';
                 const numPlain = parseInt(numStr).toString();
                 if (uploadedHistorySet.size > 0 && (uploadedHistorySet.has(numStr) || uploadedHistorySet.has(numPlain))) {
@@ -715,6 +735,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                 let fullFilename;
                 if (destination !== 'drive') {
                     const template = config.localNameTemplate || "{number:4} - {title}";
+                    const cleanSeries = (seriesTitle || rootFolder || '').replace(/^\[\d+\]\s*/, '');
                     
                     // 1. Dynamic padding {number:X} support
                     fullFilename = template.replace(/\{number:(\d)\}/g, (match, p1) => {
@@ -729,11 +750,12 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                     fullFilename = fullFilename
                         .replace(/\{number\}/g, legacyPaddedNum)
                         .replace(/\{rawNumber\}/g, (item.num || '').toString())
-                        .replace(/\{series\}/g, seriesTitle || rootFolder || '')
+                        .replace(/\{series\}/g, cleanSeries)
                         .replace(/\{title\}/g, chapterTitle || '');
                 } else {
+                    // drive (레거시): 기존 명명법인 `[ID] 작품명 0001화` 강제 적용
                     const paddedNum = (item.num || '').toString().padStart(4, '0');
-                    fullFilename = `${paddedNum} - ${chapterTitle}`;
+                    fullFilename = `${rootFolder} ${paddedNum}화`;
                 }
 
                 // [v1.6.0] Kavita Metadata Insertion
@@ -771,7 +793,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                     let success = false;
                     const cachedFileId = episodeCacheMap.get(fullFilename);
 
-                    if (destination === 'drive' && cachedFileId) {
+                    if ((destination === 'drive' || destination === 'drive_kavita') && cachedFileId) {
                         try {
                             logger.log(`⚡ [Fast Path] 캐시 히트! 무탐색 덮어쓰기 (PUT) 진행 -> ID: ${cachedFileId}`);
                             
@@ -935,8 +957,10 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
         }
 
         // [v1.5.5] 배치 완료 후 Drive 캐시 단일 갱신 (에피소드마다 호출하지 않음)
-        if (destination === 'drive') {
-            refreshCacheAfterUpload(rootFolder, category, seriesMetadata).catch(e =>
+        if (destination === 'drive' || destination === 'drive_kavita') {
+            const cleanFolder = rootFolder.replace(/^\[\d+\]\s*/, '');
+            const targetFolder = destination === 'drive_kavita' ? cleanFolder : rootFolder;
+            refreshCacheAfterUpload(targetFolder, category, seriesMetadata).catch(e =>
                 logger.warn(`캐시 갱신 호출 중 실패 (무시): ${e.message}`, 'GAS:Cache')
             );
         }

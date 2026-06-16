@@ -1,68 +1,72 @@
-import { CFG_CUSTOM_RULES, CFG_REMOTE_RULE_URL } from '../config.js';
+import { CFG_PARSER_RULES } from '../config.js';
 
 /**
  * RuleManager
- * Manages parsing rules from built-in templates and user custom definitions.
+ * Manages parsing rules from built-in templates and user definitions.
  */
 export class RuleManager {
-    // Built-in rules as fallback/templates
-    static #builtInRules = [];
+    // Built-in sample rules as fallback/templates (Offline Seeding)
+    static #builtInRules = [
+        {
+            id: "toki_common",
+            name: "토끼 계열 (뉴토끼/마나토끼) 통합 규칙",
+            urlPattern: ".*(newtoki|manatoki|comic|booktoki).*",
+            category: "Webtoon",
+            meta: {
+                title: "meta[name=\"subject\"]",
+                author: ".view-content",
+                thumb: {
+                    selector: "img[itemprop=\"image\"]",
+                    attr: "src"
+                }
+            },
+            list: {
+                container: ".list-body",
+                item: "li",
+                num: "span.no",
+                title: "a",
+                link: {
+                    selector: "a",
+                    attr: "href"
+                }
+            },
+            viewer: {
+                fetchMethod: "iframe",
+                imageRegex: "https?:\\\\/\\\\/[a-zA-Z0-9_\\\\.\\\\/-]+\\\\.(?:jpg|png|webp|gif)",
+                imageContainer: "div.view-padding, div.viewer",
+                imageItem: "img",
+                lazyAttrOptions: [
+                    "data-src",
+                    "data-lazy",
+                    "src"
+                ]
+            }
+        }
+    ];
 
     /**
      * Get all merged rules: Custom > Built-in
      * @returns {Promise<Array>}
      */
     static async getRules() {
-        let rules = [...this.#builtInRules];
+        let parserRules = this.getParserRules();
 
-        // 1. GM storage에서 Custom Rules(유일한 룰 저장소) 불러오기
-        let customRules = [];
-        let hasCustom = false;
-        
-        if (typeof GM_getValue !== 'undefined') {
-            const customStr = GM_getValue(CFG_CUSTOM_RULES, "");
-            if (customStr && customStr.trim() !== "" && customStr !== "[]") {
-                try {
-                    customRules = JSON.parse(customStr);
-                    hasCustom = true;
-                } catch (e) {
-                    console.error('[RuleManager] Failed to parse custom rules:', e);
-                }
-            }
+        // 최초 구동 시 (파서 규칙이 완전히 비어있는 경우) 내장 샘플 규칙을 자동으로 스토리지에 주입(Seed)
+        if (parserRules.length === 0) {
+            console.log("[RuleManager] 🚀 초기 구동 감지 -> 정적 기본 샘플 규칙을 TOKI_PARSER_RULES에 이식(Seed)합니다.");
+            parserRules = [...this.#builtInRules];
+            this.saveParserRules(parserRules);
         }
 
-        // 2. 만약 Custom Rules가 아예 없거나 빈 배열인 경우 (최초 구동 시) 원격에서 Seed 규칙 다운로드 및 이식
-        if (!hasCustom || customRules.length === 0) {
-            console.log("[RuleManager] 🚀 초기 구동 감지 -> 원격 기본 룰 파일로부터 Seed 규칙을 다운로드합니다.");
-            const configUrl = typeof GM_getValue !== 'undefined' ? GM_getValue(CFG_REMOTE_RULE_URL, "") : "";
-            const targetUrl = configUrl.trim() || "https://pray4skylark.github.io/tokiSync/rules.json";
-
-            try {
-                const fetched = await this.fetchRemoteRules(targetUrl);
-                if (fetched && Array.isArray(fetched) && fetched.length > 0) {
-                    customRules = fetched;
-                    this.saveCustomRules(customRules);
-                    console.log(`[RuleManager] ✅ 원격 기본 룰(${customRules.length}개)을 TOKI_CUSTOM_RULES에 초기 이식(Seed) 완료했습니다.`);
-                }
-            } catch (err) {
-                console.error("[RuleManager] 원격 기본 룰 가져오기 실패:", err);
-            }
-        }
-
-        // 3. 커스텀 룰을 병합하여 최종 반환 (Custom > Built-in 순)
-        if (customRules.length > 0) {
-            rules = [...customRules, ...rules];
-        }
-
-        return rules;
+        return parserRules;
     }
 
     /**
-     * Get only custom rules
+     * Get only custom/parser rules from GM storage
      */
-    static getCustomRules() {
+    static getParserRules() {
         if (typeof GM_getValue === 'undefined') return [];
-        const str = GM_getValue(CFG_CUSTOM_RULES, '[]');
+        const str = GM_getValue(CFG_PARSER_RULES, '[]');
         try {
             return JSON.parse(str) || [];
         } catch (e) {
@@ -71,21 +75,21 @@ export class RuleManager {
     }
 
     /**
-     * Save custom rules
+     * Save parser rules to GM storage
      */
-    static saveCustomRules(rules) {
+    static saveParserRules(rules) {
         if (typeof GM_setValue === 'undefined') return;
-        GM_setValue(CFG_CUSTOM_RULES, JSON.stringify(rules, null, 2));
+        GM_setValue(CFG_PARSER_RULES, JSON.stringify(rules, null, 2));
     }
 
     /**
      * Add a new rule
      */
     static addRule(rule) {
-        const rules = this.getCustomRules();
+        const rules = this.getParserRules();
         if (rules.find(r => r.id === rule.id)) return false;
         rules.push(rule);
-        this.saveCustomRules(rules);
+        this.saveParserRules(rules);
         return true;
     }
 
@@ -93,11 +97,11 @@ export class RuleManager {
      * Update an existing rule
      */
     static updateRule(id, updatedRule) {
-        const rules = this.getCustomRules();
+        const rules = this.getParserRules();
         const idx = rules.findIndex(r => r.id === id);
         if (idx === -1) return false;
         rules[idx] = updatedRule;
-        this.saveCustomRules(rules);
+        this.saveParserRules(rules);
         return true;
     }
 
@@ -105,9 +109,9 @@ export class RuleManager {
      * Delete a rule
      */
     static deleteRule(id) {
-        const rules = this.getCustomRules();
+        const rules = this.getParserRules();
         const filtered = rules.filter(r => r.id !== id);
-        this.saveCustomRules(filtered);
+        this.saveParserRules(filtered);
         return true;
     }
 
@@ -115,7 +119,7 @@ export class RuleManager {
      * Bulk import rules
      */
     static bulkImport(newRules, mode = 'merge') {
-        const current = this.getCustomRules();
+        const current = this.getParserRules();
         let imported = 0, updated = 0, skipped = 0;
 
         newRules.forEach(rule => {
@@ -132,7 +136,7 @@ export class RuleManager {
             }
         });
 
-        this.saveCustomRules(current);
+        this.saveParserRules(current);
         return { imported, updated, skipped };
     }
 
@@ -156,37 +160,5 @@ export class RuleManager {
             }
         }
         return null;
-    }
-
-    /**
-     * Fetch rules from remote URL
-     */
-    static async fetchRemoteRules(url) {
-        return new Promise((resolve) => {
-            if (typeof GM_xmlhttpRequest === 'undefined') {
-                resolve(null);
-                return;
-            }
-            GM_xmlhttpRequest({
-                method: 'GET',
-                url: url,
-                onload: (res) => {
-                    try {
-                        const data = JSON.parse(res.responseText);
-                        let rules = data.rules || data;
-                        if (Array.isArray(rules)) {
-                            resolve(rules);
-                        } else {
-                            resolve(null);
-                        }
-                    } catch (e) {
-                        console.error('[RuleManager] Parse remote rules failed:', e);
-                        resolve(null);
-                    }
-                },
-                onerror: () => resolve(null),
-                ontimeout: () => resolve(null)
-            });
-        });
     }
 }

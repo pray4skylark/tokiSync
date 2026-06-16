@@ -4,6 +4,11 @@ import { initWorkerExtractor } from './worker-extractor.js';
 (async function () {
     'use strict';
 
+    // 🛡️ Iframe 내부 실행 방지 가드 (중복 실행 및 중복 로그 출력 차단)
+    if (window.self !== window.top) {
+        return;
+    }
+
     // ── 🔒 [초고도 스텔스 섀도 DOM 개방 및 클로킹 엔진] ────────────────
     try {
         const originalAttachShadow = Element.prototype.attachShadow;

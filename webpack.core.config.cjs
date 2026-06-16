@@ -45,6 +45,7 @@ const METADATA_MAIN = `// ==UserScript==
 // @require      https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js
 // @require      https://cdnjs.cloudflare.com/ajax/libs/jszip-utils/0.1.0/jszip-utils.js
 // @run-at       document-start
+// @noframes
 // @license      MIT
 // ==/UserScript==
 `;
@@ -80,6 +81,7 @@ const METADATA_NEW_CORE = `// ==UserScript==
 // @require      https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js
 // @require      https://cdnjs.cloudflare.com/ajax/libs/jszip-utils/0.1.0/jszip-utils.js
 // @run-at       document-start
+// @noframes
 // @license      MIT
 // ==/UserScript==
 `;

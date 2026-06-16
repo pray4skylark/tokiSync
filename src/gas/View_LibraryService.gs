@@ -311,7 +311,9 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
       return {
         id: metaData.id || folderId,
         sourceId: metaData.sourceId || "",
+        vendorId: metaData.vendorId || metaData.sourceId || "",
         name: metaData.name || folderName,
+        originalSeriesTitle: metaData.originalSeriesTitle || "",
         folderName: folderName,
         url: metaData.url || "", // V3 metadata doesn't have webViewLink by default unless requested
         booksCount: metaData.itemsCount || 0,
@@ -327,7 +329,9 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
             status: normalizeStatus(metaData.status) || "연재중",
             authors: metaData.author ? [metaData.author] : [],
             summary: metaData.summary || "",
-            vendor: metaData.vendor || ""
+            vendor: metaData.vendor || "",
+            vendorId: metaData.vendorId || metaData.sourceId || "",
+            originalSeriesTitle: metaData.originalSeriesTitle || ""
         }
       };
     } catch (e) {
@@ -335,7 +339,7 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
     }
   }
 
-  const idMatch = folderName.match(/^\[(\d+)\]/);
+  const idMatch = folderName.match(/^\[([a-zA-Z0-9_\-]+)\]/);
   if (idMatch) {
     sourceId = idMatch[1];
     if (thumbMap && thumbMap[sourceId]) {
@@ -378,7 +382,7 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
       if (parsed.thumbnail) thumbnailOld = parsed.thumbnail;
     } catch (e) {}
   } else {
-    const match = folderName.match(/^\[(\d+)\]\s*(.+)/);
+    const match = folderName.match(/^\[([a-zA-Z0-9_\-]+)\]\s*(.+)/);
     if (match) seriesName = match[2];
   }
 
@@ -403,7 +407,9 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
   return {
     id: folderId,
     sourceId: sourceId,
+    vendorId: sourceId,
     name: seriesName,
+    originalSeriesTitle: "",
     booksCount: booksCount,
     metadata: metadata,
     vendor: metadata.vendor || "",
@@ -447,10 +453,12 @@ function View_updateMetadata(seriesId, metadata, rootFolderId) {
   const updatedMeta = {
     ...existingMeta,
     id: seriesId,
-    name: metadata.name !== undefined ? metadata.name : (existingMeta.name || folderName.replace(/^\[\d+\]\s*/, '').trim()),
+    name: metadata.name !== undefined ? metadata.name : (existingMeta.name || folderName.replace(/^\[[a-zA-Z0-9_\-]+\]\s*/, '').trim()),
     category: metadata.category !== undefined ? metadata.category : (existingMeta.category || "Unknown"),
     author: metadata.author !== undefined ? metadata.author : (existingMeta.author || ""),
     vendor: metadata.vendor !== undefined ? metadata.vendor : (existingMeta.vendor || ""),
+    vendorId: metadata.vendorId !== undefined ? metadata.vendorId : (existingMeta.vendorId || existingMeta.sourceId || ""),
+    originalSeriesTitle: metadata.originalSeriesTitle !== undefined ? metadata.originalSeriesTitle : (existingMeta.originalSeriesTitle || ""),
     status: metadata.status !== undefined ? normalizeStatus(metadata.status) : (normalizeStatus(existingMeta.status) || "연재중"),
     summary: metadata.summary !== undefined ? metadata.summary : (existingMeta.summary || ""),
     thumbnail: metadata.thumbnail !== undefined ? metadata.thumbnail : (existingMeta.thumbnail || ""),
@@ -485,12 +493,16 @@ function View_updateMetadata(seriesId, metadata, rootFolderId) {
             list[idx].thumbnailId = updatedMeta.thumbnailId;
             list[idx].lastModified = updatedMeta.lastUpdated;
             list[idx].vendor = updatedMeta.vendor;
+            list[idx].vendorId = updatedMeta.vendorId;
+            list[idx].originalSeriesTitle = updatedMeta.originalSeriesTitle;
             if (!list[idx].metadata) list[idx].metadata = {};
             list[idx].metadata.category = updatedMeta.category;
             list[idx].metadata.status = updatedMeta.status;
             list[idx].metadata.authors = updatedMeta.author ? [updatedMeta.author] : [];
             list[idx].metadata.summary = updatedMeta.summary;
             list[idx].metadata.vendor = updatedMeta.vendor;
+            list[idx].metadata.vendorId = updatedMeta.vendorId;
+            list[idx].metadata.originalSeriesTitle = updatedMeta.originalSeriesTitle;
             
             View_saveIndex(rootFolderId, list);
           }

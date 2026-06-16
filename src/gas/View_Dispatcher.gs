@@ -98,7 +98,8 @@ function View_Dispatcher(data) {
       if (!seriesId) {
         resultBody = { updated: false, reason: "folder not found" };
       } else {
-        const booksArray = View_getBooks(seriesId, true); // bypassCache=true → 재스캔 + 캐시 기록
+        const extraMeta = data.metadata || {};
+        const booksArray = View_getBooks(seriesId, true, extraMeta.episodeTitles || null);
         const itemsCount = booksArray ? booksArray.length : 0;
         
         // [v1.6.1] Merge Index Fragment Creation
@@ -109,8 +110,10 @@ function View_Dispatcher(data) {
             // 2. Extract sourceId & find cacheFileId
             const meta = DriveAccessService.getMetadata(seriesId);
             const seriesFolderName = meta.name;
-            const idMatch = seriesFolderName.match(/^\[(\d+)\]/);
-            const sourceId = idMatch ? idMatch[1] : seriesId; // Fallback to drive ID if no stamp
+            const idMatch = seriesFolderName.match(/^\[([a-zA-Z0-9_\-]+)\]/);
+            
+            const extraMeta = data.metadata || {};
+            const sourceId = extraMeta.sourceId || extraMeta.id || (idMatch ? idMatch[1] : seriesId);
             
             let cacheFileId = "";
             let retries = 3;
@@ -132,7 +135,7 @@ function View_Dispatcher(data) {
                 const fragName = `_toki_merge_${sourceId}.json`;
                 
                 // [v1.6.2] Enrich fragment with full series metadata for dynamic Insert support
-                const titleClean = seriesFolderName.replace(/^\[\d+\]\s*/, '').trim();
+                const titleClean = seriesFolderName.replace(/^\[[a-zA-Z0-9_\-]+\]\s*/, '').trim();
                 
                 // [v1.22.0] 기존 _toki_meta.json 내용을 병합하여 수동 편집 내역 보존
                 let existingMeta = {};
@@ -153,12 +156,13 @@ function View_Dispatcher(data) {
                     }
                 }
                 
-                const extraMeta = data.metadata || {};
                 const mergedMeta = {
                     ...existingMeta,
                     id: seriesId,
                     sourceId: sourceId,
-                    name: titleClean || existingMeta.name || seriesFolderName.replace(/^\[\d+\]\s*/, '').trim(),
+                    vendorId: extraMeta.vendorId || existingMeta.vendorId || sourceId,
+                    name: titleClean || existingMeta.name || seriesFolderName.replace(/^\[[a-zA-Z0-9_\-]+\]\s*/, '').trim(),
+                    originalSeriesTitle: extraMeta.originalSeriesTitle || existingMeta.originalSeriesTitle || "",
                     folderName: seriesFolderName,
                     url: existingMeta.url || "", 
                     category: data.category || existingMeta.category || "Unknown",
