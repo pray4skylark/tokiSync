@@ -19,12 +19,64 @@ export const CFG_SCAN_SPEED = "TOKI_SCAN_SPEED";
 export const CFG_LOCAL_NAME_TEMPLATE = "TOKI_LOCAL_NAME_TEMPLATE";
 export const CFG_LOG_LEVEL = "TOKI_LOG_LEVEL";
 
+const BACKUP_KEY = "tokisync_config_backup";
+
+function backupToLocalStorage(configObj) {
+    try {
+        if (typeof localStorage !== 'undefined') {
+            localStorage.setItem(BACKUP_KEY, JSON.stringify(configObj));
+        }
+    } catch (e) {
+        console.warn("[Config] LocalStorage 백업 저장 실패:", e);
+    }
+}
+
+function restoreFromLocalStorage() {
+    try {
+        if (typeof localStorage !== 'undefined') {
+            const backupStr = localStorage.getItem(BACKUP_KEY);
+            if (backupStr) {
+                const backup = JSON.parse(backupStr);
+                if (backup && (backup.gasId || backup.folderId)) {
+                    console.log("[Config] 🛡️ LocalStorage 백업 감지 -> GM_setValue로 복원을 수행합니다.");
+                    if (backup.gasId) GM_setValue(CFG_ID_KEY, backup.gasId);
+                    if (backup.folderId) GM_setValue(CFG_FOLDER_ID, backup.folderId);
+                    if (backup.policy) GM_setValue(CFG_POLICY_KEY, backup.policy);
+                    if (backup.apiKey) GM_setValue(CFG_API_KEY, backup.apiKey);
+                    if (backup.sleepMode) GM_setValue(CFG_SLEEP_MODE, backup.sleepMode);
+                    if (backup.smartSkipRatio) GM_setValue(CFG_SMART_SKIP_RATIO, backup.smartSkipRatio.toString());
+                    if (backup.novelMode) GM_setValue(CFG_NOVEL_MODE, backup.novelMode);
+                    if (backup.novelFormat) GM_setValue(CFG_NOVEL_FORMAT, backup.novelFormat);
+                    if (backup.scanSpeed) GM_setValue(CFG_SCAN_SPEED, backup.scanSpeed.toString());
+                    if (backup.localNameTemplate) GM_setValue(CFG_LOCAL_NAME_TEMPLATE, backup.localNameTemplate);
+                    if (backup.logLevel) GM_setValue(CFG_LOG_LEVEL, backup.logLevel);
+                    return true;
+                }
+            }
+        }
+    } catch (e) {
+        console.warn("[Config] LocalStorage 백업 복원 실패:", e);
+    }
+    return false;
+}
+
 /**
  * Get current configuration
  * @returns {{gasId: string, gasUrl: string, folderId: string, policy: string, apiKey: string, sleepMode: string, smartSkipRatio: number, logLevel: string}}
  */
 export function getConfig() {
     let gasId = GM_getValue(CFG_ID_KEY, "");
+    let folderId = GM_getValue(CFG_FOLDER_ID, "");
+
+    // 2중 백업 복구 엔진 기동 (GM_getValue 정보 부재 시 로컬 스토리지 데이터셋 수복)
+    if (!gasId && !folderId) {
+        const restored = restoreFromLocalStorage();
+        if (restored) {
+            gasId = GM_getValue(CFG_ID_KEY, "");
+            folderId = GM_getValue(CFG_FOLDER_ID, "");
+        }
+    }
+
     let gasUrl = GM_getValue(CFG_URL_KEY, "");
 
     // Auto-migration: gasUrl -> gasId
@@ -43,7 +95,7 @@ export function getConfig() {
         ? `https://script.google.com/macros/s/${finalGasId}/exec` 
         : gasUrl;
 
-    return {
+    const configObj = {
         gasId: finalGasId,
         gasUrl: finalGasUrl,
         folderId: GM_getValue(CFG_FOLDER_ID, ""),
@@ -65,6 +117,8 @@ export function getConfig() {
         localNameTemplate: GM_getValue(CFG_LOCAL_NAME_TEMPLATE, "{number:4} - {title}"),
         logLevel: GM_getValue(CFG_LOG_LEVEL, "info")
     };
+    backupToLocalStorage(configObj);
+    return configObj;
 }
 
 /**
@@ -74,6 +128,10 @@ export function getConfig() {
  */
 export function setConfig(key, value) {
     GM_setValue(key, value);
+    try {
+        const configObj = getConfig();
+        backupToLocalStorage(configObj);
+    } catch (e) {}
 }
 
 

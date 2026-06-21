@@ -49,6 +49,35 @@ export class RuleManager {
      * @returns {Promise<Array>}
      */
     static async getRules() {
+        // [v1.25.1] 레거시 커스텀 규칙(TOKI_CUSTOM_RULES) 자동 마이그레이션 감지
+        if (typeof GM_getValue !== 'undefined' && typeof GM_deleteValue !== 'undefined') {
+            const legacyRulesStr = GM_getValue('TOKI_CUSTOM_RULES');
+            if (legacyRulesStr) {
+                try {
+                    const legacyRules = JSON.parse(legacyRulesStr);
+                    if (Array.isArray(legacyRules) && legacyRules.length > 0) {
+                        console.log("[RuleManager] 🚚 레거시 커스텀 규칙(TOKI_CUSTOM_RULES) 감지 -> TOKI_PARSER_RULES로 마이그레이션을 수행합니다.");
+                        let currentRules = this.getParserRules();
+                        
+                        // 중복되지 않은 아이템들만 병합
+                        legacyRules.forEach(legacyRule => {
+                            if (!currentRules.some(r => r.id === legacyRule.id)) {
+                                currentRules.push(legacyRule);
+                            }
+                        });
+                        
+                        this.saveParserRules(currentRules);
+                        console.log("[RuleManager] ✅ 커스텀 규칙 병합 완료.");
+                    }
+                } catch (e) {
+                    console.error("[RuleManager] ❌ 레거시 규칙 파싱 실패:", e);
+                } finally {
+                    // 중복 실행 방지를 위한 안전 소거
+                    GM_deleteValue('TOKI_CUSTOM_RULES');
+                }
+            }
+        }
+
         let parserRules = this.getParserRules();
 
         // 최초 구동 시 (파서 규칙이 완전히 비어있는 경우) 내장 샘플 규칙을 자동으로 스토리지에 주입(Seed)

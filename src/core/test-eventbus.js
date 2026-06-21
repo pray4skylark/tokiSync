@@ -811,5 +811,83 @@ test('멀티큐 자율 배치 스케줄러 시나리오가 Concurrency 한도를
     }
 });
 
+// ── 테스트 15: 구버전 커스텀 규칙(TOKI_CUSTOM_RULES) 자동 마이그레이션 검증 ──────────────────────
+test('RuleManager는 구버전 커스텀 규칙이 존재하면 새로운 TOKI_PARSER_RULES로 마이그레이션해야 합니다.', async () => {
+    const backupGM_getValue = globalThis.GM_getValue;
+    const backupGM_setValue = globalThis.GM_setValue;
+    const backupGM_deleteValue = globalThis.GM_deleteValue;
+
+    try {
+        const mockStorage = new Map();
+        globalThis.GM_getValue = (key, defaultVal) => mockStorage.has(key) ? mockStorage.get(key) : defaultVal;
+        globalThis.GM_setValue = (key, val) => mockStorage.set(key, val);
+        globalThis.GM_deleteValue = (key) => mockStorage.delete(key);
+
+        const legacyRules = [
+            { id: "custom_test_site", name: "커스텀 테스트 사이트 규칙", urlPattern: ".*custom.*" }
+        ];
+        globalThis.GM_setValue('TOKI_CUSTOM_RULES', JSON.stringify(legacyRules));
+
+        const { RuleManager } = await import('./parsers/RuleManager.js');
+        const rules = await RuleManager.getRules();
+
+        const customRule = rules.find(r => r.id === 'custom_test_site');
+        console.assert(customRule !== undefined, '커스텀 규칙이 마이그레이션되지 않았습니다.');
+        console.assert(globalThis.GM_getValue('TOKI_CUSTOM_RULES') === undefined, '레거시 스토리지 키가 삭제되지 않았습니다.');
+
+        if (!customRule || globalThis.GM_getValue('TOKI_CUSTOM_RULES') !== undefined) {
+            throw new Error('구버전 커스텀 규칙 마이그레이션 실패');
+        }
+    } finally {
+        globalThis.GM_getValue = backupGM_getValue;
+        globalThis.GM_setValue = backupGM_setValue;
+        globalThis.GM_deleteValue = backupGM_deleteValue;
+    }
+});
+
+// ── 테스트 16: localStorage 기반 설정 2중 백업/복원(Self-Healing) 검증 ──────────────────────
+test('config 모듈은 GM_getValue 설정이 유실되었을 때 localStorage 백업으로부터 설정을 복원해야 합니다.', async () => {
+    const backupGM_getValue = globalThis.GM_getValue;
+    const backupGM_setValue = globalThis.GM_setValue;
+    const backupLocalStorage = globalThis.localStorage;
+
+    try {
+        const mockStorage = new Map();
+        globalThis.GM_getValue = (key, defaultVal) => mockStorage.has(key) ? mockStorage.get(key) : defaultVal;
+        globalThis.GM_setValue = (key, val) => mockStorage.set(key, val);
+
+        const localStore = new Map();
+        globalThis.localStorage = {
+            setItem(key, val) { localStore.set(key, val); },
+            getItem(key) { return localStore.get(key) || null; }
+        };
+
+        const { getConfig, setConfig } = await import('./config.js');
+
+        // 1. 초기값 설정 및 백업 생성 검증
+        setConfig('TOKI_FOLDER_ID', 'test-folder-123');
+        setConfig('TOKI_GAS_ID', 'test-gas-456');
+
+        const backupStr = localStore.get('tokisync_config_backup');
+        console.assert(backupStr !== undefined, 'localStorage 백업 사본이 생성되지 않았습니다.');
+
+        // 2. GM 스페이스 강제 소멸 (초기화 시나리오)
+        mockStorage.clear();
+
+        // 3. 복원 검증
+        const config = getConfig();
+        console.assert(config.folderId === 'test-folder-123', `설정이 복원되지 않았습니다. folderId: ${config.folderId}`);
+        console.assert(config.gasId === 'test-gas-456', `설정이 복원되지 않았습니다. gasId: ${config.gasId}`);
+
+        if (config.folderId !== 'test-folder-123' || config.gasId !== 'test-gas-456') {
+            throw new Error('localStorage 기반 설정 복원 실패');
+        }
+    } finally {
+        globalThis.GM_getValue = backupGM_getValue;
+        globalThis.GM_setValue = backupGM_setValue;
+        globalThis.localStorage = backupLocalStorage;
+    }
+});
+
 // 테스트 기동
 runTests();
