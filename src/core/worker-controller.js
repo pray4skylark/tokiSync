@@ -4,8 +4,8 @@
  */
 
 import { fetchNovelTextViaApi } from './novel-decryptor.js';
-import { registerIpcListener, sendToWorker } from './ipc-broker.js';
-import { updateQueueItem, WORKER_STAGE, activeWorkers, getQueue, runSchedulerOnce, getQueuePaused } from './queue.js';
+import { registerIpcListener, sendToWorker, registerWorkerOrigin, removeWorkerOrigin, validateNonce } from './ipc-broker.js';
+import { updateQueueItem, WORKER_STAGE, activeWorkers, getQueue, runSchedulerOnce, getQueuePaused, _activeProcessing } from './queue.js';
 import { EventBus, EVT } from './EventBus.js';
 import { getConfig, SLEEP_MULTIPLIERS } from './config.js';
 import { refreshCacheAfterUpload } from './gas.js';
@@ -17,9 +17,26 @@ import { saveFile } from './utils.js';
 // Reference for the single worker popup (used in sequential mode)
 let activeWorkerRef = null;
 
+// Security: Current session nonce for single worker mode
+let activeWorkerNonce = null;
+let activeWorkerId = null;
+
+// 🧠 인메모리 수집 콘텐츠 데이터 캐시 (GM Storage 512KB 용량 초과 및 ArrayBuffer 직렬화 실패 원천 차단)
+const extractedDataCache = new Map();
+
+// 대기열 전체 삭제 또는 중단 시 인메모리 캐시 강제 비우기
+EventBus.on(EVT.QUEUE_RESET, () => extractedDataCache.clear());
+EventBus.on(EVT.QUEUE_STOP_ALL, () => extractedDataCache.clear());
+
 // 🛡️ 배치 제어용 중복 리스너 방지 로컬 변수 가드
 let batchIpcCleanup = null;
 let isBatchControllerInitialized = false;
+
+// 🛡️ 배치 폴링 setInterval ID 추적 (중복 초기화 시 이전 인터벌 정리)
+let _batchPollingInterval = null;
+
+// Security: Batch worker nonce tracking (queueId -> nonce)
+const batchWorkerNonces = new Map();
 
 /**
  * Close active single worker popup window
@@ -29,6 +46,13 @@ export function closeActiveWorker() {
         console.log('[WorkerController] 단일 워커 팝업 세션 수동 폐쇄');
         activeWorkerRef.close();
     }
+    // Security: Clean up nonce and origin registration
+    if (activeWorkerId) {
+        activeWorkers.delete(activeWorkerId);
+        removeWorkerOrigin(activeWorkerId, activeWorkerNonce);
+        activeWorkerId = null;
+    }
+    activeWorkerNonce = null;
     activeWorkerRef = null;
 }
 
@@ -54,6 +78,13 @@ async function fetchMediaViaWorkerSingleAttempt(episodeUrl, targetType = 'novel'
 
         const handleSuccess = async (payload, sourceWindow) => {
             cleanup();
+
+            // Security: Invalidate session nonce after successful completion
+            if (activeWorkerId) {
+                removeWorkerOrigin(activeWorkerId, activeWorkerNonce);
+                activeWorkerId = null;
+            }
+            activeWorkerNonce = null;
 
             // 즉각 ACK 응답 전송 (자식이 안전하게 종료하도록 피드백)
             if (sourceWindow && !sourceWindow.closed) {
@@ -99,6 +130,7 @@ async function fetchMediaViaWorkerSingleAttempt(episodeUrl, targetType = 'novel'
                 }
 
                 if (activeWorkerRef && !activeWorkerRef.closed) {
+                    if (queueId) updateQueueItem(queueId, { lastActivity: Date.now() });
                     const localCfg = getConfig();
                     const localMultiplier = SLEEP_MULTIPLIERS[localCfg.sleepMode] || SLEEP_MULTIPLIERS.cautious;
                     const initialDelay = 3000 * localMultiplier;
@@ -128,8 +160,9 @@ async function fetchMediaViaWorkerSingleAttempt(episodeUrl, targetType = 'novel'
                             protocolDomain: config.protocolDomain || window.location.origin,
                             scanSpeedMultiplier: config.scanSpeedMultiplier || 1.0,
                             speedMultiplier: localMultiplier, // 속도 배율 전달
-                            localNameTemplate: config.localNameTemplate || "{number:4} - {title}"
-                        });
+                            localNameTemplate: config.localNameTemplate || "{number:4} - {title}",
+                            sessionNonce: activeWorkerNonce // Security: session token for IPC validation
+                        }, activeWorkerNonce);
                     }
                 }
             }
@@ -244,6 +277,11 @@ async function fetchMediaViaWorkerSingleAttempt(episodeUrl, targetType = 'novel'
             if (!activeWorkerRef) {
                 throw new Error('브라우저 팝업 차단이 감지되었습니다.');
             }
+            // Security: Register worker origin and generate session nonce
+            activeWorkerId = queueId;
+            activeWorkers.set(activeWorkerId, activeWorkerRef);
+            activeWorkerNonce = registerWorkerOrigin(activeWorkerId, 'null'); // about:blank popups have origin="null"
+            console.log(`[WorkerController] 보안 세션 논스 생성 완료 (ID: ${activeWorkerId})`);
         } catch (err) {
             cleanup();
             console.error('[WorkerController] 워커 팝업 기동 실패:', err);
@@ -339,39 +377,57 @@ export function initBatchWorkerController() {
     console.log('[WorkerController] 🚦 [배치 모드] 백그라운드 영속성 IPC 라우터 활성화 완료');
 
     // 정기적인 자식 팝업 닫힘 실시간 감시 (Batch Liveness Guard) 및 60초 타임아웃 검사
+    if (_batchPollingInterval) clearInterval(_batchPollingInterval);
     const batchClosedCounts = new Map();
-    setInterval(() => {
+    _batchPollingInterval = setInterval(() => {
+        // [H8] 일시 정지(Pause) 상태인 동안에는 타임아웃 감시 및 회수를 잠시 유예합니다.
+        if (getQueuePaused()) {
+            return;
+        }
+
         const queue = getQueue();
         const now = Date.now();
 
-        // 1. 60초 이상 무반응인 워커 강제 타임아웃 회수
+        // 1. 60초(업로드 중인 경우 5분) 이상 무반응인 워커 강제 타임아웃 회수
         queue.forEach(item => {
             const lastActive = item.lastActivity || item.startedAt;
-            if (item.status === 'processing' && lastActive && (now - lastActive > 60000)) {
-                console.warn(`[WorkerController] ⚠️ [배치] 60초 수집 타임아웃 감지: ${item.id} (${item.episodeTitle})`);
-                const popupRef = activeWorkers.get(item.id);
-                try {
-                    const actualRef = popupRef && (popupRef.ref || popupRef);
-                    if (actualRef && !actualRef.closed) {
-                        actualRef.close();
+            if (item.status === 'processing' && lastActive) {
+                const isUploading = (item.stage === WORKER_STAGE.UPLOADING);
+                const limit = isUploading ? 300000 : 60000;
+                
+                if (now - lastActive > limit) {
+                    const limitSec = limit / 1000;
+                    console.warn(`[WorkerController] ⚠️ [배치] ${limitSec}초 타임아웃 감지: ${item.id} (${item.episodeTitle}), Stage: ${item.stage}`);
+                    const popupRef = activeWorkers.get(item.id);
+                    try {
+                        const actualRef = popupRef && (popupRef.ref || popupRef);
+                        if (actualRef && !actualRef.closed) {
+                            actualRef.close();
+                        }
+                    } catch (e) {}
+                    activeWorkers.delete(item.id);
+                    batchClosedCounts.delete(item.id);
+                    // Security: Invalidate timed-out worker nonce
+                    const timedOutNonce = batchWorkerNonces.get(item.id);
+                    if (timedOutNonce) {
+                        removeWorkerOrigin(item.id, timedOutNonce);
+                        batchWorkerNonces.delete(item.id);
                     }
-                } catch (e) {}
-                activeWorkers.delete(item.id);
-                batchClosedCounts.delete(item.id);
 
-                const nextRetry = (item.retryCount || 0) + 1;
-                updateQueueItem(item.id, {
-                    status: nextRetry >= 3 ? 'failed' : 'pending',
-                    retryCount: nextRetry,
-                    errorMsg: '에피소드 수집 처리 시간이 60초를 초과하여 타임아웃되었습니다.'
-                });
+                    const nextRetry = (item.retryCount || 0) + 1;
+                    updateQueueItem(item.id, {
+                        status: nextRetry >= 3 ? 'failed' : 'pending',
+                        retryCount: nextRetry,
+                        errorMsg: `에피소드 ${isUploading ? '업로드' : '수집'} 처리 시간이 ${limitSec}초를 초과하여 타임아웃되었습니다.`
+                    });
 
-                EventBus.emit(EVT.LOG, {
-                    msg: `❌ [배치 타임아웃] [${item.episodeTitle}] 수집 시간 초과(60초). 복구를 단행합니다.`,
-                    tag: 'Queue',
-                    level: 'error'
-                });
-                runSchedulerOnce();
+                    EventBus.emit(EVT.LOG, {
+                        msg: `❌ [배치 타임아웃] [${item.episodeTitle}] ${isUploading ? '업로드' : '수집'} 시간 초과(${limitSec}초). 복구를 단행합니다.`,
+                        tag: 'Queue',
+                        level: 'error'
+                    });
+                    runSchedulerOnce();
+                }
             }
         });
 
@@ -386,9 +442,22 @@ export function initBatchWorkerController() {
                     console.warn(`[WorkerController] ⚠️ [배치] 자식 팝업 수동 종료 확정: ${id}`);
                     activeWorkers.delete(id);
                     batchClosedCounts.delete(id);
+                    // Security: Invalidate manually closed worker nonce
+                    const manualNonce = batchWorkerNonces.get(id);
+                    if (manualNonce) {
+                        removeWorkerOrigin(id, manualNonce);
+                        batchWorkerNonces.delete(id);
+                    }
 
                     const item = queue.find(i => i.id === id);
                     if (item && item.status === 'processing') {
+                        // [H8] 업로드 중(95%~)이거나 이미 완료된 회차는 팝업 닫힘을 정상 종료로 취급하여 복구 차단
+                        if (item.stage === WORKER_STAGE.UPLOADING || item.stage === WORKER_STAGE.COMPLETED) {
+                            activeWorkers.delete(id);
+                            batchClosedCounts.delete(id);
+                            return;
+                        }
+
                         const nextRetry = (item.retryCount || 0) + 1;
                         updateQueueItem(id, {
                             status: nextRetry >= 3 ? 'failed' : 'pending',
@@ -434,20 +503,34 @@ export function initBatchWorkerController() {
                 console.warn('[WorkerController] [배치] 자식 팝업 close 또는 ACK 전송 실패:', ackErr);
             }
         }
+        _activeProcessing.add(matchedId);
         activeWorkers.delete(matchedId);
         batchClosedCounts.delete(matchedId);
+        // Security: Invalidate batch worker nonce
+        const batchNonce = batchWorkerNonces.get(matchedId);
+        if (batchNonce) {
+            removeWorkerOrigin(matchedId, batchNonce);
+            batchWorkerNonces.delete(matchedId);
+        }
 
-        // 자식 팝업이 회수되었으므로 즉시 다음 에피소드 수집 기동
-        runSchedulerOnce();
+        // [P0] 수집된 무거운 바이너리/본문 데이터는 영속 스토리지 대신 인메모리 캐시에 보관
+        extractedDataCache.set(matchedId, {
+            content: payload.content || null,
+            images: payload.images || null
+        });
 
-        // 수집된 바이너리/텍스트 데이터를 임시로 메모리에 업데이트하고 상태를 UPLOADING으로 표시
+        // 큐 스토리지에는 단순 상태 메타데이터만 기재하여 스토리지 락과 초과 크기 에러 방지
         updateQueueItem(matchedId, {
             stage: WORKER_STAGE.UPLOADING,
-            progressPercent: 95,
-            extractedContent: payload.content || null,
-            extractedImages: payload.images || null
+            progressPercent: 95
         });
         EventBus.emit(EVT.UPDATE_PROGRESS);
+
+        EventBus.emit(EVT.LOG, {
+            msg: `📦 [${item.episodeTitle}] 업로드 파일(CBZ/EPUB) 압축 조립 준비 중...`,
+            tag: 'Downloader:Batch',
+            level: 'info'
+        });
 
         try {
             const { category, destination, novelFormat, episodeTitle, episodeNum, rootFolder, title, matchedRule, localNameTemplate } = item;
@@ -457,14 +540,24 @@ export function initBatchWorkerController() {
             let blob;
             const extension = isNovel ? novelFormat : 'cbz';
 
-            // 2. 미디어 타입별 조립(Build) 진행
+            // 2. 미디어 타입별 조립(Build) 진행 (인메모리 캐시에서 우선 획득)
+            const cachedMedia = extractedDataCache.get(matchedId) || {};
+            const finalContent = cachedMedia.content || payload.content;
+            const finalImages = cachedMedia.images || payload.images;
+
             if (isNovel) {
-                if (!payload.content) {
+                if (!finalContent) {
                     throw new Error("수집된 소설 본문 데이터가 없습니다.");
                 }
                 const builder = novelFormat === 'txt' ? new TxtBuilder() : new EpubBuilder();
-                builder.addChapter(episodeTitle, payload.content.trim());
-                
+                builder.addChapter(episodeTitle, finalContent.trim());
+
+                EventBus.emit(EVT.LOG, {
+                    msg: `🔨 [${episodeTitle}] ${novelFormat.toUpperCase()} 압축 조립 중... (${(finalContent.length / 1024).toFixed(0)}KB)`,
+                    level: 'info',
+                    tag: 'Builder'
+                });
+
                 const innerZip = await builder.build({
                     series: title || rootFolder,
                     title: episodeTitle,
@@ -473,11 +566,11 @@ export function initBatchWorkerController() {
                 });
                 blob = await innerZip.generateAsync({ type: "blob" });
             } else {
-                if (!payload.images || !Array.isArray(payload.images)) {
+                if (!finalImages || !Array.isArray(finalImages)) {
                     throw new Error("수집된 만화 이미지 데이터가 없습니다.");
                 }
                 const builder = new CbzBuilder();
-                const resolvedImages = payload.images.map(img => {
+                const resolvedImages = finalImages.map(img => {
                     const mimeType = img.ext?.includes('png') ? 'image/png' : (img.ext?.includes('webp') ? 'image/webp' : 'image/jpeg');
                     return {
                         url: img.url,
@@ -487,7 +580,13 @@ export function initBatchWorkerController() {
                     };
                 });
                 builder.addChapter(episodeTitle, resolvedImages);
-                
+
+                EventBus.emit(EVT.LOG, {
+                    msg: `🔨 [${episodeTitle}] CBZ 압축 중... (이미지 ${resolvedImages.length}개)`,
+                    level: 'info',
+                    tag: 'Builder'
+                });
+
                 const innerZip = await builder.build({
                     series: title || rootFolder,
                     title: episodeTitle,
@@ -497,39 +596,74 @@ export function initBatchWorkerController() {
                 blob = await innerZip.generateAsync({ type: "blob" });
             }
 
-            // 3. 파일 이름 및 폴더명 결정: drive(레거시) vs drive_kavita(Kavita 호환)
+            // 3. 파일 이름 및 폴더명 결정 (destination 기반 분기)
             let fullFilename = "";
             let targetFolderName = rootFolder;
 
             if (destination === 'drive_kavita') {
-                const cleanSeries = rootFolder.replace(/^\[\d+\]\s*/, '');
+                const cleanSeries = rootFolder.replace(/^\[[^\]]+\]\s*/, '');
                 targetFolderName = cleanSeries;
 
                 // Kavita 표준 스캐너 100% 매칭 규격: {cleanSeries} - c{paddedNum} (3자리 패딩)
                 const paddedNum = (episodeNum || '').toString().padStart(3, '0');
                 fullFilename = `${cleanSeries} - c${paddedNum}`;
-            } else {
+            } else if (destination === 'drive') {
                 // drive (레거시): 기존 명명법 강제 적용
                 const legacyPaddedNum = (episodeNum || '').toString().padStart(4, '0');
                 fullFilename = `${rootFolder} ${legacyPaddedNum}화`;
+            } else {
+                // local / native: 사용자 설정 localNameTemplate 동적 파싱 적용
+                const template = getConfig().localNameTemplate || "{number:4} - {title}";
+                const cleanSeries = rootFolder.replace(/^\[[^\]]+\]\s*/, '');
+                fullFilename = template
+                    .replace(/\{number:(\d)\}/g, (_, p) => (episodeNum || '').toString().padStart(parseInt(p, 10), '0'))
+                    .replace(/\{number\}/g, (episodeNum || '').toString().padStart(4, '0'))
+                    .replace(/\{rawNumber\}/g, (episodeNum || '').toString())
+                    .replace(/\{series\}/g, cleanSeries)
+                    .replace(/\{title\}/g, episodeTitle || '');
             }
 
-            console.log(`[WorkerController] [배치 업로드] 파일 조립 완료 (정책: ${destination}). 구글 드라이브 전송 시작: ${fullFilename}.${extension}`);
+            console.log(`[WorkerController] [배치 저장] 파일 조립 완료 (정책: ${destination}). 전송 시작: ${fullFilename}.${extension}`);
             
-            await saveFile(blob, fullFilename, 'drive', extension, {
-                folderName: targetFolderName,
-                category: category
+            const isLocal = (destination === 'local' || destination === 'native');
+            EventBus.emit(EVT.LOG, {
+                msg: isLocal
+                    ? `💾 [${episodeTitle}] 로컬 파일 저장 개시... (${(blob.size / 1024 / 1024).toFixed(1)} MB)`
+                    : `🚀 [${episodeTitle}] 구글 드라이브 업로드 전송 시작... (${(blob.size / 1024 / 1024).toFixed(1)} MB)`,
+                tag: 'Downloader:Batch',
+                level: 'info'
             });
 
-            // 4. 업로드 완료 후 최종 성공 전이
+            // saveFile은 'local'/'native'/'drive' 3개 타입만 처리하므로 drive_kavita는 'drive'로 변환 전달
+            const saveType = (destination === 'drive_kavita') ? 'drive' : destination;
+
+            // [H8] 업로드 중 lastActivity keepalive — 30초마다 갱신하여 300초 타임아웃 오발사 방지
+            const keepalive = setInterval(() => {
+                updateQueueItem(matchedId, { lastActivity: Date.now() });
+            }, 30000);
+            try {
+                await saveFile(blob, fullFilename, saveType, extension, {
+                    folderId: item.folderId,
+                    folderName: targetFolderName,
+                    category: category,
+                    destination: destination
+                });
+            } finally {
+                clearInterval(keepalive);
+            }
+
+            // 4. 업로드 완료 후 최종 성공 전이 및 캐시 삭제
             updateQueueItem(matchedId, {
                 status: 'completed',
                 progressPercent: 100,
                 stage: WORKER_STAGE.COMPLETED
             });
+            extractedDataCache.delete(matchedId); // 인메모리 캐시 클린업
+            _activeProcessing.delete(matchedId);
             console.log(`[WorkerController] 🎉 [배치] 업로드 및 완료 처리 성공 (ID: ${matchedId})`);
 
         } catch (uploadErr) {
+            _activeProcessing.delete(matchedId);
             console.error(`[WorkerController] ❌ [배치] 업로드 처리 중 예외 발생:`, uploadErr);
             
             // [v1.21.8] 사용자의 정지 클릭으로 이미 failed로 빠졌는지 확인
@@ -538,11 +672,14 @@ export function initBatchWorkerController() {
             const isStopped = freshItem && freshItem.status === 'failed' && freshItem.errorMsg?.includes('중단');
 
             const nextRetry = (item.retryCount || 0) + 1;
+            const finalStatus = (isStopped || nextRetry >= 3) ? 'failed' : 'pending';
             updateQueueItem(matchedId, {
-                status: (isStopped || nextRetry >= 3) ? 'failed' : 'pending',
+                status: finalStatus,
                 retryCount: nextRetry,
                 errorMsg: isStopped ? '사용자에 의해 수집이 강제로 중단되었습니다.' : (uploadErr.message || '파일 빌드 및 업로드 실패')
             });
+            extractedDataCache.delete(matchedId); // 실패 또는 재시도 전이 시 캐시 클린업
+
 
             EventBus.emit(EVT.LOG, {
                 msg: `❌ [배치 업로드 실패] [${item.episodeTitle}] ${uploadErr.message || '오류 발생'} (시도: ${nextRetry}/3)`,
@@ -574,7 +711,7 @@ export function initBatchWorkerController() {
         if (!hasActive) {
             const completedItem = currentQueue.find(i => i.id === matchedId);
             if (completedItem && (completedItem.destination === 'drive' || completedItem.destination === 'drive_kavita')) {
-                const cleanFolder = completedItem.rootFolder.replace(/^\[\d+\]\s*/, '');
+                const cleanFolder = completedItem.rootFolder.replace(/^\[[^\]]+\]\s*/, '');
                 const targetFolder = completedItem.destination === 'drive_kavita' ? cleanFolder : completedItem.rootFolder;
                 console.log(`[WorkerController] ☁️ 전 대기열 수집 완료 -> 드라이브 캐시 갱신 시작: ${targetFolder}`);
                 refreshCacheAfterUpload(
@@ -623,10 +760,13 @@ export function initBatchWorkerController() {
                     (item.status === 'pending' || item.status === 'processing') && 
                     item.episodeUrl === targetUrl
                 );
-                if (matchedItem) {
+                if (matchedItem && batchWorkerNonces.has(matchedItem.id)) {
                     matchedId = matchedItem.id;
                     activeWorkers.set(matchedId, sourceEvent.source);
-                    console.log(`[WorkerController] ♻️ URL 매칭 성공 ➡️ Window 참조 복원 갱신 (ID: ${matchedId})`);
+                    // Security: Register worker origin and generate session nonce for batch
+                    const batchNonce = registerWorkerOrigin(matchedId, 'null');
+                    batchWorkerNonces.set(matchedId, batchNonce);
+                    console.log(`[WorkerController] ♻️ URL 매칭 성공 ➡️ Window 참조 복원 갱신 (ID: ${matchedId}), 보안 논스 생성`);
                 }
             }
 
@@ -641,6 +781,7 @@ export function initBatchWorkerController() {
                         return;
                     }
                     window[`tokisync_waiting_${matchedId}`] = true;
+                    updateQueueItem(matchedId, { lastActivity: Date.now() });
 
                     const config = getConfig();
                     const multiplier = SLEEP_MULTIPLIERS[config.sleepMode] || SLEEP_MULTIPLIERS.cautious;
@@ -669,6 +810,7 @@ export function initBatchWorkerController() {
 
                     console.log(`[WorkerController] 📢 [배치] 안전 대기 완료 ➡️ START_EXTRACTION 주입 (ID: ${matchedId})`);
                     
+                    const batchNonce = batchWorkerNonces.get(matchedId);
                     sendToWorker(sourceEvent.source, 'START_EXTRACTION', {
                         queueId: item.id,
                         targetType: (item.category === 'Novel' || item.category === 'novel') ? 'novel' : 'comic',
@@ -683,8 +825,9 @@ export function initBatchWorkerController() {
                         protocolDomain: item.protocolDomain || window.location.origin,
                         scanSpeedMultiplier: config.scanSpeed / 750,
                         speedMultiplier: multiplier, // 속도 배율 전달
-                        localNameTemplate: config.localNameTemplate || "{number:4} - {title}"
-                    });
+                        localNameTemplate: config.localNameTemplate || "{number:4} - {title}",
+                        sessionNonce: batchNonce // Security: session token for IPC validation
+                    }, batchNonce);
                 }
             } else {
                 console.warn('[WorkerController] [배치] WORKER_READY 수신했으나 매칭되는 activeWorkers 항목을 찾지 못했습니다.', targetUrl);
@@ -719,12 +862,24 @@ export function initBatchWorkerController() {
 
         // 2-1. WORKER_LOG: 자식 워커 커스텀 실시간 로그 출력
         if (type === 'WORKER_LOG') {
-            const { msg, level } = payload || {};
+            const { msg, level, queueId } = payload || {};
             EventBus.emit(EVT.LOG, {
                 msg: msg,
                 tag: 'Worker:Batch',
                 level: level || 'info'
             });
+
+            // [H8] Liveness Jitter 방어: 로그 수신 시 수집 시간(lastActivity)을 갱신하여 60초 배치 타임아웃 오작동 차단
+            let matchedId = queueId;
+            if (!matchedId) {
+                for (const [id, popupRef] of activeWorkers.entries()) {
+                    const actualRef = popupRef.ref || popupRef;
+                    if (actualRef === sourceEvent.source) { matchedId = id; break; }
+                }
+            }
+            if (matchedId) {
+                updateQueueItem(matchedId, { lastActivity: Date.now() });
+            }
         }
 
         // 3. WORKER_PROGRESS: 자식 워커 실시간 진행률 UI 반영
@@ -743,7 +898,8 @@ export function initBatchWorkerController() {
                 const queue = getQueue();
                 const item = queue.find(i => i.id === matchedId);
                 if (item) {
-                    updateQueueItem(matchedId, { progressPercent: percent, stage: stage });
+                    // 진행률 업데이트 시에도 lastActivity를 현재 시간으로 강제 명시하여 타임아웃을 유예
+                    updateQueueItem(matchedId, { progressPercent: percent, stage: stage, lastActivity: Date.now() });
                     
                     let stageText = '대기 중';
                     if (stage === WORKER_STAGE.DOM_READY) stageText = '페이지 로딩';
@@ -829,6 +985,12 @@ export function initBatchWorkerController() {
                         }
                     } catch (e) {}
                     activeWorkers.delete(matchedId);
+                    // Security: Invalidate failed worker nonce
+                    const failedNonce = batchWorkerNonces.get(matchedId);
+                    if (failedNonce) {
+                        removeWorkerOrigin(matchedId, failedNonce);
+                        batchWorkerNonces.delete(matchedId);
+                    }
                 }
 
                 const queue = getQueue();
@@ -851,7 +1013,7 @@ export function initBatchWorkerController() {
                 if (!hasActive) {
                     const failedItem = currentQueue.find(i => i.id === matchedId);
                     if (failedItem && (failedItem.destination === 'drive' || failedItem.destination === 'drive_kavita')) {
-                        const cleanFolder = failedItem.rootFolder.replace(/^\[\d+\]\s*/, '');
+                        const cleanFolder = failedItem.rootFolder.replace(/^\[[^\]]+\]\s*/, '');
                         const targetFolder = failedItem.destination === 'drive_kavita' ? cleanFolder : failedItem.rootFolder;
                         console.log(`[WorkerController] ☁️ 전 대기열 수집 종료(실패 포함) -> 드라이브 캐시 갱신 시작: ${targetFolder}`);
                         refreshCacheAfterUpload(

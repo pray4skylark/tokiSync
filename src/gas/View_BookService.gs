@@ -256,6 +256,19 @@ function View_getFileChunk(fileId, offset, length) {
       "Drive API Partial Fetch failed, falling back to DriveAccessService: " +
         e,
     );
+
+    try {
+      const meta = DriveAccessService.getMetadata(fileId);
+      const fileSize = parseInt(meta.size || '0');
+      var SAFE_LIMIT = 30 * 1024 * 1024; // 30MB
+      if (fileSize > SAFE_LIMIT) {
+        throw new Error(`File too large for fallback download: ${(fileSize/1024/1024).toFixed(1)}MB exceeds 30MB safety limit. Range fetch failed: ${e.message}`);
+      }
+    } catch (sizeCheckErr) {
+      if (sizeCheckErr.message.includes('too large')) throw sizeCheckErr;
+      // If meta fetch also fails, proceed with original fallback
+    }
+
     const bytes = DriveAccessService.getFileBytes(fileId);
 
     if (offset >= bytes.length) return null;

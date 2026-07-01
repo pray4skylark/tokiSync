@@ -1,6 +1,7 @@
 import { EventBus, EVT } from './EventBus.js';
 import { LogBox } from './ui/LogBox.js';
 import { MenuModal } from './ui/MenuModal.js';
+import { initQueueScheduler } from './queue.js';
 
 let passCount = 0;
 let failCount = 0;
@@ -32,6 +33,13 @@ function setupMockBrowser() {
         return defaultVal !== undefined ? defaultVal : null;
     };
     globalThis.GM_setValue = () => {};
+    globalThis.localStorage = {
+        _store: {},
+        getItem(key) { return this._store[key] || null; },
+        setItem(key, val) { this._store[key] = val.toString(); },
+        removeItem(key) { delete this._store[key]; },
+        clear() { this._store = {}; }
+    };
 }
 
 function restoreBrowser() {
@@ -39,6 +47,7 @@ function restoreBrowser() {
     globalThis.GM_registerMenuCommand = originalGM.register;
     globalThis.GM_getValue = originalGM.get;
     globalThis.GM_setValue = originalGM.set;
+    delete globalThis.localStorage;
 }
 
 function createMockPopup() {
@@ -123,6 +132,7 @@ function createMockPopup() {
 // ── 테스트 1: Cross-Window EventBus 스코프 바인딩 검증 ──────
 test('Cross-Window 환경에서 자식 팝업 내부의 클릭 이벤트가 부모 창의 EventBus에 도달해야 합니다.', () => {
     setupMockBrowser();
+    initQueueScheduler();
     
     // LogBox와 MenuModal 인스턴스 초기화 (싱글톤 초기화)
     LogBox.instance = null;

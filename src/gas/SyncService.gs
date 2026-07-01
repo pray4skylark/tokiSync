@@ -130,45 +130,6 @@ function getLibraryIndex(rootFolderId) {
   return createRes("success", []);
 }
 
-// 기능: 라이브러리 상태 업데이트 (클라이언트 결과 저장)
-function updateLibraryStatus(data, rootFolderId) {
-  const results = DriveAccessService.list(rootFolderId, {
-    query: "name = 'index.json'",
-    fields: "files(id)"
-  });
-
-  if (results.length === 0) return createRes("error", "Index not found");
-
-  const fileId = results[0].id;
-  let library = [];
-  try {
-    const content = DriveAccessService.getFileContent(fileId);
-    library = JSON.parse(content);
-    if (!Array.isArray(library)) library = [];
-  } catch (e) {
-    return createRes("error", "Invalid JSON");
-  }
-
-  // 업데이트 반영
-  const updates = data.updates;
-  let changedCount = 0;
-
-  updates.forEach((u) => {
-    const item = library.find((i) => i.id === u.id);
-    if (item) {
-      item.latest_episode_in_site = u.latestEpisode;
-      item.last_checked_at = new Date().toISOString();
-      changedCount++;
-    }
-  });
-
-  if (changedCount > 0) {
-    DriveAccessService.updateFileContent(fileId, JSON.stringify(library));
-    return createRes("success", `Updated ${changedCount} items`);
-  }
-  return createRes("success", "No changes");
-}
-
 // =======================================================
 // 📦 마이그레이션 서비스 (Legacy -> v3.1 Structure)
 // =======================================================

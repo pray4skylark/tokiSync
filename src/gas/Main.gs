@@ -36,21 +36,29 @@ function doGet(e) {
 var SERVER_VERSION = "v1.8.0"; // Drive API V3 Migration
 // API Key stored in Script Properties (Project Settings > Script Properties)
 // Set property: API_KEY = your_secret_key
-var API_KEY = PropertiesService.getScriptProperties().getProperty("API_KEY");
+
+function getApiKey_() {
+    return PropertiesService.getScriptProperties().getProperty("API_KEY");
+}
 
 function doPost(e) {
   Debug.start(); // 🐞 디버그 시작
   try {
-    const data = JSON.parse(e.postData.contents);
+    let data;
+    try {
+      data = JSON.parse(e.postData.contents);
+    } catch (parseErr) {
+      return createRes("error", "Invalid JSON in request body");
+    }
 
     // 0. API Key Validation (Security) - All Requests Including Viewer
-    if (!API_KEY) {
+    var apiKey = getApiKey_(); if (!apiKey) {
       return createRes(
         "error",
         "Server Configuration Error: API_KEY not set in Script Properties",
       );
     }
-    if (!data.apiKey || data.apiKey !== API_KEY) {
+    if (!data.apiKey || data.apiKey !== apiKey) {
       return createRes("error", "Unauthorized: Invalid API Key");
     }
 
@@ -97,8 +105,6 @@ function doPost(e) {
         result = saveSeriesInfo(data, rootFolderId);
       else if (data.type === "get_library")
         result = getLibraryIndex(rootFolderId);
-      else if (data.type === "update_library_status")
-        result = updateLibraryStatus(data, rootFolderId);
       else if (data.type === "get_server_info") {
         result = createRes("success", {
           name: "TokiSync API",
@@ -143,7 +149,7 @@ function TimeDriven_SweepMergeIndex() {
     
     // Call the Sweep function defined in View_LibraryService.gs
     if (typeof SweepMergeIndex === 'function') {
-        SweepMergeIndex(folderId, null);
+        SweepMergeIndex(folderId);
     } else {
         console.error("[SweepMergeIndex] SweepMergeIndex function not found. Verify deployment.");
     }

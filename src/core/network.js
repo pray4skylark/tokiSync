@@ -4,7 +4,8 @@
  */
 
 import { getConfig } from './config.js';
-import { LogBox } from './ui/index.js';
+import { EventBus, EVT } from './EventBus.js';
+import { logger } from './logger.js';
 import { extractEpisodeNum } from './utils.js';
 
 
@@ -47,7 +48,7 @@ async function fetchToken() {
                     } else {
                         console.error('[DirectUpload] Token fetch failed:', result.error);
                         console.error('[DirectUpload] Debug logs:', result.logs);
-                        LogBox.getInstance().error(`Token fetch failed: ${result.error}`, 'Network:Auth');
+                        logger.error(`Token fetch failed: ${result.error}`, 'Network:Auth');
                         reject(new Error(result.error || 'Token fetch failed'));
                     }
                 } catch (e) {
@@ -58,12 +59,12 @@ async function fetchToken() {
             },
             onerror: (error) => {
                 console.error('[DirectUpload] Request error:', error);
-                LogBox.getInstance().error('Token request network error', 'Network:Auth');
+                logger.error('Token request network error', 'Network:Auth');
                 reject(new Error('Token request failed'));
             },
             ontimeout: () => {
                 console.error('[DirectUpload] Token request timed out (30s)');
-                LogBox.getInstance().error('Token request timed out (30s)', 'Network:Auth');
+                logger.error('Token request timed out (30s)', 'Network:Auth');
                 reject(new Error('[DirectUpload] 토큰 요청 타임아웃 (30초)'));
             }
         });
@@ -106,8 +107,9 @@ export async function getOrCreateFolder(folderName, parentId, token, _category) 
         queryPart = `name = '${folderName.replace(/'/g, "\\'")}'`; 
     }
 
+    const fullQuery = `${queryPart} and '${parentId}' in parents and trashed=false and mimeType='application/vnd.google-apps.folder'`;
     const searchUrl = `https://www.googleapis.com/drive/v3/files?` +
-        `q=${queryPart} and '${parentId}' in parents and trashed=false and mimeType='application/vnd.google-apps.folder'` +
+        `q=${encodeURIComponent(fullQuery)}` +
         `&fields=files(id,name)&supportsAllDrives=true&includeItemsFromAllDrives=true`;
     
     const searchResult = await new Promise((resolve, reject) => {
@@ -219,7 +221,6 @@ async function sendResumableChunks(uploadUrl, blob, token, fileName) {
     const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB (Minimum for Drive is 256KB, 5MB is standard)
     const totalSize = blob.size;
     let start = 0;
-    const logger = LogBox.getInstance();
 
     while (start < totalSize) {
         const end = Math.min(start + CHUNK_SIZE, totalSize);
@@ -257,6 +258,11 @@ async function sendResumableChunks(uploadUrl, blob, token, fileName) {
         start = end;
         const progress = Math.min(100, Math.floor((start / totalSize) * 100));
         console.log(`[DirectUpload] ${fileName} -> ${progress}% (${start}/${totalSize})`);
+        EventBus.emit(EVT.LOG, {
+            msg: `☁️ [${fileName}] Drive 업로드 중... ${progress}% (${Math.floor(start / 1024 / 1024)}MB / ${Math.floor(totalSize / 1024 / 1024)}MB)`,
+            level: 'info',
+            tag: 'Upload'
+        });
     }
 }
 
@@ -269,10 +275,18 @@ export async function uploadDirect(blob, folderName, fileName, metadata = {}) {
         
         const config = getConfig();
         const token = await getToken();
-        const logger = LogBox.getInstance();
         
         // 1. Get Series Folder ID
-        const seriesFolderId = metadata.folderId || await getOrCreateFolder(folderName, config.folderId, token);
+        let seriesFolderId = metadata.folderId;
+        if (!seriesFolderId) {
+            let parentFolderId = config.folderId;
+            const isDriveOrKavita = (metadata.destination === 'drive' || metadata.destination === 'drive_kavita');
+            if (isDriveOrKavita) {
+                const categoryFolder = metadata.category || 'Webtoon';
+                parentFolderId = await getOrCreateFolder(categoryFolder, config.folderId, token);
+            }
+            seriesFolderId = await getOrCreateFolder(folderName, parentFolderId, token);
+        }
         
         let targetFolderId = seriesFolderId;
         let finalFileName = fileName;
@@ -290,8 +304,9 @@ export async function uploadDirect(blob, folderName, fileName, metadata = {}) {
         // 3. Search for existing file to decide POST (New) or PATCH (Update)
         let existingFileId = null;
         try {
+            const q = `name='${finalFileName.replace(/'/g, "\\'")}' and '${targetFolderId}' in parents and trashed=false`;
             const searchUrl = `https://www.googleapis.com/drive/v3/files?` +
-                `q=name='${finalFileName}' and '${targetFolderId}' in parents and trashed=false` +
+                `q=${encodeURIComponent(q)}` +
                 `&fields=files(id,name)&supportsAllDrives=true&includeItemsFromAllDrives=true`;
             
             const searchRes = await new Promise((res, rej) => {
@@ -368,7 +383,7 @@ export async function uploadDirect(blob, folderName, fileName, metadata = {}) {
 
     } catch (error) {
         console.error(`[DirectUpload] Error:`, error);
-        LogBox.getInstance().error(`[DirectUpload] ${error.message}`, 'Network:Upload');
+        logger.error(`[DirectUpload] ${error.message}`, 'Network:Upload');
         throw error;
     }
 }
@@ -385,19 +400,24 @@ export const getOAuthToken = getToken;
  * @param {string} category 
  * @returns {Promise<{success: boolean, folderId: string|null, data: string[]}>} Object with valid episode IDs
  */
-export async function fetchHistoryDirect(seriesTitle) {
-    const logger = LogBox.getInstance();
+export async function fetchHistoryDirect(seriesTitle, category = 'Webtoon') {
     const config = getConfig();
     if (!config.folderId) return { success: false, folderId: null, data: [] };
 
     let currentSeriesFolderId = null;
 
     try {
-        console.log(`[DirectHistory] Fetching history for: ${seriesTitle}`);
+        console.log(`[DirectHistory] Fetching history for: ${seriesTitle} (${category})`);
         const token = await getToken();
         
+        const isDriveOrKavita = (config.policy === 'drive' || config.policy === 'drive_kavita');
+        let parentFolderId = config.folderId;
+        if (isDriveOrKavita) {
+            parentFolderId = await getOrCreateFolder(category, config.folderId, token);
+        }
+
         // Find the Series Folder ID
-        currentSeriesFolderId = await getOrCreateFolder(seriesTitle, config.folderId, token);
+        currentSeriesFolderId = await getOrCreateFolder(seriesTitle, parentFolderId, token);
         
         if (!currentSeriesFolderId) {
             console.log(`[DirectHistory] Series folder not found or created.`);

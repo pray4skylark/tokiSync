@@ -19,6 +19,13 @@ var Debug = {
     this.logs.push(`${timestamp} ${msg}`);
   },
 
+  warn: function (msg) {
+    const elapsed = new Date().getTime() - this.startTime;
+    const timestamp = `[+${elapsed}ms]`;
+    console.warn(msg);
+    this.logs.push(`⚠️ ${timestamp} ${msg}`);
+  },
+
   error: function (msg, err) {
     const elapsed = new Date().getTime() - this.startTime;
     const timestamp = `[+${elapsed}ms]`;

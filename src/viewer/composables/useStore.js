@@ -20,7 +20,7 @@ function isStale(cachedAt, ttl) {
 
 // --- Sub-Composables ---
 const { isConnected, initBridge, bridgeFetch } = useBridge();
-const { gasConfig, setConfig, isConfigured, getLibrary, getBooks, getReadHistory, saveReadHistory, updateMetadata, uploadThumbnail } = useGAS();
+const { gasConfig, setConfig, isConfigured, getLibrary, getBooks, getReadHistory, saveReadHistory, updateMetadata, uploadThumbnail, request } = useGAS();
 const { 
   downloadProgress, isDownloading, isPreloading, 
   fetchAndUnzip, preloadEpisode, cleanupBlobUrls, formatSize, cancelViewerDownload 
@@ -37,6 +37,7 @@ const showEpisodeModal = ref(false);
 const isInitialLoading = ref(true);
 const isSyncing = ref(false);
 const notification = ref('');
+let notifyTimerId = null;
 const needsServerUpdate = ref(false); // [v1.8.0] 서버 업데이트 안내용
 const RECOMMENDED_SERVER_VERSION = '1.22.0';
 
@@ -429,8 +430,12 @@ const toggleNovelSpread = () => {
 
 // --- Methods ---
 const notify = (msg) => {
-  notification.value = msg;
-  setTimeout(() => notification.value = '', 3000);
+    if (notifyTimerId) clearTimeout(notifyTimerId);
+    notification.value = msg;
+    notifyTimerId = setTimeout(() => {
+        notification.value = '';
+        notifyTimerId = null;
+    }, 3000);
 };
 
 const forceCloudSync = () => {

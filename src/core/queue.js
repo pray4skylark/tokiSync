@@ -16,12 +16,15 @@ export const WORKER_STAGE = {
   FAILED: 'STAGE_FAILED'          // 예외 및 수집 실패
 };
 
-const STORAGE_KEY = 'tokisync_download_queue';
+const STORAGE_KEY = 'TOKI_DOWNLOAD_QUEUE';
 const MAX_CONCURRENCY = 2; // 최대 동시 다운로드 수
 
 // 임시 팝업 창 참조 보관용 맵 (Liveness check 및 재활용 루프 대비)
 export const activeWorkers = new Map();
 const closedCounts = new Map(); // Track closed counts for liveness check independently to avoid polluting activeWorkers window references
+
+// handleBatchSuccess 진행 중인 아이템 추적 (팝업은 닫혔지만 CBZ/업로드 진행 중)
+export const _activeProcessing = new Set();
 
 // Tampermonkey 환경 및 Node.js/일반 브라우저 환경 간의 영속성 호환 래퍼
 const getRawQueue = () => {
@@ -132,13 +135,21 @@ export const updateQueueItem = (id, updates) => {
   const index = queue.findIndex(item => item.id === id);
 
   if (index !== -1) {
+    const currentItem = queue[index];
+    const isAlreadyStopped = currentItem.status === 'failed' && currentItem.errorMsg?.includes('중단');
+    if (isAlreadyStopped) {
+      console.log(`[Queue] 🛡️ 강제 중단된 큐 아이템에 대한 비동기 업데이트 거부: ${currentItem.episodeTitle}`);
+      return false;
+    }
+
     const hasStateChange = updates.status && updates.status !== queue[index].status;
     const hasStageChange = updates.stage && updates.stage !== queue[index].stage;
+    const hasProgressChange = updates.progressPercent !== undefined && updates.progressPercent !== queue[index].progressPercent;
     queue[index] = {
       ...queue[index],
       ...updates,
       completedAt: updates.status === 'completed' ? Date.now() : queue[index].completedAt,
-      lastActivity: (hasStateChange || hasStageChange) ? Date.now() : (updates.lastActivity !== undefined ? updates.lastActivity : queue[index].lastActivity)
+      lastActivity: (hasStateChange || hasStageChange || hasProgressChange) ? Date.now() : (updates.lastActivity !== undefined ? updates.lastActivity : queue[index].lastActivity)
     };
     saveRawQueue(queue);
     return true;
@@ -161,15 +172,6 @@ export const updateQueueItemProgress = (id, percent) => {
  */
 export const clearQueue = () => {
   saveRawQueue([]);
-};
-
-/**
- * 완료된(completed) 항목들 일괄 삭제
- */
-export const removeCompletedItems = () => {
-  const queue = getRawQueue();
-  const filtered = queue.filter(item => item.status !== 'completed');
-  saveRawQueue(filtered);
 };
 
 /**
@@ -237,7 +239,7 @@ export const getQueueStats = () => {
 // 🚦 [2단계] 백그라운드 세마포어 및 이벤트 기반 스케줄러 구현
 // =============================================================
 
-const PAUSED_KEY = 'tokisync_queue_paused';
+const PAUSED_KEY = 'TOKI_QUEUE_PAUSED';
 
 /**
  * 전역 큐 일시 정지 상태 조회 (GM 스토리지 연동으로 멀티 탭 실시간 공유)
@@ -261,10 +263,23 @@ export const setQueuePaused = (paused) => {
   try {
     if (typeof GM_setValue !== 'undefined') {
       GM_setValue(PAUSED_KEY, paused);
-      return;
-    }
-    if (typeof localStorage !== 'undefined') {
+    } else if (typeof localStorage !== 'undefined') {
       localStorage.setItem(PAUSED_KEY, String(paused));
+    }
+
+    // [H8] 일시 정지 해제(재개) 시, 현재 수집 중(processing)인 모든 워커의 lastActivity를 리셋하여 타임아웃 오작동 원천 차단
+    if (!paused) {
+      const queue = getRawQueue();
+      let updated = false;
+      queue.forEach(item => {
+        if (item.status === 'processing') {
+          item.lastActivity = Date.now();
+          updated = true;
+        }
+      });
+      if (updated) {
+        saveRawQueue(queue);
+      }
     }
   } catch (e) {}
 };
@@ -272,19 +287,22 @@ export const setQueuePaused = (paused) => {
 /**
  * 모든 자식 팝업을 강제 폐쇄하고 큐를 중단 청소하는 완전 정지
  */
-export const stopAllWorkers = () => {
-  console.log('[Queue] ⏹️ 모든 활성 자식 팝업 강제 폐쇄 및 수집 중단 집행...');
+export const stopAllWorkers = (shouldClear = false) => {
+  console.log(`[Queue] ⏹️ 모든 활성 자식 팝업 강제 폐쇄 및 수집 중단 집행... (초기화 여부: ${shouldClear})`);
   
-  // 1. 모든 팝업 창 즉시 닫기
+  // 1. 모든 팝업 창 닫기 (EMERGENCY_STOP 전파 후 100ms 대기)
   for (const [id, popupRef] of activeWorkers.entries()) {
     try {
       if (popupRef && !popupRef.closed) {
-        // [v1.21.8] 워커에 긴급 정지 postMessage 메시지 전파
         const actualRef = popupRef.ref || popupRef;
         if (actualRef && typeof actualRef.postMessage === 'function') {
           actualRef.postMessage({ type: 'EMERGENCY_STOP', payload: { queueId: id } }, '*');
         }
-        popupRef.close();
+        setTimeout(() => {
+          try {
+            if (!popupRef.closed) popupRef.close();
+          } catch (e) {}
+        }, 100);
       }
     } catch (e) {
       console.warn(`[Queue] 팝업 close 오류: ${id}`, e);
@@ -293,20 +311,24 @@ export const stopAllWorkers = () => {
   activeWorkers.clear();
   closedCounts.clear();
 
-  // 2. 큐 대기열 전체 청소 및 중단 마킹
-  const queue = getRawQueue();
-  const updatedQueue = queue.map(item => {
-    if (item.status === 'pending' || item.status === 'processing') {
-      return {
-        ...item,
-        status: 'failed',
-        stage: WORKER_STAGE.FAILED,
-        errorMsg: '사용자에 의해 수집이 강제로 중단되었습니다.'
-      };
-    }
-    return item;
-  });
-  saveRawQueue(updatedQueue);
+  // 2. 큐 대기열 전체 청소 및 중단 마킹 (1회성 트랜잭션 병합으로 레이스 컨디션 제거)
+  if (shouldClear) {
+    saveRawQueue([]);
+  } else {
+    const queue = getRawQueue();
+    const updatedQueue = queue.map(item => {
+      if (item.status === 'pending' || item.status === 'processing') {
+        return {
+          ...item,
+          status: 'failed',
+          stage: WORKER_STAGE.FAILED,
+          errorMsg: '사용자에 의해 수집이 강제로 중단되었습니다.'
+        };
+      }
+      return item;
+    });
+    saveRawQueue(updatedQueue);
+  }
 
   // 3. 일시 정지 해제 및 크로스 탭 정지 동기화 트리거
   setQueuePaused(false);
@@ -337,6 +359,7 @@ export const runSchedulerOnce = async () => {
   }
   if (isSchedulerRunning) return;
   isSchedulerRunning = true;
+  console.log(`[Queue Scheduler] 🔍 runSchedulerOnce 진입 (activeWorkers=${activeWorkers.size}, _activeProcessing=${_activeProcessing.size})`);
 
   try {
     const queue = getRawQueue();
@@ -370,8 +393,8 @@ export const runSchedulerOnce = async () => {
       }
     }
 
-    // 1. 현재 수집 중인 활성 팝업(activeWorkers)의 개수를 제약 (순차 수집: 최대 1개)
-    if (activeWorkers.size >= 1) {
+    // 1. 현재 수집 중인 활성 팝업(activeWorkers) 또는 진행 중인 작업(_activeProcessing) 제약
+    if (activeWorkers.size >= 1 || _activeProcessing.size >= 1) {
       isSchedulerRunning = false;
       return;
     }
@@ -422,13 +445,21 @@ export const runSchedulerOnce = async () => {
       return;
     }
 
-    // 5. 팝업 실행 및 상태 갱신
-    console.log(`[Queue Scheduler] 🚀 1회성 신규 팝업 기동: ${nextItem.episodeTitle} (${nextItem.episodeUrl})`);
+    // 5. 최종 가드: 아직 처리 중인 작업이 있거나 활성 팝업이 있으면 기동 취소
+    if (_activeProcessing.size >= 1 || activeWorkers.size >= 1) {
+      console.log(`[Queue Scheduler] 🛡️ 활성 처리/팝업 감지로 기동 취소: ${nextItem.episodeTitle} (activeProcessing=${_activeProcessing.size}, activeWorkers=${activeWorkers.size})`);
+      isSchedulerRunning = false;
+      return;
+    }
+
+    // 6. 팝업 실행 및 상태 갱신
+    console.log(`[Queue Scheduler] 🚀 1회성 신규 팝업 기동: ${nextItem.episodeTitle} (${nextItem.episodeUrl}), 현재 activeWorkers=${activeWorkers.size}, _activeProcessing=${_activeProcessing.size}`);
     updateQueueItem(nextItem.id, { status: 'processing', startedAt: Date.now() });
     
     const popupRef = openEpisodePopup(nextItem.episodeUrl, nextItem.id);
     if (popupRef) {
         activeWorkers.set(nextItem.id, popupRef);
+        console.log(`[Queue Scheduler] ✅ 팝업 등록 완료: ${nextItem.episodeTitle} (activeWorkers=${activeWorkers.size})`);
     } else {
         // 팝업 차단 등으로 창 생성 실패 시 즉시 failed 처리
         updateQueueItem(nextItem.id, { 
@@ -486,7 +517,9 @@ export const initQueueScheduler = () => {
   if (typeof GM_addValueChangeListener !== 'undefined') {
     GM_addValueChangeListener(STORAGE_KEY, (key, oldValue, newValue, remote) => {
       // 대기열 변동 이벤트가 오면 1회성 스케줄러 즉시 발동
+      const pendingCount = (Array.isArray(newValue) ? newValue.filter(i => i.status === 'pending').length : 0);
       runSchedulerOnce();
+      console.log(`[Queue Scheduler] 📡 GM_setValue 트리거 → runSchedulerOnce 호출 (pending=${pendingCount}, remote=${remote})`);
     });
     // [v1.21.8] 크로스 탭 정지 동기화 감지기 추가
     GM_addValueChangeListener('tokisync_queue_stopped_trigger', (key, oldValue, newValue, remote) => {
@@ -541,27 +574,9 @@ export const initQueueScheduler = () => {
   // 초기 기동 시에도 즉시 1회 검사
   runSchedulerOnce();
 
-  // ── EventBus 구독자 (UI → Core 레이어 분리) ──
-  EventBus.on(EVT.QUEUE_TOGGLE_PAUSE, async () => {
-    const p = getQueuePaused();
-    setQueuePaused(!p);
-    EventBus.emit(EVT.UPDATE_PROGRESS);
-    if (p) runSchedulerOnce();
-  });
 
-  EventBus.on(EVT.QUEUE_STOP_ALL, () => {
-    stopAllWorkers();
-    EventBus.emit(EVT.UPDATE_PROGRESS);
-  });
-
-  EventBus.on(EVT.QUEUE_CLEAR, () => {
-    clearQueue();
-    removeCompletedItems();
-    EventBus.emit(EVT.UPDATE_PROGRESS);
-  });
-
-  EventBus.on(EVT.QUEUE_REMOVE_ITEM, ({ id }) => {
-    removeQueueItem(id);
-    runSchedulerOnce();
+  // [H1] Queue Write Monopoly: 외부 모듈(downloader.js 등)의 큐 상태 변경 요청을 전담 처리
+  EventBus.on(EVT.QUEUE_ITEM_UPDATE, ({ id, updates }) => {
+    updateQueueItem(id, updates);
   });
 };

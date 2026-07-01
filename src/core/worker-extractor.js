@@ -114,7 +114,8 @@ export function initWorkerExtractor() {
                 matchedRule,
                 protocolDomain,
                 scanSpeedMultiplier = 1.0,
-                speedMultiplier = 1.0
+                speedMultiplier = 1.0,
+                sessionNonce
             } = msg.payload;
 
             console.log(`🚀 [TokiSync:Worker] 동작 지시문 수신 (ID: ${queueId}, 유형: ${targetType})`);
@@ -440,7 +441,7 @@ export function initWorkerExtractor() {
 
                     try {
                         console.log(`[TokiSync:Worker] 1차 시도: postMessage 기반 전송 개시...`);
-                        sendToParent('TASK_COMPLETED', payload, transferables);
+                        sendToParent('TASK_COMPLETED', payload, sessionNonce, transferables);
                         console.log(`[TokiSync:Worker] postMessage 송신 완료. 부모의 ACK를 기다립니다.`);
                     } catch (ipcErr) {
                         console.warn(`[TokiSync:Worker] ⚠️ postMessage 실패 (샌드박스 차단 의심) -> GM_setValue 2차 폴백 구동:`, ipcErr);
@@ -479,7 +480,7 @@ export function initWorkerExtractor() {
 
                         // 1. GM Storage 리스너 등록
                         if (typeof GM_addValueChangeListener !== 'undefined') {
-                            stateListenerId = GM_addValueChangeListener('tokisync_download_queue', (key, oldValue, newValue, remote) => {
+                            stateListenerId = GM_addValueChangeListener('TOKI_DOWNLOAD_QUEUE', (key, oldValue, newValue, remote) => {
                                 try {
                                     const parsed = typeof newValue === 'string' ? JSON.parse(newValue) : newValue;
                                     checkStateAndClose(parsed);

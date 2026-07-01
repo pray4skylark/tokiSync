@@ -1,6 +1,7 @@
 import { getConfig, isConfigValid } from './config.js';
 import { uploadDirect } from './network.js';
-import { LogBox } from './ui/index.js';
+import { EventBus, EVT } from './EventBus.js';
+import { logger } from './logger.js';
 import { arrayBufferToBase64 } from './utils.js';
 
 function gasRequest(payload, options = {}) {
@@ -72,7 +73,7 @@ export async function uploadToGAS(blob, folderName, fileName, options = {}) {
         return; // Success!
     } catch (directError) {
         console.warn('[Upload] ⚠️  Direct upload failed, falling back to GAS relay:', directError.message);
-        LogBox.getInstance().warn('Direct 업로드 실패 → GAS 릴레이 폴백: ' + directError.message + ' (' + fileName + ')', 'GAS:Upload');
+        logger.warn('Direct 업로드 실패 → GAS 릴레이 폴백: ' + directError.message + ' (' + fileName + ')', 'GAS:Upload');
     }
     
     // Fallback to GAS Relay
@@ -101,10 +102,10 @@ export async function refreshCacheAfterUpload(folderName, category = 'Unknown', 
             console.log('[Cache] 갱신 완료 응답 수신 (상세없음)');
         },
         onNetworkError: () => {
-            LogBox.getInstance().warn(`캐시 갱신 네트워크 오류 (${folderName}) — 다음 실행 시 자동 복구됨`, 'GAS:Cache');
+            logger.warn(`캐시 갱신 네트워크 오류 (${folderName}) — 다음 실행 시 자동 복구됨`, 'GAS:Cache');
         },
         onTimeout: () => {
-            LogBox.getInstance().warn(`캐시 갱신 타임아웃 30초 (${folderName}) — 스킬폭 포함 가능`, 'GAS:Cache');
+            logger.warn(`캐시 갱신 타임아웃 30초 (${folderName}) — 스킬폭 포함 가능`, 'GAS:Cache');
         }
     });
 }
@@ -118,7 +119,6 @@ export async function refreshCacheAfterUpload(folderName, category = 'Unknown', 
 async function uploadViaGASRelay(blob, folderName, fileName, options = {}) {
     const config = getConfig();
     if (!isConfigValid()) throw new Error("GAS 설정이 누락되었습니다. 메뉴에서 설정을 완료해주세요.");
-    const logger = LogBox.getInstance();
     
     // Constants
     const CHUNK_SIZE = 20 * 1024 * 1024; // 20MB
@@ -188,6 +188,11 @@ async function uploadViaGASRelay(blob, folderName, fileName, options = {}) {
         const percentage = Math.floor((end / totalSize) * 100);
         
         console.log(`[GAS] 전송 중... ${percentage}% (${start} ~ ${end} / ${totalSize})`);
+        EventBus.emit(EVT.LOG, {
+            msg: `☁️ GAS 릴레이 업로드 중... ${percentage}%`,
+            level: 'info',
+            tag: 'Upload'
+        });
 
         await new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
@@ -247,16 +252,16 @@ export async function fetchHistory(seriesTitle, category = 'Webtoon') {
         defaultValue: [],
         onSuccess: (json) => Array.isArray(json.body) ? json.body : [],
         onError: (errBody) => {
-            LogBox.getInstance().warn(`다운로드 기록 조회 실패: ${errBody}`, 'GAS:History');
+            logger.warn(`다운로드 기록 조회 실패: ${errBody}`, 'GAS:History');
         },
         onParseError: () => {
-            LogBox.getInstance().warn(`다운로드 기록 응답 파싱 실패`, 'GAS:History');
+            logger.warn(`다운로드 기록 응답 파싱 실패`, 'GAS:History');
         },
         onNetworkError: () => {
-            LogBox.getInstance().warn(`다운로드 기록 조회 네트워크 오류`, 'GAS:History');
+            logger.warn(`다운로드 기록 조회 네트워크 오류`, 'GAS:History');
         },
         onTimeout: () => {
-            LogBox.getInstance().warn(`다운로드 기록 조회 타임아웃 (30초)`, 'GAS:History');
+            logger.warn(`다운로드 기록 조회 타임아웃 (30초)`, 'GAS:History');
         }
     });
 }
@@ -272,16 +277,16 @@ export async function getBooksByCacheId(cacheFileId) {
         defaultValue: [],
         onSuccess: (json) => Array.isArray(json.body) ? json.body : [],
         onError: (errBody) => {
-            LogBox.getInstance().warn(`Fast Path 캐시 직행 조회 실패: ${errBody}`, 'GAS:FastPath');
+            logger.warn(`Fast Path 캐시 직행 조회 실패: ${errBody}`, 'GAS:FastPath');
         },
         onParseError: () => {
-            LogBox.getInstance().warn(`Fast Path 캐시 응답 파싱 실패`, 'GAS:FastPath');
+            logger.warn(`Fast Path 캐시 응답 파싱 실패`, 'GAS:FastPath');
         },
         onNetworkError: () => {
-            LogBox.getInstance().warn(`Fast Path 캐시 네트워크 오류`, 'GAS:FastPath');
+            logger.warn(`Fast Path 캐시 네트워크 오류`, 'GAS:FastPath');
         },
         onTimeout: () => {
-            LogBox.getInstance().warn(`Fast Path 캐시 조회 타임아웃 (10초)`, 'GAS:FastPath');
+            logger.warn(`Fast Path 캐시 조회 타임아웃 (10초)`, 'GAS:FastPath');
         }
     });
 }
@@ -299,16 +304,16 @@ export async function initUpdateUploadViaGASRelay(fileId, fileName) {
         rejectOnError: true,
         onSuccess: (json) => (typeof json.body === 'object') ? json.body.uploadUrl : json.body,
         onError: (errBody) => {
-            LogBox.getInstance().critical(`Fast Path PUT 세션 초기화 실패: ${errBody} (${fileName})`, 'GAS:FastPath');
+            logger.critical(`Fast Path PUT 세션 초기화 실패: ${errBody} (${fileName})`, 'GAS:FastPath');
         },
         onParseError: () => {
-            LogBox.getInstance().critical(`Fast Path PUT 레스폰스 파싱 실패 (${fileName})`, 'GAS:FastPath');
+            logger.critical(`Fast Path PUT 레스폰스 파싱 실패 (${fileName})`, 'GAS:FastPath');
         },
         onNetworkError: () => {
-            LogBox.getInstance().critical(`Fast Path PUT 네트워크 오류 (${fileName})`, 'GAS:FastPath');
+            logger.critical(`Fast Path PUT 네트워크 오류 (${fileName})`, 'GAS:FastPath');
         },
         onTimeout: () => {
-            LogBox.getInstance().critical(`Fast Path PUT 타임아웃 30초 (${fileName})`, 'GAS:FastPath');
+            logger.critical(`Fast Path PUT 타임아웃 30초 (${fileName})`, 'GAS:FastPath');
         }
     });
 }
@@ -323,16 +328,16 @@ export async function getMergeIndexFragment(sourceId) {
         timeout: 10000,
         defaultValue: { found: false, data: null },
         onError: (errBody) => {
-            LogBox.getInstance().warn(`MergeIndex 파편 조회 실패: ${errBody} (ID: ${sourceId})`, 'GAS:FastPath');
+            logger.warn(`MergeIndex 파편 조회 실패: ${errBody} (ID: ${sourceId})`, 'GAS:FastPath');
         },
         onParseError: () => {
-            LogBox.getInstance().warn(`MergeIndex 파편 응답 파싱 실패`, 'GAS:FastPath');
+            logger.warn(`MergeIndex 파편 응답 파싱 실패`, 'GAS:FastPath');
         },
         onNetworkError: () => {
-            LogBox.getInstance().warn(`MergeIndex 파편 조회 네트워크 오류`, 'GAS:FastPath');
+            logger.warn(`MergeIndex 파편 조회 네트워크 오류`, 'GAS:FastPath');
         },
         onTimeout: () => {
-            LogBox.getInstance().warn(`MergeIndex 파편 조회 타임아웃 (10초)`, 'GAS:FastPath');
+            logger.warn(`MergeIndex 파편 조회 타임아웃 (10초)`, 'GAS:FastPath');
         }
     });
 }

@@ -554,24 +554,21 @@ export class FormRuleEditor {
     /**
      * Run the test button logic — delegates via EventBus.
      */
-    _runTest(overlay) {
+    async _runTest(overlay) {
         const res = overlay.querySelector('#form-test-result');
         if (!res) return;
         res.textContent = '⏳ 파싱 테스트 작동 중...';
 
-        const requestId = Date.now().toString(36);
-        const unsub = EventBus.on(EVT.TEST_RESULT, ({ id, html }) => {
-            if (id !== requestId) return;
-            unsub();
-            if (res) res.innerHTML = html;
-        });
-
-        EventBus.emit(EVT.PARSE_TEST, {
-            requestId,
-            url: overlay.querySelector('#form-test-url').value,
-            rule: this.rules[this.currentRuleIndex],
-            category: this.rules[this.currentRuleIndex]?.category || 'Webtoon'
-        });
+        try {
+            const data = await EventBus.request(EVT.PARSE_TEST, {
+                url: overlay.querySelector('#form-test-url').value,
+                rule: this.rules[this.currentRuleIndex],
+                category: this.rules[this.currentRuleIndex]?.category || 'Webtoon'
+            }, 30000);
+            if (res) res.innerHTML = data.html;
+        } catch (err) {
+            if (res) res.innerHTML = `<div class="toki-text-danger">❌ 실패: ${err.message}</div>`;
+        }
     }
 
     /**
@@ -956,7 +953,7 @@ export class FormRuleEditor {
         // 🔍 검증(Verify) 버튼 이벤트 바인딩 — delegates via EventBus
         const verifyBtns = this.overlay.querySelectorAll('.toki-form-verify-btn');
         verifyBtns.forEach(btn => {
-            btn.onclick = () => {
+            btn.onclick = async () => {
                 const targetId = btn.getAttribute('data-target');
                 const resultEl = this.overlay.querySelector('#verify-' + targetId);
                 if (!resultEl) return;
@@ -966,20 +963,19 @@ export class FormRuleEditor {
                 resultEl.textContent = '⏳ 파싱 검증 중...';
 
                 this.updateJsonPreview();
-                const requestId = Date.now().toString(36) + '_' + targetId;
-                const unsub = EventBus.on(EVT.VERIFY_RESULT, ({ id, cssClass, msg }) => {
-                    if (id !== requestId) return;
-                    unsub();
-                    resultEl.classList.add(cssClass);
-                    resultEl.textContent = msg;
-                });
-
-                EventBus.emit(EVT.PARSE_VERIFY, {
-                    requestId,
-                    targetId,
-                    rule: this.rules[this.currentRuleIndex],
-                    domain: window.location.origin
-                });
+                try {
+                    const data = await EventBus.request(EVT.PARSE_VERIFY, {
+                        targetId,
+                        rule: this.rules[this.currentRuleIndex],
+                        domain: window.location.origin
+                    }, 15000);
+                    
+                    resultEl.classList.add('success');
+                    resultEl.textContent = data.msg;
+                } catch (err) {
+                    resultEl.classList.add('error');
+                    resultEl.textContent = err.message;
+                }
             };
         });
 

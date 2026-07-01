@@ -34,6 +34,9 @@ try {
     console.log('🧪 [Test Runner] 실환경 시나리오 모사 테스트(test-real-env.js)를 기동합니다...');
     execSync('node src/core/test-real-env.js', { stdio: 'inherit' });
 
+    console.log('📋 [Test Runner] 정적 코드 검증(test/static-verify.mjs)을 수행합니다...');
+    execSync('node test/static-verify.mjs', { stdio: 'inherit' });
+
 } catch (err) {
     console.error('❌ [Test Runner] 테스트 실행 중 에러 발생:', err.message);
     process.exitCode = 1;

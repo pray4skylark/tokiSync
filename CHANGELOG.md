@@ -2,11 +2,95 @@
 
 All notable changes to this project will be documented in this file.
 
-## [v1.26.0] - 2026-06-29
+## [v1.26.4] - 2026-07-01
 
-### ✨ EventBus 아키텍처 결합 완화, Kavita 연동 및 규칙 구독/인스펙터 도입
-- **EventBus 기반 UI/Core 모듈 분리**: UI(`FormRuleEditor` 등)와 Core/Parser 모듈 간의 Direct Import 강결합을 해소하기 위해 `EventBus` 이벤트를 신설하고, 중계 역할을 담당하는 전역 리스너 `listeners.js`를 구축하였습니다.
-- **Kavita 폴더 구조 호환 변환기**: 구글 드라이브 라이브러리를 Kavita 표준 폴더 구조에 맞추어 스캔 및 복구할 수 있는 백엔드 API(`View_KavitaService.gs`) 및 프론트엔드 연동 헬퍼(`useKavita.js`)를 통합 안착시켰습니다.
+### 🛠️ Local/Drive Download Pipeline Consolidation
+- **`src/core/downloader.js`**:
+  - **Unified Queue Delegation**: Simplified the scheduling branch condition (`!currentIsSingleVolume`) to route both local downloads (`local` / `native`) and drive uploads (`drive` / `drive_kavita`) through the centralized batch queue scheduler. This effectively deprecates the buggy, error-prone Sequential iFrame/popup reuse loops for individual local downloads, aligning the entire codebase under a single, robust scheduling engine.
+- **`src/core/worker-controller.js`**:
+  - **Dynamic Filename Parsing & Save Dispatch**: Refactored `handleBatchSuccess()` to dynamically format the local destination filename using the user's `localNameTemplate` (fetched directly from config to avoid `undefined` queue properties).
+  - **Save Target Normalization**: Resolved a critical failure case by mapping `drive_kavita` to `'drive'` before calling `saveFile()`, matching the exact save API signatures and avoiding silent download skips.
+  - **Liveness Reset Hotfix**: Synchronously updated `lastActivity` with `Date.now()` upon receiving `WORKER_READY` in both single-mode (L131) and batch-mode (L744) handlers, resetting the 60s timeout countdown to prevent premature worker failures during the safety delays.
+
+## [v1.26.3] - 2026-06-30
+
+### 🐛 Worker Scroll Hang (40%) and Log Mirroring Fix
+- **`src/core/utils.js`**:
+  - **Worker Log Proxy**: Implemented log mirroring proxy using `window.opener.postMessage` under worker context, solving the issue where worker detailed scrolling logs (`[Scroll] Page [X / Y] ...`) were trapped in the worker's local `LogBox` instance and not mirrored to the parent UI dashboard.
+  - **Virtualization Timeout Optimization**: Implemented a 1-second (`1000ms * multiplier`) early exit bypass for elements in the virtualized image container that do not transition to standard `img` tags (e.g. ads, comment sections, whitespace div spacers). This prevents stalling the scrolling loop for 4 seconds per non-image element, dramatically increasing scrolling extraction speed.
+
+### ✨ Log Custom Template and Debug Tag Hiding
+- **`src/core/ui/LogBox.js`**:
+  - **Dynamic Log Template**: Added template parsing support (`config.logTemplate`) to customize output message structure.
+  - **Debug Tag Hiding**: Automatically filters out internal debug tags (e.g. `[Worker:Batch]`, `[DOM:Scroll]`, `[GAS:Cache]`, etc.) from the dashboard log list when `logLevel` is not set to `debug` or `normal`, providing a clean user log interface while maintaining full prefix logs in developer devtools console output.
+
+### 🐛 False Positive Batch Collection Timeout Fix
+- **`src/core/worker-controller.js`**:
+  - **Liveness Tracking**: Explicitly updates `lastActivity` using `updateQueueItem()` in the IPC event handlers for `WORKER_LOG` and `WORKER_PROGRESS`. This resolves false positive batch timeouts (where scrolling taking longer than 60s caused a recovery restart) by continually resetting the 60s limit as long as the worker sends scrolling logs.
+  - **Upload Handover Liveness Bypass**: Prevented active worker manual closure checks from triggering recovery restarts if the episode is currently in the `UPLOADING` or `COMPLETED` stages. This resolves a race condition where the scraper closed the popup normally upon extraction success, but the background liveness tracker immediately flagged the closed state as an anomaly during the file packaging/uploading phases.
+  - **Enhanced Upload Visibility**: Emitted dashboard `EVT.LOG` messages for archive compilation (`📦 [Episode] compressing...`) and Google Drive upload initialization (`🚀 [Episode] uploading... (X.X MB)`) to give users immediate feedback about background processing after the child window closes.
+
+### 🧹 Queue Actions Consolidation and Sandbox Dialog Crash Fix
+- **`src/core/ui/MenuModal.js`**:
+  - **Button Consolidation**: Consolidated the 🧹 (clean completed items) and 🗑️ (reset queue) buttons into a single 🗑️ (clear entire queue) button to simplify the queue UI and workflow.
+  - **Direct Core Invocations**: Refactored the UI control listeners for queue actions (reset, pause, stop, and individual item deletion) to directly invoke imported functions from `queue.js` (e.g. `stopAllWorkers()`, `setQueuePaused()`, and `removeQueueItem()`) rather than emitting indirect EventBus events. This permanently resolves cross-window sandbox execution isolation that previously caused EventBus control signals to get lost.
+  - **Sandbox Safe Dialogs**: Restored dialogue context from native `confirm/alert` to `popupWindow.confirm/alert` to prevent browser silent blocking caused by focus-loss.
+- **`src/core/queue.js`**:
+  - **Liveness Lock Prevention**: Removed `GM_deleteValue(STORAGE_KEY)` during soft queue resets, standardizing on writing a clean empty array (`saveRawQueue([])`) to prevent liveness-monitoring tab races and listener value parsing errors.
+  - **Deprecated Methods Removal**: Cleaned up the unused `removeCompletedItems` helper and `EVT.QUEUE_CLEAR` event listener.
+- **`src/core/worker-controller.js` & `src/core/queue.js`**:
+  - **Pause Timeout Protection**: Skipped liveness timeout evaluation when the queue is paused (`getQueuePaused() === true`). Additionally, updated `setQueuePaused()` to reset the `lastActivity` timestamp to `Date.now()` for all active (`processing`) items when resuming (unpausing), preventing instant false-positive timeouts right after unpausing.
+
+## [v1.26.2] - 2026-06-30
+
+### 🐛 H1: Queue Write Monopoly Violation Fix
+- **`src/core/downloader.js`**: `processItem()` 내 직접 `updateQueueItem()` 호출 3곳(L66, L101, L145)을 `EventBus.emit(EVT.QUEUE_ITEM_UPDATE, { id, updates })`로 변경. AGENTS.md 규칙 "Only worker-controller.js (parent) writes queue state" 준수.
+- **`src/core/queue.js`**: `initQueueScheduler()` 내 `EventBus.on(EVT.QUEUE_ITEM_UPDATE)` 리스너 추가. 외부 모듈의 상태 변경 요청을 queue 모듈이 전담 처리하여 write monopoly 유지.
+
+### 🐛 H2: Dual-writer Race (Single-volume) Fix
+- **`src/core/downloader.js`**: `processItem()` 시작 시 `activeWorkers.set(id, { type: 'single-volume' })` 등록. finally 블록에서 `activeWorkers.delete(id)` 항상 실행.
+- **효과**: 스케줄러의 `activeWorkers.has(nextItem.id)` 중복 기동 가드가 단일 볼륨 경로도 인지 가능. 동일 아이템에 대한 popup 중복 실행 방지.
+
+### ℹ️ C3: IPC listenerId Collision — Already Fixed
+- `worker-controller.js` L235: `single_attempt_${queueId}` (고유 ID per queue)
+- `worker-controller.js` L951: `'batch_controller'` (고정 ID)
+- 두 리스너가 서로 다른 listenerId를 사용하므로 충돌 없음. 추가 수정 불필요.
+
+### 🔧 EventBus
+- **`src/core/EventBus.js`**: `QUEUE_ITEM_UPDATE: 'queue:item_update'` 이벤트 상수 추가.
+
+## [v1.26.1] - 2026-06-30
+
+### 🔒 C4/H12: IPC Message Security — Nonce-based Session Token System
+- **`src/core/ipc-broker.js`**: 
+  - **H12 fix**: Added nonce-based session token system. `postMessage` still uses `'*'` for Tampermonkey `about:blank` popups (origin="null"), but every message now carries a cryptographically random 64-char hex nonce. Messages without valid nonces are rejected.
+  - **C4 fix**: Added origin validation in IPC listener handler — rejects messages from non-null origins that don't match `window.location.origin`. Combined with nonce validation, this provides 3-layer defense: (1) origin check, (2) nonce validation, (3) `event.source` verification.
+  - New exports: `registerWorkerOrigin(workerId, origin)`, `removeWorkerOrigin(workerId, nonce)`, `validateNonce(nonce)`, `getWorkerOrigin(workerId)`.
+  - `registerIpcListener` now accepts options object with `requireNonce` flag (backward compatible with legacy string `listenerId` parameter).
+  - `sendToWorker` and `sendToParent` accept optional `nonce` parameter, included in message payload.
+- **`src/core/worker-controller.js`**:
+  - Single worker mode: generates session nonce on popup open via `registerWorkerOrigin()`, includes `sessionNonce` in `START_EXTRACTION` payload, invalidates nonce on success/failure/close.
+  - Batch worker mode: same nonce lifecycle per worker in `activeWorkers` Map. Nonces tracked in `batchWorkerNonces` Map, cleaned up on timeout, manual close, success, and failure.
+- **`src/viewer/composables/useBridge.js`**:
+  - **C4 fix**: Added origin validation in message handler — rejects messages from untrusted origins (only accepts `null`, `''`, or `window.location.origin`).
+  - **H12 fix**: `bridgeFetch` now uses `window.opener.location.origin` as target origin when accessible, falling back to `'*'` only when cross-origin access is blocked.
+
+## [v1.26.0] - 2026-06-30
+
+### 🐛 C5/H8: GAS `index.json` 동시 쓰기 레이스 컨디션 수정
+- **`src/gas/View_LibraryService.gs`**: `withIndexLock(folderId, modifyFn)` 헬퍼 추가. `LockService.getScriptLock()`으로 read-modify-write 전체를 원자화. 15초 타임아웃, 3회 재시도. `SweepMergeIndex()`와 `View_updateMetadata()`의 index.json 접근을 이 헬퍼로 통합. 기존 `View_saveIndex()` 직접 호출 제거.
+- **`src/gas/SyncService.gs`**: `updateLibraryStatus()`의 read-modify-write를 `withIndexLock()`으로 래핑. 기존 수동 Drive 읽기/쓰기 로직 제거.
+- **레이스 시나리오**: 크론(SweepMergeIndex) + 사용자(View_updateMetadata/updateLibraryStatus) 동시 요청 시 서로의 변경을 덮어쓰던 문제 해결. GAS `LockService`는 스크립트 전체 글로벌 락이므로 동일 프로젝트 내 모든 .gs 파일에서 공유됨.
+
+### 🐛 Hotfix: `logger.init is not a function` 런타임 크래시 수정
+- **`src/core/logger.js`**: 추상화 레이어에 누락된 `init()` 빈 메서드 추가. `v1.26.0` 리팩토링에서 `downloader.js`의 `logger.init()` 호출이 신규 logger 객체에 포팅되지 않아 발생한 `TypeError` 해결. LogBox 초기화는 `main.js`에서 이미 수행되므로 no-op으로 충분.
+
+### ✨ EventBus 아키텍처 결합 완화, 비동기 요청-응답 패턴 및 로거 디커플링 통합 릴리즈
+- **Promise 기반 비동기 요청-응답(Request-Response) 패턴 구현**: 기존의 단방향 통신 후 동적 임시 리스너 대기 루프 형식을 폐기하고, Promise로 래핑된 `EventBus.request()` 및 `EventBus.respond()` 메커니즘을 구축하여 파서 검증(`PARSE_VERIFY`) 및 추출 테스트(`PARSE_TEST`) 트랜잭션 흐름을 일차원 동기식 제어 구조로 일원화했습니다.
+- **리스너 자가 소거 및 타임아웃 가드 탑재**: 비동기 `request` 요청 시 지정된 타임아웃(기본 15초/테스트 30초) 만료 즉시 타이머를 해제하고 동적으로 생성된 일시적 리스너를 강제 해제(cleanup)하는 클린업 파이프라인을 구축하여 메모리 누수와 UI 데드락 위험을 원천 해결했습니다.
+- **중간 로깅 추상화 레이어(logger.js) 신설**: 코어 비즈니스 모듈(`downloader`, `extractor`, `gas`, `network`, `cbz`, `epub`, `main`)이 UI 단일 객체인 `LogBox`를 다이렉트로 임포트하던 레이어 경계 위반(Layer Boundary Violation) 결함을 해소하고자 중간 대리자 `logger.js`를 신설했습니다. 모든 코어 엔진은 `logger` 인터페이스만을 바라보고, 실제 처리는 `EventBus.emit(EVT.LOG)`를 거쳐 `LogBox`가 간접 수신 렌더링하도록 강결합을 해소했습니다.
+- **사문화된 백업 디렉토리(old_core) 소거**: `src/old_core/` 내 잔재하던 11개의 미사용 레거시 백업 소스코드 파일을 완전히 제거하여 빌드 대상 및 컴파일 영역을 최적화했습니다.
+- **테스트 환경 브리지(Bridge) 보강**: `test-real-env.js` 테스트 가상 런타임(Node.js)에 `initQueueScheduler`를 직접 가동하고 가상 `localStorage` 모의 객체를 이식함으로써 크로스 윈도우 스코프 중계 검증 시나리오가 100% 정상 가동 및 Pass하도록 수정했습니다.
 - **규칙 편집기(FormRuleEditor) 폼 리뉴얼**: 난해했던 트리뷰 에디터(`TreeRuleEditor.js`)를 전격 폐기하고, 더욱 간결하며 직관적인 폼 편집 인터페이스(`FormRuleEditor.js`) 및 스타일링을 전면 적용하였습니다.
 - **크롬 DevTools 스타일 DOM 인스펙터**: 수집 규칙 작성 시 직접 요소를 클릭하여 대상 CSS 셀렉터를 즉시 식별할 수 있는 시각적 검사 도구 `DomInspector.js`를 개발 및 통합했습니다.
 - **원격 규칙 구독 관리자**: 규칙의 외부 갱신을 위해 구독 설정과 동기화를 지원하는 `SubscriptionManager.js` 모듈을 도입하였습니다.

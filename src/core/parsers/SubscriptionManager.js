@@ -110,7 +110,7 @@ export class SubscriptionManager {
                     results.push({ url: sub.url, status: 'updated', count: result.rules.length });
                 }
             } catch (err) {
-                sub.lastFetched = Date.now(); // don't retry immediately on error
+                sub.lastFetched = Date.now() - 86400000 + 300000; // 5min cooldown instead of 24h
                 results.push({ url: sub.url, status: 'error', error: err.message });
             }
         }

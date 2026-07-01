@@ -142,29 +142,6 @@ body {
   color: #f4f4f5 !important;
 }
 
-/* Navigation Click Zones */
-.nav-zone {
-  position: fixed;
-  top: 0;
-  bottom: 0;
-  z-index: 45;
-}
-.nav-left {
-  left: 0;
-  width: 15%;
-  cursor: w-resize;
-}
-.nav-right {
-  right: 0;
-  width: 15%;
-  cursor: e-resize;
-}
-.nav-center {
-  left: 15%;
-  right: 15%;
-  cursor: pointer;
-}
-
 /* Transitions */
 .fade-enter-active,
 .fade-leave-active {

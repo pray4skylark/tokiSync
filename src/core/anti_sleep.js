@@ -68,9 +68,12 @@ export function stopSilentAudio() {
         }
         
         if (audioContext) {
-            audioContext.close().then(() => {
-                audioContext = null;
+            const ctx = audioContext;
+            audioContext = null;
+            ctx.close().then(() => {
                 console.log('🔇 [Anti-Sleep] Audio stopped');
+            }).catch(e => {
+                console.warn('[Anti-Sleep] close error:', e);
             });
         }
     } catch (e) {

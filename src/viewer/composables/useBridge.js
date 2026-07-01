@@ -3,6 +3,8 @@
  * Handles communication between Viewer (Web Page) and UserScript (extension context).
  * - Zero-Config: Receives TOKI_CONFIG from UserScript automatically.
  * - Proxy Fetch: Routes requests through UserScript's GM_xmlhttpRequest to bypass CORS.
+ *
+ * Security: Origin validation for postMessage (C4 + H12 fixes).
  */
 import { ref, onUnmounted } from 'vue';
 
@@ -55,6 +57,13 @@ function initBridge(onConfigReceived) {
   _messageHandler = (event) => {
     const { type } = event.data || {};
 
+    // C4 fix: Origin validation — reject messages from untrusted origins
+    // Tampermonkey popups have origin="null" (about:blank), which is expected
+    if (event.origin !== 'null' && event.origin !== '' && event.origin !== window.location.origin) {
+      console.warn(`[Bridge] Blocked message from untrusted origin: ${event.origin}`);
+      return;
+    }
+
     // Zero-Config Handshake
     if (type === 'TOKI_CONFIG') {
       const { url, folderId, apiKey } = event.data;
@@ -87,13 +96,21 @@ async function bridgeFetch(url, options = {}) {
   return new Promise((resolve, reject) => {
     pendingRequests.set(requestId, { resolve, reject });
 
+    // H12 fix: Use opener's origin when accessible, fallback to '*' for cross-origin
+    let targetOrigin = '*';
+    try {
+      targetOrigin = window.opener.location.origin || '*';
+    } catch (e) {
+      // Cross-origin access to location.origin is blocked
+    }
+
     // Send Request to UserScript
     window.opener.postMessage({
       type: 'TOKI_BRIDGE_REQUEST',
       requestId: requestId,
       url: url,
       options: options,
-    }, '*');
+    }, targetOrigin);
 
     // Timeout safety (30s)
     setTimeout(() => {

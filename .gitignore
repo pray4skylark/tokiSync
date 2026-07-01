@@ -42,3 +42,6 @@ tools/
 # Local Analysis Images (Private)
 documentation/분석/북토끼*.png
 
+# Vite build target exclusion
+dist-viewer/
+

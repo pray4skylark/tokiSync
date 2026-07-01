@@ -8,7 +8,7 @@ import { EventBus, EVT } from './EventBus.js';
 import { ParserFactory } from './parsers/ParserFactory.js';
 
 // ── Parser Verify (FormRuleEditor 🔍 button) ──
-EventBus.on(EVT.PARSE_VERIFY, async ({ requestId, targetId, rule, domain }) => {
+EventBus.on(EVT.PARSE_VERIFY, async ({ _requestId, targetId, rule, domain }) => {
     try {
         const { GenericParser } = await import('./parsers/GenericParser.js');
         const parser = new GenericParser(domain, rule);
@@ -73,14 +73,14 @@ EventBus.on(EVT.PARSE_VERIFY, async ({ requestId, targetId, rule, domain }) => {
             }
         }
 
-        EventBus.emit(EVT.VERIFY_RESULT, { id: requestId, cssClass: 'success', msg });
+        EventBus.respond(EVT.PARSE_VERIFY, _requestId, { ok: true, data: { msg } });
     } catch (err) {
-        EventBus.emit(EVT.VERIFY_RESULT, { id: requestId, cssClass: 'error', msg: `❌ 실패: ${err.message}` });
+        EventBus.respond(EVT.PARSE_VERIFY, _requestId, { ok: false, error: err.message });
     }
 });
 
 // ── Parser Test (FormRuleEditor 🧪 button) ──
-EventBus.on(EVT.PARSE_TEST, async ({ requestId, url, rule, category }) => {
+EventBus.on(EVT.PARSE_TEST, async ({ _requestId, url, rule, category }) => {
     try {
         const [{ GenericParser }, { extractEpisodeData }] = await Promise.all([
             import('./parsers/GenericParser.js'),
@@ -95,9 +95,9 @@ EventBus.on(EVT.PARSE_TEST, async ({ requestId, url, rule, category }) => {
             <div>• 제목: <strong>${result.title || '미추출'}</strong></div>
             <div>• 총 에피소드 수: <strong>${result.urls?.length || (result.content ? '1 (Text)' : '0')}개</strong></div>
         `;
-        EventBus.emit(EVT.TEST_RESULT, { id: requestId, html });
+        EventBus.respond(EVT.PARSE_TEST, _requestId, { ok: true, data: { html } });
     } catch (e) {
-        EventBus.emit(EVT.TEST_RESULT, { id: requestId, html: `<div class="toki-text-danger">❌ 실패: ${e.message}</div>` });
+        EventBus.respond(EVT.PARSE_TEST, _requestId, { ok: false, error: e.message });
     }
 });
 

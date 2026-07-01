@@ -1,5 +1,5 @@
 import { waitForContent, scrollToLoad, sleep } from './utils.js';
-import { LogBox } from './ui/index.js';
+import { logger } from './logger.js';
 import { fetchNovelText } from './worker-controller.js';
 
 /**
@@ -13,7 +13,6 @@ import { fetchNovelText } from './worker-controller.js';
  * @returns {Promise<Object>} 추출 결과 { urls: string[], content: string, title: string, episodeTitle: string }
  */
 export async function extractEpisodeData(targetDoc, parser, siteInfo, isStaticDoc = false, episodeUrl = null) {
-    const logger = LogBox.getInstance();
     const isNovel = (siteInfo.category === 'Novel' || siteInfo.category === 'novel');
     const viewerCfg = parser.rule.viewer || {};
 

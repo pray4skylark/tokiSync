@@ -31,8 +31,8 @@ export class CbzBuilder {
 
             return zip;
         } catch (e) {
-            const { LogBox } = await import('./ui/index.js');
-            LogBox.getInstance().critical(`CBZ 빌드 실패: ${e.message} (${metadata.title || 'unknown'})`, 'Builder:CBZ');
+            const { logger } = await import('./logger.js');
+            logger.critical(`CBZ 빌드 실패: ${e.message} (${metadata.title || 'unknown'})`, 'Builder:CBZ');
             throw e;
         }
     }
@@ -57,13 +57,15 @@ export class CbzBuilder {
     }
 
     escapeXml(unsafe) {
-        return unsafe.replace(/[<>&"']/g, (c) => {
+        if (unsafe === null || unsafe === undefined) return '';
+        return String(unsafe).replace(/[<>&"']/g, (c) => {
             switch (c) {
                 case '<': return '&lt;';
                 case '>': return '&gt;';
                 case '&': return '&amp;';
                 case '"': return '&quot;';
                 case "'": return '&apos;';
+                default: return c;
             }
         });
     }

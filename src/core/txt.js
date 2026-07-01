@@ -31,6 +31,8 @@ function cleanNovelParagraphs(html) {
     return text.trim();
 }
 
+import { EventBus, EVT } from './EventBus.js';
+
 export class TxtBuilder {
     constructor() {
         this.content = "";
@@ -55,8 +57,7 @@ export class TxtBuilder {
                 }
             };
         } catch (e) {
-            const { LogBox } = await import('./ui/index.js');
-            LogBox.getInstance().critical(`TXT 빌드 실패: ${e.message} (${metadata.title || 'unknown'})`, 'Builder:TXT');
+            EventBus.emit(EVT.LOG, { msg: `TXT 빌드 실패: ${e.message} (${metadata.title || 'unknown'})`, level: 'critical', tag: 'Builder:TXT' });
             throw e;
         }
     }

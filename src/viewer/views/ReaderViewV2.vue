@@ -186,8 +186,6 @@
         </div>
       </div>
     </transition>
-    <!-- Episode List Modal Integration -->
-    <EpisodeListModal />
 
   </main>
 </template>
@@ -204,7 +202,6 @@ import ScrollLayer from '../components/v2/ScrollLayer.vue';
 import PageLayer from '../components/v2/PageLayer.vue';
 import ImageRenderer from '../components/v2/ImageRenderer.vue';
 import TextRenderer from '../components/v2/TextRenderer.vue';
-import EpisodeListModal from '../components/EpisodeListModal.vue';
 
 const store = useStore();
 const {

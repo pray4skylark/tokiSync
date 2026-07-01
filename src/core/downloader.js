@@ -5,7 +5,8 @@ import { detectSite } from './detector.js';
 import { EpubBuilder } from './epub.js';
 import { CbzBuilder } from './cbz.js';
 import { TxtBuilder } from './txt.js';
-import { LogBox, Notifier, showProgressModal } from './ui/index.js';
+import { Notifier, showProgressModal } from './ui/index.js';
+import { logger } from './logger.js';
 import { getConfig, isConfigValid, SLEEP_MULTIPLIERS } from './config.js';
 import { EventBus, EVT } from './EventBus.js';
 import { startSilentAudio, stopSilentAudio } from './anti_sleep.js';
@@ -30,19 +31,19 @@ async function shouldSkipEpisode({
     const numPlain = parseInt(numStr).toString();
     if (uploadedHistorySet.size > 0 && (uploadedHistorySet.has(numStr) || uploadedHistorySet.has(numPlain))) {
         if (logOnSkip) {
-            LogBox.getInstance().log(`⏭️ 건너뜀 (이미 업로드됨): ${episodeTitle}`);
+            logger.log(`⏭️ 건너뜀 (이미 업로드됨): ${episodeTitle}`);
         }
         return true;
     }
     
     if (historyCheckTimeoutFlag && historyFolderId) {
         if (logOnSkip) {
-            LogBox.getInstance().log(`🔍 [페일세이프] 타임아웃 2차 단일 로컬/원격 검사 중: ${episodeTitle}`);
+            logger.log(`🔍 [페일세이프] 타임아웃 2차 단일 로컬/원격 검사 중: ${episodeTitle}`);
         }
         const isUploaded = await checkSingleHistoryDirect(historyFolderId, numStr);
         if (isUploaded) {
             if (logOnSkip) {
-                LogBox.getInstance().log(`⏭️ [페일세이프 재검사] 건너뜀 (이미 업로드됨): ${episodeTitle}`);
+                logger.log(`⏭️ [페일세이프 재검사] 건너뜀 (이미 업로드됨): ${episodeTitle}`);
             }
             return true;
         }
@@ -56,14 +57,15 @@ export async function processItem(item, builder, siteInfo, iframe, parser, serie
     const isNovel = (category === 'Novel' || category === 'novel');
     const viewerCfg = parser.rule.viewer || {};
 
-    const logger = LogBox.getInstance();
     const config = getConfig();
     const multiplier = SLEEP_MULTIPLIERS[config.sleepMode] || SLEEP_MULTIPLIERS.cautious;
 
     const id = getQueueItemId(seriesTitle, item.num ? item.num.toString() : '');
     
-    // 상태를 'processing'으로 올려 즉시 실시간 수집 연동 시작 (단일/로컬 워커 진행률 연동용)
-    updateQueueItem(id, { status: 'processing', stage: WORKER_STAGE.INIT });
+    // [H1] Queue Write Monopoly: 상태 변경은 EventBus를 통해 queue.js로 위임
+    // [H2] activeWorkers 등록으로 스케줄러 중복 기동 방지 가드 활성화
+    EventBus.emit(EVT.QUEUE_ITEM_UPDATE, { id, updates: { status: 'processing', stage: WORKER_STAGE.INIT } });
+    activeWorkers.set(id, { type: 'single-volume' });
 
     const finalRootFolder = rootFolder || seriesTitle || 'UnknownSeries';
 
@@ -97,8 +99,8 @@ export async function processItem(item, builder, siteInfo, iframe, parser, serie
                 builder.addChapter(item.title, result.trim());
                 logger.log(`✅ [부모 컨트롤러] 소설 추출 성공 (조립 적재 완료): ${item.title}`, 'Downloader');
                 
-                // 단일 합본용 큐 아이템 상태 갱신
-                updateQueueItem(id, { status: 'completed', progressPercent: 100, stage: WORKER_STAGE.COMPLETED });
+                // [H1] 단일 합본용 큐 아이템 상태 갱신 — EventBus 경유
+                EventBus.emit(EVT.QUEUE_ITEM_UPDATE, { id, updates: { status: 'completed', progressPercent: 100, stage: WORKER_STAGE.COMPLETED } });
                 EventBus.emit(EVT.UPDATE_PROGRESS);
                 
                 await sleep(1500 * multiplier, 1000 * multiplier);
@@ -141,8 +143,8 @@ export async function processItem(item, builder, siteInfo, iframe, parser, serie
                 builder.addChapter(item.title, resolvedImages);
                 logger.log(`✅ [부모 컨트롤러] 만화 이미지 추출 성공 (조립 적재 완료): ${item.title}`, 'Downloader');
                 
-                // 단일 합본용 큐 아이템 상태 갱신
-                updateQueueItem(id, { status: 'completed', progressPercent: 100, stage: WORKER_STAGE.COMPLETED });
+                // [H1] 단일 합본용 큐 아이템 상태 갱신 — EventBus 경유
+                EventBus.emit(EVT.QUEUE_ITEM_UPDATE, { id, updates: { status: 'completed', progressPercent: 100, stage: WORKER_STAGE.COMPLETED } });
                 EventBus.emit(EVT.UPDATE_PROGRESS);
 
                 await sleep(1500 * multiplier, 1000 * multiplier);
@@ -152,6 +154,9 @@ export async function processItem(item, builder, siteInfo, iframe, parser, serie
             }
         }
     } finally {
+        // [H2] activeWorkers 정리 — 단일/배치 무관하게 항상 실행
+        activeWorkers.delete(id);
+        
         // 단일 합본 및 배치 모드가 아닐 때만 즉시 큐 청소 (UI 지속 노출 보장)
         if (!isSingleVolume && buildingPolicy !== 'zipOfCbzs') {
             removeQueueItem(id);
@@ -184,8 +189,8 @@ export function parseRangeSpec(spec) {
 }
 
 export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = false) {
-    const logger = LogBox.getInstance();
     const config = getConfig();
+    let isAsyncDelegate = false;
     
     // --- 🚨 대기열 프리체크 스마트 필터 및 UI 위임 ---
     const currentQueue = getQueue();
@@ -365,7 +370,9 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                     const numKey = parseInt(ep.num).toString();
                     episodeTitles[numKey] = ep.title || "";
                 }
-            } catch (e) {}
+            } catch (e) {
+                logger.warn(`[Downloader] Episode title parse failed: ${e.message}`, 'Downloader');
+            }
         });
 
         // [v1.7.0] Collect detailed metadata for Phase 3 Persistence
@@ -386,6 +393,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
         // [v1.6.0 Update] Batch range is handled during saving, not in rootFolder variable
 
         // [v1.4.0] Upload Series Thumbnail (if uploading to Drive)
+        let historyFolderId = null;
         if (destination === 'drive' || destination === 'drive_kavita') {
             try {
                 const thumbnailUrl = parser.getThumbnailUrl();
@@ -396,9 +404,13 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                     // Upload as 'cover.jpg' - network.js will auto-redirect to _Thumbnails/{ID}.jpg
                     // saveFile(data, filename, type, extension, metadata)
                     // → fullFileName = "cover.jpg"
+                    const cleanSeries = seriesTitle.replace(/^\[[^\]]+\]\s*/, '');
+                    const targetFolder = destination === 'drive_kavita' ? cleanSeries : rootFolder;
                     await saveFile(thumbBlob, 'cover', 'drive', 'jpg', { 
                         category,
-                        folderName: rootFolder  // Target folder for upload
+                        folderName: targetFolder,
+                        destination: destination,
+                        folderId: historyFolderId || undefined
                     });
                     logger.success('✅ 썸네일 업로드 완료');
                 } else {
@@ -415,7 +427,6 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
         let episodeCacheMap = new Map(); // key: "0001 - Title", value: "fileId"
 
         let historyCheckTimeoutFlag = false;
-        let historyFolderId = null;
 
         if (destination === 'drive' || destination === 'drive_kavita') {
             try {
@@ -423,9 +434,9 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                     logger.log('⚠️ 강제 재다운로드 옵션 활성화: 기존 업로드 기록 무시 (전체 덮어쓰기)');
                 } else {
                     logger.log('☁️ 드라이브 업로드 기록 및 용량 확인 중 (Smart Skip)...');
-                    const cleanFolder = rootFolder.replace(/^\[\d+\]\s*/, '');
+                    const cleanFolder = rootFolder.replace(/^\[[^\]]+\]\s*/, '');
                     const targetFolder = destination === 'drive_kavita' ? cleanFolder : rootFolder;
-                    const histResult = await fetchHistoryDirect(targetFolder);
+                    const histResult = await fetchHistoryDirect(targetFolder, category);
                     
                     if (histResult.success) {
                         historyFolderId = histResult.folderId;
@@ -562,12 +573,17 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
             // [v1.21.4] 구글 드라이브 업로드 모드 시, 큐 등록 전 작품 폴더를 선제 생성/확정하여 큐 전파 (경쟁적 중복 폴더 생성 차단)
             let activeFolderId = historyFolderId;
             if ((destination === 'drive' || destination === 'drive_kavita') && !activeFolderId) {
-                const cleanSeries = seriesTitle.replace(/^\[\d+\]\s*/, '');
-                const targetFolder = destination === 'drive_kavita' ? cleanSeries : seriesTitle;
+                const cleanSeries = seriesTitle.replace(/^\[[^\]]+\]\s*/, '');
+                const targetFolder = destination === 'drive_kavita' ? cleanSeries : rootFolder;
                 logger.log(`📁 [Drive] 신규 작품 폴더 선제 생성 중: ${targetFolder}`);
                 try {
                     const token = await getOAuthToken();
-                    activeFolderId = await getOrCreateFolder(targetFolder, getConfig().folderId, token);
+                    let parentFolderId = getConfig().folderId;
+                    if (destination === 'drive' || destination === 'drive_kavita') {
+                        const categoryFolder = category || 'Webtoon';
+                        parentFolderId = await getOrCreateFolder(categoryFolder, getConfig().folderId, token);
+                    }
+                    activeFolderId = await getOrCreateFolder(targetFolder, parentFolderId, token);
                     logger.success(`📁 [Drive] 신규 작품 폴더 선제 생성 완료 -> ID: ${activeFolderId}`);
                 } catch (folderErr) {
                     logger.error(`❌ [Drive] 폴더 선제 생성 중 에러 발생: ${folderErr.message}`);
@@ -584,8 +600,8 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
             logger.log(`🗂️ [공통 큐] 수집 대상 ${injected}개 에피소드를 대기열에 선등록 완료.`, 'Queue');
         }
 
-        // [v1.21.0] 차세대 자율형 멀티큐 배치 수집기 기동 가교 (구글 드라이브 업로드 전용 비동기 스케줄러 라우팅)
-        if ((destination === 'drive' || destination === 'drive_kavita') && !currentIsSingleVolume) {
+        // [v1.26.4] 소설 합본 모드를 제외한 모든 다운로드 정책을 신뢰성 높은 배치 큐 파이프라인으로 대통합
+        if (!currentIsSingleVolume) {
             logger.log(`🚦 [멀티큐] 차세대 자율형 멀티큐 배치 수집기(v1.21.0) 가동 준비...`, 'Queue');
 
             // 팝업 차단 회피용 동기적 자식 창 사전 오픈 (Pre-open)
@@ -626,6 +642,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                 logger.success(`🚦 멀티큐 스케줄러 기동 완료. 릴레이 루프 활성화.`, 'Queue');
                 initBatchWorkerController();
                 initQueueScheduler();
+                isAsyncDelegate = true;
             } else {
                 logger.error(`❌ 선제 확보된 자식 창이 없어 큐 수집을 중지합니다.`, 'Queue');
                 stopSilentAudio();
@@ -761,7 +778,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                 let fullFilename;
                 if (destination !== 'drive') {
                     const template = config.localNameTemplate || "{number:4} - {title}";
-                    const cleanSeries = (seriesTitle || rootFolder || '').replace(/^\[\d+\]\s*/, '');
+                    const cleanSeries = (seriesTitle || rootFolder || '').replace(/^\[[^\]]+\]\s*/, '');
                     
                     // 1. Dynamic padding {number:X} support
                     fullFilename = template.replace(/\{number:(\d)\}/g, (match, p1) => {
@@ -971,7 +988,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
 
         // [v1.5.5] 배치 완료 후 Drive 캐시 단일 갱신 (에피소드마다 호출하지 않음)
         if (destination === 'drive' || destination === 'drive_kavita') {
-            const cleanFolder = rootFolder.replace(/^\[\d+\]\s*/, '');
+            const cleanFolder = rootFolder.replace(/^\[[^\]]+\]\s*/, '');
             const targetFolder = destination === 'drive_kavita' ? cleanFolder : rootFolder;
             refreshCacheAfterUpload(targetFolder, category, seriesMetadata).catch(e =>
                 logger.warn(`캐시 갱신 호출 중 실패 (무시): ${e.message}`, 'GAS:Cache')
@@ -989,9 +1006,13 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
         logger.error(`전체 다운로드 루틴 오류 발생: ${error.message}`, 'System');
         alert(`다운로드 중 오류 발생:\n${error.message}`);
     } finally {
-        // Auto-stop Anti-Sleep mode
-        stopSilentAudio();
-        logger.log('[Anti-Sleep] 백그라운드 모드 자동 종료');
+        if (!isAsyncDelegate) {
+            // Auto-stop Anti-Sleep mode
+            stopSilentAudio();
+            logger.log('[Anti-Sleep] 백그라운드 모드 자동 종료');
+        } else {
+            console.log('[Anti-Sleep] 비동기 멀티큐 배치 위임으로 안티 슬립 상태를 지속 유지합니다.');
+        }
         
         // [Cleanup 팝업 세션] 다운로드 종료 후 액티브 팝업 폐쇄
         try {
@@ -1013,7 +1034,6 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
  * @private
  */
 async function generateDownloadReport(seriesTitle, seriesId, listCount, failedEpisodes, partialFailures) {
-    const logger = LogBox.getInstance();
     if (failedEpisodes.length === 0 && partialFailures.length === 0) return;
 
     logger.warn(`⚠️ 다운로드 중 일부 오류가 발견되었습니다. 리포트를 생성합니다.`, 'System');

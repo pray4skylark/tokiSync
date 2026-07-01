@@ -94,7 +94,7 @@ function _kavitaProcessSeries(series, rootFolderId) {
       const content = DriveAccessService.getFileContent(metaResults[0].id);
       const meta = JSON.parse(content);
       alreadyRestructured = meta._restructured === true;
-    } catch (e) {}
+    } catch (e) { Debug.error("[Kavita] processSeries error: " + e.message); }
   }
   
   if (alreadyRestructured) {
@@ -164,9 +164,17 @@ function _kavitaMarkMigrated(folderId, seriesName) {
     });
     if (existing.length > 0) {
       const raw = DriveAccessService.getFileContent(existing[0].id);
-      meta = JSON.parse(raw);
+      try {
+        meta = JSON.parse(raw);
+      } catch (parseErr) {
+        Debug.error(`[Kavita] _toki_meta.json parse failed for ${seriesName}: ${parseErr.message}. Skip write to prevent data loss.`);
+        return;
+      }
     }
-  } catch (e) {}
+  } catch (e) {
+    Debug.error(`[Kavita] Drive access failed for ${seriesName}: ${e.message}`);
+    return;
+  }
 
   meta._restructured = true;
   meta._restructuredAt = new Date().toISOString();

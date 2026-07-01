@@ -5,6 +5,7 @@
 
 import { EventBus, EVT } from '../EventBus.js';
 import { FormRuleEditor } from './FormRuleEditor.js';
+import { stopAllWorkers, getQueuePaused, setQueuePaused, runSchedulerOnce, removeQueueItem } from '../queue.js';
 
 export class MenuModal {
     static instance = null;
@@ -244,6 +245,9 @@ export class MenuModal {
                             <button class="toki-btn-action toki-btn-lavender" id="toki-btn-form-editor">
                                 📝 간편 규칙 편집기 (Form Editor)
                             </button>
+                            <button class="toki-btn-action toki-btn-danger" id="toki-btn-hard-reset-queue">
+                                🚨 대기열 긴급 강제 초기화
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -263,8 +267,7 @@ export class MenuModal {
                             <span id="toki-progress-overall-text">진행률: 0% (0 / 0)</span>
                             <div id="toki-progress-overall-controls">
                                 <span id="toki-btn-queue-expand" title="대기열 크게 보기" class="toki-cursor-pointer toki-progress-btn">↕️</span>
-                                <span id="toki-btn-queue-clear" title="완료 항목 정리" class="toki-cursor-pointer toki-progress-btn">🧹</span>
-                                <span id="toki-btn-queue-reset" title="대기열 전체 삭제 (초기화)" class="toki-cursor-pointer toki-progress-btn">🗑️</span>
+                                <span id="toki-btn-queue-reset" title="대기열 전체 비우기 (작업 중단)" class="toki-cursor-pointer toki-progress-btn">🗑️</span>
                                 <span id="toki-btn-queue-pause" title="일시 정지" class="toki-cursor-pointer toki-progress-btn">⏸️</span>
                                 <span id="toki-btn-queue-stop" title="수집 중단" class="toki-cursor-pointer toki-progress-btn">⏹️</span>
                             </div>
@@ -297,11 +300,21 @@ export class MenuModal {
                 </div>
                 <div class="toki-dashboard-modal-content">
                     <div id="toki-dashboard-log-section" style="display: flex;">
-                        <div id="toki-log-header">
-                            <span>📋 실시간 수집 로그 모니터</span>
-                            <span id="toki-btn-log-clear" title="Clear Logs" class="toki-cursor-pointer" style="font-size: 12px; color: var(--toki-color-warning, #e6a23c); cursor: pointer;">🚫 비우기</span>
+                        <div class="toki-log-tabs">
+                            <button class="toki-log-tab-btn active" data-logtab="service">📋 서비스 로그</button>
+                            <button class="toki-log-tab-btn" data-logtab="debug">🛠️ 디버그 콘솔</button>
+                            <div class="toki-log-tabs-right">
+                                <button id="toki-btn-log-clear" title="Clear Logs">🚫 비우기</button>
+                            </div>
                         </div>
-                        <ul id="toki-logbox-content"></ul>
+                        <ul id="toki-logbox-content" class="toki-log-panel active"></ul>
+                        <div id="toki-debug-console" class="toki-log-panel">
+                            <div id="toki-debug-console-header">
+                                <button id="toki-btn-console-toggle" class="toki-console-toggle-btn on">■ 수집 중단</button>
+                                <span class="toki-console-status">TokiSync 디버그 로그 수집 중</span>
+                            </div>
+                            <ul id="toki-debug-console-content"></ul>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -362,7 +375,10 @@ export class MenuModal {
         const inlinePause = doc.getElementById('toki-inline-pause');
         if (inlinePause) {
             inlinePause.onclick = () => {
-                EventBus.emit(EVT.QUEUE_TOGGLE_PAUSE);
+                const p = getQueuePaused();
+                setQueuePaused(!p);
+                EventBus.emit(EVT.UPDATE_PROGRESS);
+                if (p) runSchedulerOnce();
             };
         }
 
@@ -370,7 +386,8 @@ export class MenuModal {
         if (inlineStop) {
             inlineStop.onclick = () => {
                 if (popupWindow.confirm('⚠️ 모든 배치 작업을 중단하시겠습니까?')) {
-                    EventBus.emit(EVT.QUEUE_STOP_ALL);
+                    stopAllWorkers(false);
+                    EventBus.emit(EVT.UPDATE_PROGRESS);
                 }
             };
         }
@@ -462,26 +479,19 @@ export class MenuModal {
                 if (deleteBtn) {
                     const itemId = deleteBtn.getAttribute('data-id');
                     if (popupWindow.confirm('선택한 에피소드를 대기열에서 제거하시겠습니까?')) {
-                        EventBus.emit(EVT.QUEUE_REMOVE_ITEM, { id: itemId });
+                        removeQueueItem(itemId);
+                        runSchedulerOnce();
+                        EventBus.emit(EVT.UPDATE_PROGRESS);
                     }
                     return;
                 }
 
-                // 9-2. 대기열 전체 삭제 (초기화) 🗑️
+                // 9-2. 대기열 전체 비우기 (초기화) 🗑️
                 const resetBtn = e.target.closest('#toki-btn-queue-reset');
                 if (resetBtn) {
                     if (popupWindow.confirm('🗑️ 대기열의 모든 에피소드를 즉시 완전히 삭제하시겠습니까?\n(진행 중인 작업도 모두 강제 중단됩니다)')) {
-                        EventBus.emit(EVT.QUEUE_STOP_ALL);
-                        EventBus.emit(EVT.QUEUE_CLEAR);
-                    }
-                    return;
-                }
-
-                // 9-3. 완료 정리 🧹
-                const clearBtn = e.target.closest('#toki-btn-queue-clear');
-                if (clearBtn) {
-                    if (popupWindow.confirm('🧹 완료된 항목들을 정리하시겠습니까?')) {
-                        EventBus.emit(EVT.QUEUE_CLEAR);
+                        stopAllWorkers(true);
+                        EventBus.emit(EVT.UPDATE_PROGRESS);
                     }
                     return;
                 }
@@ -489,7 +499,10 @@ export class MenuModal {
                 // 9-4. 일시 정지 ⏸️
                 const pauseBtn = e.target.closest('#toki-btn-queue-pause');
                 if (pauseBtn) {
-                    EventBus.emit(EVT.QUEUE_TOGGLE_PAUSE);
+                    const p = getQueuePaused();
+                    setQueuePaused(!p);
+                    EventBus.emit(EVT.UPDATE_PROGRESS);
+                    if (p) runSchedulerOnce();
                     return;
                 }
 
@@ -497,7 +510,8 @@ export class MenuModal {
                 const stopBtn = e.target.closest('#toki-btn-queue-stop');
                 if (stopBtn) {
                     if (popupWindow.confirm('⚠️ 모든 배치 작업을 중단하시겠습니까?')) {
-                        EventBus.emit(EVT.QUEUE_STOP_ALL);
+                        stopAllWorkers(false);
+                        EventBus.emit(EVT.UPDATE_PROGRESS);
                     }
                     return;
                 }
@@ -633,6 +647,21 @@ export class MenuModal {
                 }
 
                 popupWindow.alert('설정이 저장되었습니다.');
+            };
+        }
+
+        const hardResetBtn = doc.getElementById('toki-btn-hard-reset-queue');
+        if (hardResetBtn) {
+            hardResetBtn.onclick = () => {
+                if (popupWindow.confirm('🚨 긴급 복원 경고 🚨\n\n대기열을 완전히 강제 초기화하고 돌고 있는 모든 팝업 워커 창을 강제 종료하시겠습니까? (이 작업은 되돌릴 수 없습니다)')) {
+                    try {
+                        stopAllWorkers(true);
+                        popupWindow.alert('대기열이 성공적으로 강제 초기화되었습니다.');
+                        EventBus.emit(EVT.UPDATE_PROGRESS);
+                    } catch (e) {
+                        popupWindow.alert('초기화 실패: ' + e.message);
+                    }
+                }
             };
         }
 

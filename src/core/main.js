@@ -1,7 +1,8 @@
 import { tokiDownload, processItem } from './downloader.js';
 import { detectSite } from './detector.js'; 
 import { getConfig, setConfig, isConfigValid } from './config.js';
-import { LogBox, MenuModal } from './ui/index.js';
+import { MenuModal, LogBox } from './ui/index.js';
+import { logger } from './logger.js';
 import { extractEpisodeData } from './extractor.js';
 import { EpubBuilder } from './epub.js';
 import { CbzBuilder } from './cbz.js';
@@ -11,14 +12,69 @@ import { ParserFactory } from './parsers/ParserFactory.js';
 import { SubscriptionManager } from './parsers/SubscriptionManager.js';
 import { getOAuthToken, fetchHistoryDirect } from './network.js';
 
+import { EventBus, EVT } from './EventBus.js';
 import { getCommonPrefix, blobToArrayBuffer, saveFile } from './utils.js';
 
 export async function main() {
     console.log("🚀 TokiDownloader Loaded (New Core v1.20.5)");
-    
-    const logger = LogBox.getInstance();
 
-    // -- 0. Core Logic starts after helper function definitions --
+    // -- 0. Bootstrap UI Instances --
+    const _logbox = LogBox.getInstance();
+
+    // ── Console Log Interceptor ──
+    const _origConsole = {
+        log: console.log.bind(console),
+        warn: console.warn.bind(console),
+        error: console.error.bind(console)
+    };
+    let _forwarding = false;
+    let _consoleActive = true;
+
+    const CONSOLE_WHITELIST = [
+        '[TokiSync', '[WorkerController', '[DirectUpload', '[DirectHistory',
+        '[GAS]', '[Upload]', '[Local]', '[Native]',
+        '[Builder]', '[Cache]', '[Captcha]', '[ScrollEngine',
+        '[Bridge]', '[Debug ', '[Notification]'
+    ];
+
+    function _fmtArg(a) {
+        if (a instanceof Error) return a.stack || a.message;
+        if (typeof a === 'object') {
+            try { return JSON.stringify(a); } catch (_) { return String(a); }
+        }
+        return String(a);
+    }
+
+    function _makeHandler(level) {
+        return function (...args) {
+            _origConsole[level].apply(console, args);
+            if (_forwarding || !_consoleActive) return;
+            const msg = args.map(_fmtArg).join(' ');
+            if (!CONSOLE_WHITELIST.some(p => msg.startsWith(p))) return;
+            if (/^\[(info|warn|error|success|critical|debug)\]/.test(msg)) return;
+            _forwarding = true;
+            try {
+                EventBus.emit(EVT.LOG, {
+                    msg,
+                    level: level === 'log' ? 'info' : level,
+                    tag: 'Console'
+                });
+            } finally {
+                _forwarding = false;
+            }
+        };
+    }
+
+    console.log = _makeHandler('log');
+    console.warn = _makeHandler('warn');
+    console.error = _makeHandler('error');
+
+    _logbox._consoleInterceptor = {
+        setActive: (a) => { _consoleActive = a; },
+        getActive: () => _consoleActive
+    };
+
+    // -- Helper Functions for Menu Actions --
 
     // -- Helper Functions for Menu Actions --
 
@@ -258,7 +314,6 @@ export async function main() {
         },
         testExtraction: async () => {
             try {
-                const logger = LogBox.getInstance();
                 logger.show();
                 logger.log('🧪 추출 테스트 시작...', 'Debug');
                 
@@ -288,12 +343,11 @@ export async function main() {
                 }
 
             } catch (e) {
-                LogBox.getInstance().error(`❌ 테스트 실패: ${e.message}`, 'Debug');
+                logger.error(`❌ 테스트 실패: ${e.message}`, 'Debug');
                 console.error(e);
             }
         },
         downloadCurrent: async () => {
-            const logger = LogBox.getInstance();
             try {
                 logger.show();
                 logger.log('🚀 현재 에피소드 다운로드 시작...', 'System');

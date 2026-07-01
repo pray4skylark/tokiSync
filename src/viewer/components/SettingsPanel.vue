@@ -270,7 +270,7 @@
                   </button>
                   <button @click="reloadApp" class="w-full bg-theme-surface-hover border border-white/5 hover:border-theme-accent p-6 rounded-[24px] text-left transition-all flex items-center justify-between group">
                     <div class="flex flex-col">
-                      <span class="text-sm font-black text-theme-text uppercase">Relod Application</span>
+                      <span class="text-sm font-black text-theme-text uppercase">Reload Application</span>
                       <span class="text-[10px] text-theme-muted uppercase">앱 강제 새로고침</span>
                     </div>
                     <span class="text-xl group-hover:rotate-180 transition-transform duration-500">♻️</span>

@@ -5,16 +5,8 @@
       "args": [
         "-m",
         "graphify.serve",
-        "${workspaceFolder}/graphify-out/graph.json"
-      ],
-      "env": {}
-    },
-    "opencode": {
-      "command": "node",
-      "args": [
-        "${workspaceFolder}/tools/mcp-opencode-bridge.js"
-      ],
-      "env": {}
+        "/Users/pray4skylark/Documents/WorkSpace/tokiSync/graphify-out/graph.json"
+      ]
     }
   }
 }

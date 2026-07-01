@@ -8,10 +8,12 @@ export class GenericParser extends BaseParser {
     /**
      * @param {string} protocolDomain 
      * @param {Object} rule - The matched JSON rule object
+     * @param {Document} doc - Document context (defaults to global document)
      */
-    constructor(protocolDomain, rule) {
+    constructor(protocolDomain, rule, doc = document) {
         super(protocolDomain);
         this.rule = rule;
+        this._doc = doc;
     }
 
     /**
@@ -98,17 +100,18 @@ export class GenericParser extends BaseParser {
             if (ext.source === 'url' && ext.regex) {
                 try {
                     const regex = new RegExp(ext.regex, 'i');
-                    const match = document.URL.match(regex);
+                    const match = this._doc.URL.match(regex);
                     if (match) return match[1] || match[0];
                 } catch(e) {
                     console.warn('[GenericParser] Invalid idExtraction regex', e);
                 }
             } else if (ext.source === 'query' && ext.param) {
-                const params = new URLSearchParams(window.location.search);
+                const win = this._doc.defaultView || window;
+                const params = new URLSearchParams(win.location.search);
                 const val = params.get(ext.param);
                 if (val) return val;
             } else if (ext.source === 'dom' && ext.selector) {
-                const el = document.querySelector(ext.selector);
+                const el = this._doc.querySelector(ext.selector);
                 if (el) {
                     return ext.attr ? el.getAttribute(ext.attr) : el.innerText?.trim();
                 }
@@ -124,10 +127,11 @@ export class GenericParser extends BaseParser {
         };
         const targetWords = categorySynonyms[category] || [category];
         const dynamicPattern = new RegExp(`\\/(${targetWords.join('|')})\\/([a-zA-Z0-9_\\-]+)`, 'i');
-        const idMatch = document.URL.match(dynamicPattern);
+        const idMatch = this._doc.URL.match(dynamicPattern);
         let seriesId = idMatch ? idMatch[2] : null;
         if (!seriesId) {
-            const params = new URLSearchParams(window.location.search);
+            const win = this._doc.defaultView || window;
+            const params = new URLSearchParams(win.location.search);
             seriesId = params.get('id') || params.get('no') || params.get('comic_id') || params.get('toon');
         }
         return seriesId || "0000";
@@ -139,7 +143,7 @@ export class GenericParser extends BaseParser {
         // [v1.25.1] 스마트 컨테이너 검출: 동일한 셀렉터의 컨테이너가 여러 개 있을 때
         // 실제 회차 아이템(listCfg.item)을 하나 이상 가지고 있는 첫 번째 유효 컨테이너를 탐색합니다.
         let container = null;
-        const containers = Array.from(document.querySelectorAll(listCfg.container));
+        const containers = Array.from(this._doc.querySelectorAll(listCfg.container));
         if (containers.length > 0) {
             container = containers.find(c => c.querySelectorAll(listCfg.item).length > 0) || containers[0];
         }
@@ -301,22 +305,22 @@ export class GenericParser extends BaseParser {
 
     getThumbnailUrl() {
         const meta = this.rule.meta || {};
-        const thumb = this._extractValue(document, meta.thumb);
+        const thumb = this._extractValue(this._doc, meta.thumb);
         return thumb ? this.getAbsoluteUrl(thumb) : null;
     }
 
     getSeriesTitle() {
         const meta = this.rule.meta || {};
-        return this._extractValue(document, meta.title);
+        return this._extractValue(this._doc, meta.title);
     }
 
     getSeriesMetadata() {
         const meta = this.rule.meta || {};
         const vendorSlug = (this.rule.name || "").toLowerCase().replace(/[^a-z0-9]/g, '');
         return {
-            author: this._extractValue(document, meta.author) || "",
-            status: this._extractValue(document, meta.status) || "연재중",
-            summary: this._extractValue(document, meta.summary) || "",
+            author: this._extractValue(this._doc, meta.author) || "",
+            status: this._extractValue(this._doc, meta.status) || "연재중",
+            summary: this._extractValue(this._doc, meta.summary) || "",
             vendor: vendorSlug,
             vendorId: this.rule.id || vendorSlug
         };

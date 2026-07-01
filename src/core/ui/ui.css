@@ -338,6 +338,18 @@
     color: var(--toki-text) !important;
 }
 
+.toki-btn-danger {
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%) !important;
+    color: #ffffff !important;
+    border: none !important;
+    box-shadow: 0 4px 10px rgba(239, 68, 68, 0.2) !important;
+}
+
+.toki-btn-danger:hover {
+    background: linear-gradient(135deg, #f87171 0%, #ef4444 100%) !important;
+    box-shadow: 0 6px 15px rgba(239, 68, 68, 0.35) !important;
+}
+
 /* Status & Indicators */
 .toki-status-dot {
     width: 8px;
@@ -1280,9 +1292,10 @@
     background: transparent !important;
     height: 400px !important;
 }
-#toki-modal-logs #toki-logbox-content {
-    height: 350px !important;
-    max-height: 350px !important;
+#toki-modal-logs .toki-log-panel {
+    height: 330px !important;
+    max-height: 330px !important;
+    overflow-y: auto;
 }
 
 /* 대기열 모달 최대화 시의 너비 및 리스트 세로 높이 확장 */
@@ -1797,4 +1810,156 @@
     color: #64748b;
     flex: 1;
     text-align: right;
+}
+
+/* ── Log Tab Bar ── */
+.toki-log-tabs {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 8px;
+    flex-shrink: 0;
+}
+
+.toki-log-tab-btn {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid transparent;
+    padding: 4px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+    color: #94a3b8;
+    transition: all 0.15s;
+    font-family: inherit;
+}
+
+.toki-log-tab-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #e0e0e0;
+}
+
+.toki-log-tab-btn.active {
+    background: rgba(99, 102, 241, 0.15);
+    border-color: rgba(99, 102, 241, 0.3);
+    color: #a5b4fc;
+}
+
+.toki-log-tabs-right {
+    margin-left: auto;
+}
+
+.toki-log-tabs-right button {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 12px;
+    color: #e6a23c;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-family: inherit;
+    transition: color 0.15s;
+}
+
+.toki-log-tabs-right button:hover {
+    color: #f59e0b;
+}
+
+/* ── Log Panels ── */
+.toki-log-panel {
+    display: none !important;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+}
+
+.toki-log-panel.active {
+    display: flex !important;
+}
+
+/* ── Debug Console ── */
+#toki-debug-console-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+    flex-shrink: 0;
+}
+
+.toki-console-toggle-btn {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 3px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    color: #94a3b8;
+    font-family: inherit;
+    font-weight: 600;
+    transition: all 0.15s;
+}
+
+.toki-console-toggle-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.toki-console-toggle-btn.on {
+    color: #4ade80;
+    border-color: rgba(74, 222, 128, 0.3);
+}
+
+.toki-console-status {
+    font-size: 10px;
+    color: #64748b;
+}
+
+#toki-debug-console-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+    margin: 0;
+    list-style: none;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.03);
+    min-height: 280px;
+    font-family: 'Cascadia Code', Consolas, monospace;
+    font-size: 11px;
+}
+
+#toki-debug-console-content::-webkit-scrollbar {
+    width: 4px;
+}
+#toki-debug-console-content::-webkit-scrollbar-track {
+    background: transparent;
+}
+#toki-debug-console-content::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 999px;
+}
+
+#toki-debug-console-content li {
+    margin-bottom: 2px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    word-break: break-all;
+    line-height: 1.5;
+}
+
+#toki-debug-console-content li.log,
+#toki-debug-console-content li.info {
+    color: #e0e0e0;
+}
+
+#toki-debug-console-content li.warn {
+    color: #f9e2af;
+}
+
+#toki-debug-console-content li.error,
+#toki-debug-console-content li.critical {
+    color: #f38ba8;
+}
+
+#toki-debug-console-content li.success {
+    color: #a6e3a1;
 }

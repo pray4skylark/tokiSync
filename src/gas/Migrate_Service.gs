@@ -4,7 +4,7 @@
  */
 
 // Centralized Thumbnail Folder Name provided by View_LibraryService.gs
-// const THUMB_FOLDER_NAME = "_Thumbnails";
+var THUMB_FOLDER_NAME = "_Thumbnails";
 
 /**
  * [Migration] Moves 'cover.jpg' from series folders to '_Thumbnails/{SeriesID}.jpg'

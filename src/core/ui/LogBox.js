@@ -6,7 +6,7 @@
 import { startSilentAudio, stopSilentAudio, isAudioRunning } from '../anti_sleep.js';
 import { getConfig, setConfig } from '../config.js';
 import { EventBus, EVT } from '../EventBus.js';
-import { getQueue, getQueueStats, getQueuePaused, setQueuePaused, removeQueueItem, removeCompletedAndFailedItems, removeCompletedItems, stopAllWorkers, runSchedulerOnce, clearQueue } from '../queue.js';
+import { getQueue, getQueueStats, getQueuePaused } from '../queue.js';
 import { MenuModal } from './MenuModal.js';
 import styles from './ui.css';
 
@@ -20,6 +20,7 @@ export class LogBox {
         this.popupWindow = null;
         this.isEventRegistered = false;
         this.syncIntervalId = null;
+        this._consoleInterceptor = null;
         this.init();
         LogBox.instance = this;
     }
@@ -196,19 +197,58 @@ export class LogBox {
             clearLogsBtn.onclick = () => this.clear();
         }
 
+        // Tab Switch Binding
+        const logTabBtns = doc.querySelectorAll('.toki-log-tab-btn');
+        logTabBtns.forEach(btn => {
+            btn.onclick = () => {
+                const target = btn.getAttribute('data-logtab');
+                logTabBtns.forEach(b => b.classList.toggle('active', b === btn));
+                doc.querySelectorAll('.toki-log-panel').forEach(p => {
+                    const isTarget = (target === 'debug' && p.id === 'toki-debug-console')
+                        || (target === 'service' && p.id === 'toki-logbox-content');
+                    p.classList.toggle('active', isTarget);
+                });
+            };
+        });
+
+        // Toggle Button Binding
+        const toggleBtn = doc.getElementById('toki-btn-console-toggle');
+        if (toggleBtn) {
+            toggleBtn.onclick = () => {
+                const active = toggleBtn.classList.toggle('on');
+                toggleBtn.textContent = active ? '■ 수집 중단' : '▶ 수집 재개';
+                if (this._consoleInterceptor) {
+                    this._consoleInterceptor.setActive(active);
+                }
+                const statusEl = doc.querySelector('.toki-console-status');
+                if (statusEl) {
+                    statusEl.textContent = active ? 'TokiSync 디버그 로그 수집 중' : '수집 중단됨';
+                }
+            };
+        }
+
         // Flush Cached Logs
-        const logContentEl = doc.getElementById('toki-logbox-content');
-        if (logContentEl) {
-            logContentEl.innerHTML = '';
-            this.logs.forEach(l => {
+        const flushContainer = (id, logArray) => {
+            const el = doc.getElementById(id);
+            if (!el) return;
+            el.innerHTML = '';
+            logArray.forEach(l => {
                 const li = doc.createElement('li');
                 li.textContent = `[${l.time}] ${l.context ? `[${l.context}] ` : ''}${l.msg}`;
-                if (l.type === 'error' || l.type === 'critical') li.className = 'error';
-                if (l.type === 'success') li.className = 'success';
-                logContentEl.appendChild(li);
+                const t = l.type;
+                if (l.context === 'Console') {
+                    li.className = (t === 'error' || t === 'critical') ? 'error'
+                        : t === 'warn' ? 'warn' : t === 'success' ? 'success' : 'log';
+                } else {
+                    if (t === 'error' || t === 'critical') li.className = 'error';
+                    else if (t === 'success') li.className = 'success';
+                }
+                el.appendChild(li);
             });
-            logContentEl.scrollTop = logContentEl.scrollHeight;
-        }
+            el.scrollTop = el.scrollHeight;
+        };
+        flushContainer('toki-logbox-content', this.logs.filter(l => l.context !== 'Console'));
+        flushContainer('toki-debug-console-content', this.logs.filter(l => l.context === 'Console'));
 
         this.updateProgressUI();
         if (defaultTab) {
@@ -405,19 +445,35 @@ export class LogBox {
 
     log(msg, type = 'normal', context = '') {
         const time = new Date().toLocaleTimeString('ko-KR', { hour12: false });
-        const prefix = context ? `[${context}] ` : '';
-        const fullMsg = `[${time}] ${prefix}${msg}`;
+        const config = getConfig();
+
+        // 디버그성 컨텍스트(태그) 목록 정의
+        const debugContexts = ['Worker:Batch', 'DOM:Scroll', 'DOM:Stall', 'DOM:Ready', 'FastPath', 'GAS:Cache', 'Queue'];
+        const isDebugMode = config.logLevel === 'debug' || config.logLevel === 'normal';
+
+        // 디버그성 컨텍스트이나 디버그 모드가 아닌 경우 접두사(prefix)에서 숨김 처리
+        const shouldShowContext = isDebugMode || !debugContexts.includes(context);
+
+        // 템플릿 문법을 사용한 로그 문자열 조립
+        const logTemplate = config.logTemplate || '[{time}] {prefix}{msg}';
+        const displayPrefix = (context && shouldShowContext) ? `[${context}] ` : '';
+
+        const fullMsg = logTemplate
+            .replace('{time}', time)
+            .replace('{prefix}', displayPrefix)
+            .replace('{msg}', msg);
         
-        // 1. 내부 메모리 및 브라우저 콘솔에는 모든 로그 누적 출력
+        // 1. 내부 메모리 및 브라우저 콘솔에는 모든 상세 정보가 포함된 원본 로그 누적 출력
+        const consolePrefix = context ? `[${context}] ` : '';
         this.logs.push({ time, type, context, msg: typeof msg === 'string' ? msg : JSON.stringify(msg) });
         if (this.logs.length > this.MAX_LOGS) this.logs.shift();
 
         if (type === 'error' || type === 'critical') {
-            console.error(`[TokiSync] ${prefix}${msg}`);
+            console.error(`[TokiSync] ${consolePrefix}${msg}`);
         } else if (type === 'warn') {
-            console.warn(`[TokiSync] ${prefix}${msg}`);
+            console.warn(`[TokiSync] ${consolePrefix}${msg}`);
         } else {
-            console.log(`[TokiSync] ${prefix}${msg}`);
+            console.log(`[TokiSync] ${consolePrefix}${msg}`);
         }
 
         // 2. 설정된 로그 수준에 따라 로그 필터링 적용
@@ -441,20 +497,27 @@ export class LogBox {
         // 팝업이 활성화되어 있으면 실시간 렌더링
         if (this.popupWindow && !this.popupWindow.closed && this.popupWindow.document) {
             const doc = this.popupWindow.document;
-            const logContentEl = doc.getElementById('toki-logbox-content');
+            const isConsole = (context === 'Console');
+            const containerId = isConsole ? 'toki-debug-console-content' : 'toki-logbox-content';
+            const logContentEl = doc.getElementById(containerId);
             if (logContentEl) {
                 const li = doc.createElement('li');
                 li.textContent = fullMsg;
                 
-                // 클래스 매핑
-                if (type === 'error' || type === 'critical') li.className = 'error';
-                else if (type === 'success') li.className = 'success';
-                else if (type === 'warn') li.className = 'warn';
-                else if (type === 'info') li.className = 'info';
+                if (isConsole) {
+                    const baseType = (type === 'info' || type === 'normal') ? 'log' : type;
+                    li.className = baseType === 'error' || baseType === 'critical' ? 'error'
+                        : baseType === 'warn' ? 'warn'
+                        : baseType === 'success' ? 'success' : 'log';
+                } else {
+                    if (type === 'error' || type === 'critical') li.className = 'error';
+                    else if (type === 'success') li.className = 'success';
+                    else if (type === 'warn') li.className = 'warn';
+                    else if (type === 'info') li.className = 'info';
+                }
                 
                 logContentEl.appendChild(li);
                 
-                // 스크롤 미동작 방지 (안정적인 DOM 렌더링 후 스크롤 조율을 위해 미세 지연)
                 setTimeout(() => {
                     logContentEl.scrollTop = logContentEl.scrollHeight;
                 }, 10);
@@ -485,11 +548,21 @@ export class LogBox {
     }
 
     clear() {
-        this.logs = [];
         if (this.popupWindow && !this.popupWindow.closed) {
             const doc = this.popupWindow.document;
-            const logContentEl = doc.getElementById('toki-logbox-content');
-            if (logContentEl) logContentEl.innerHTML = '';
+            const activeTab = doc.querySelector('.toki-log-tab-btn.active');
+            const tabName = activeTab ? activeTab.getAttribute('data-logtab') : 'service';
+            if (tabName === 'service') {
+                const el = doc.getElementById('toki-logbox-content');
+                if (el) el.innerHTML = '';
+                this.logs = this.logs.filter(l => l.context === 'Console');
+            } else {
+                const el = doc.getElementById('toki-debug-console-content');
+                if (el) el.innerHTML = '';
+                this.logs = this.logs.filter(l => l.context !== 'Console');
+            }
+        } else {
+            this.logs = [];
         }
     }
 
@@ -501,6 +574,7 @@ export class LogBox {
         if (this.popupWindow && !this.popupWindow.closed) {
             this.popupWindow.close();
         }
+        this.popupWindow = null;
         this.stopProgressSync();
     }
 

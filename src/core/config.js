@@ -40,17 +40,17 @@ function restoreFromLocalStorage() {
                 const backup = JSON.parse(backupStr);
                 if (backup && (backup.gasId || backup.folderId)) {
                     console.log("[Config] 🛡️ LocalStorage 백업 감지 -> GM_setValue로 복원을 수행합니다.");
-                    if (backup.gasId) GM_setValue(CFG_ID_KEY, backup.gasId);
-                    if (backup.folderId) GM_setValue(CFG_FOLDER_ID, backup.folderId);
-                    if (backup.policy) GM_setValue(CFG_POLICY_KEY, backup.policy);
-                    if (backup.apiKey) GM_setValue(CFG_API_KEY, backup.apiKey);
-                    if (backup.sleepMode) GM_setValue(CFG_SLEEP_MODE, backup.sleepMode);
-                    if (backup.smartSkipRatio) GM_setValue(CFG_SMART_SKIP_RATIO, backup.smartSkipRatio.toString());
-                    if (backup.novelMode) GM_setValue(CFG_NOVEL_MODE, backup.novelMode);
-                    if (backup.novelFormat) GM_setValue(CFG_NOVEL_FORMAT, backup.novelFormat);
-                    if (backup.scanSpeed) GM_setValue(CFG_SCAN_SPEED, backup.scanSpeed.toString());
-                    if (backup.localNameTemplate) GM_setValue(CFG_LOCAL_NAME_TEMPLATE, backup.localNameTemplate);
-                    if (backup.logLevel) GM_setValue(CFG_LOG_LEVEL, backup.logLevel);
+                    if (backup.gasId && typeof GM_setValue !== 'undefined') GM_setValue(CFG_ID_KEY, backup.gasId);
+                    if (backup.folderId && typeof GM_setValue !== 'undefined') GM_setValue(CFG_FOLDER_ID, backup.folderId);
+                    if (backup.policy && typeof GM_setValue !== 'undefined') GM_setValue(CFG_POLICY_KEY, backup.policy);
+                    if (backup.apiKey && typeof GM_setValue !== 'undefined') GM_setValue(CFG_API_KEY, backup.apiKey);
+                    if (backup.sleepMode && typeof GM_setValue !== 'undefined') GM_setValue(CFG_SLEEP_MODE, backup.sleepMode);
+                    if (backup.smartSkipRatio && typeof GM_setValue !== 'undefined') GM_setValue(CFG_SMART_SKIP_RATIO, backup.smartSkipRatio.toString());
+                    if (backup.novelMode && typeof GM_setValue !== 'undefined') GM_setValue(CFG_NOVEL_MODE, backup.novelMode);
+                    if (backup.novelFormat && typeof GM_setValue !== 'undefined') GM_setValue(CFG_NOVEL_FORMAT, backup.novelFormat);
+                    if (backup.scanSpeed && typeof GM_setValue !== 'undefined') GM_setValue(CFG_SCAN_SPEED, backup.scanSpeed.toString());
+                    if (backup.localNameTemplate && typeof GM_setValue !== 'undefined') GM_setValue(CFG_LOCAL_NAME_TEMPLATE, backup.localNameTemplate);
+                    if (backup.logLevel && typeof GM_setValue !== 'undefined') GM_setValue(CFG_LOG_LEVEL, backup.logLevel);
                     return true;
                 }
             }
@@ -66,26 +66,27 @@ function restoreFromLocalStorage() {
  * @returns {{gasId: string, gasUrl: string, folderId: string, policy: string, apiKey: string, sleepMode: string, smartSkipRatio: number, logLevel: string}}
  */
 export function getConfig() {
-    let gasId = GM_getValue(CFG_ID_KEY, "");
-    let folderId = GM_getValue(CFG_FOLDER_ID, "");
+    const _gmGet = (key, def) => typeof GM_getValue !== 'undefined' ? GM_getValue(key, def) : def;
+    let gasId = _gmGet(CFG_ID_KEY, "");
+    let folderId = _gmGet(CFG_FOLDER_ID, "");
 
     // 2중 백업 복구 엔진 기동 (GM_getValue 정보 부재 시 로컬 스토리지 데이터셋 수복)
     if (!gasId && !folderId) {
         const restored = restoreFromLocalStorage();
         if (restored) {
-            gasId = GM_getValue(CFG_ID_KEY, "");
-            folderId = GM_getValue(CFG_FOLDER_ID, "");
+            gasId = _gmGet(CFG_ID_KEY, "");
+            folderId = _gmGet(CFG_FOLDER_ID, "");
         }
     }
 
-    let gasUrl = GM_getValue(CFG_URL_KEY, "");
+    let gasUrl = _gmGet(CFG_URL_KEY, "");
 
     // Auto-migration: gasUrl -> gasId
     if (!gasId && gasUrl) {
         const match = gasUrl.match(/\/s\/([^\/]+)\/exec/);
         if (match) {
             gasId = match[1];
-            GM_setValue(CFG_ID_KEY, gasId);
+            if (typeof GM_setValue !== 'undefined') GM_setValue(CFG_ID_KEY, gasId);
             console.log("✅ [Config] Auto-migrated GAS URL to ID:", gasId);
         }
     }
@@ -99,15 +100,15 @@ export function getConfig() {
     const configObj = {
         gasId: finalGasId,
         gasUrl: finalGasUrl,
-        folderId: GM_getValue(CFG_FOLDER_ID, ""),
-        policy: GM_getValue(CFG_POLICY_KEY, "folderInCbz"),
-        apiKey: GM_getValue(CFG_API_KEY, ""),
-        sleepMode: GM_getValue(CFG_SLEEP_MODE, "cautious"), // default: cautious
-        smartSkipRatio: parseInt(GM_getValue(CFG_SMART_SKIP_RATIO, "50"), 10), // default 50% of Max
-        novelMode: GM_getValue(CFG_NOVEL_MODE, "perChapter"), // default: chapter-by-chapter
-        novelFormat: GM_getValue(CFG_NOVEL_FORMAT, "epub"), // default: EPUB
+        folderId: _gmGet(CFG_FOLDER_ID, ""),
+        policy: _gmGet(CFG_POLICY_KEY, "folderInCbz"),
+        apiKey: _gmGet(CFG_API_KEY, ""),
+        sleepMode: _gmGet(CFG_SLEEP_MODE, "cautious"), // default: cautious
+        smartSkipRatio: parseInt(_gmGet(CFG_SMART_SKIP_RATIO, "50"), 10), // default 50% of Max
+        novelMode: _gmGet(CFG_NOVEL_MODE, "perChapter"), // default: chapter-by-chapter
+        novelFormat: _gmGet(CFG_NOVEL_FORMAT, "epub"), // default: EPUB
         scanSpeed: (() => {
-            let val = parseFloat(GM_getValue(CFG_SCAN_SPEED, "1000"));
+            let val = parseFloat(_gmGet(CFG_SCAN_SPEED, "1000"));
             if (isNaN(val)) val = 1000;
             // 하위 호환성: 기존의 배속 배율 값(예: 0.5 ~ 5.0)이 저장되어 있는 경우 밀리세컨드 단위로 자동 변환
             if (val <= 10) {
@@ -115,8 +116,8 @@ export function getConfig() {
             }
             return Math.round(val);
         })(),
-        localNameTemplate: GM_getValue(CFG_LOCAL_NAME_TEMPLATE, "{number:4} - {title}"),
-        logLevel: GM_getValue(CFG_LOG_LEVEL, "info")
+        localNameTemplate: _gmGet(CFG_LOCAL_NAME_TEMPLATE, "{number:4} - {title}"),
+        logLevel: _gmGet(CFG_LOG_LEVEL, "info")
     };
     backupToLocalStorage(configObj);
     return configObj;
@@ -128,11 +129,13 @@ export function getConfig() {
  * @param {string} value 
  */
 export function setConfig(key, value) {
-    GM_setValue(key, value);
+    if (typeof GM_setValue !== 'undefined') GM_setValue(key, value);
     try {
         const configObj = getConfig();
         backupToLocalStorage(configObj);
-    } catch (e) {}
+    } catch (e) {
+        console.warn(`[Config] Backup to localStorage failed: ${e.message}`);
+    }
 }
 
 
