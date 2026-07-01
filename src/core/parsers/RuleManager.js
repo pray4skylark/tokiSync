@@ -7,7 +7,7 @@ import { CFG_PARSER_RULES } from '../config.js';
 export class RuleManager {
     // Built-in sample rules as fallback/templates (Offline Seeding)
     static get _version() {
-        return typeof __SCRIPT_VERSION__ !== 'undefined' ? __SCRIPT_VERSION__ : '1.25.0';
+        return typeof __SCRIPT_VERSION__ !== 'undefined' ? __SCRIPT_VERSION__ : '1.26.4';
     }
 
     static #builtInRules = [

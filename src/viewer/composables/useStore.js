@@ -39,7 +39,7 @@ const isSyncing = ref(false);
 const notification = ref('');
 let notifyTimerId = null;
 const needsServerUpdate = ref(false); // [v1.8.0] 서버 업데이트 안내용
-const RECOMMENDED_SERVER_VERSION = '1.22.0';
+const RECOMMENDED_SERVER_VERSION = '1.26.4';
 
 const config = reactive({ deploymentId: '', apiKey: '', folderId: '' });
 const viewerDefaults = reactive({ 

@@ -1,4 +1,4 @@
-// ⚙️ TokiSync API Server v1.8.0 (Stateless)
+// ⚙️ TokiSync API Server v1.26.4 (Stateless)
 // -----------------------------------------------------
 // 🤝 Compatibility:
 //    - Client v1.8.0+ (User Execution Mode)
@@ -14,7 +14,7 @@
  */
 function doGet(e) {
   return ContentService.createTextOutput(
-    "✅ TokiSync API Server v1.8.0 (Stateless) is Running...",
+    "✅ TokiSync API Server v1.26.4 (Stateless) is Running...",
   );
 }
 
@@ -33,7 +33,7 @@ function doGet(e) {
  * @returns {TextOutput} JSON 응답
  */
 // [CONSTANTS]
-var SERVER_VERSION = "v1.8.0"; // Drive API V3 Migration
+var SERVER_VERSION = "v1.26.4";
 // API Key stored in Script Properties (Project Settings > Script Properties)
 // Set property: API_KEY = your_secret_key
 

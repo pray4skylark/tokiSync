@@ -300,7 +300,7 @@ const {
   formatSize, cachedEpisodesList, cachedTotalSize, loadOfflineCacheInfo, deleteEpisodeCache, clearAllEpisodeCaches
 } = useStore();
 
-const appVersion = typeof __VIEWER_VERSION__ !== 'undefined' ? __VIEWER_VERSION__ : '1.22.0';
+const appVersion = typeof __VIEWER_VERSION__ !== 'undefined' ? __VIEWER_VERSION__ : '1.26.4';
 
 const activeTab = ref('cloud');
 const tabItems = [
