@@ -9885,7 +9885,7 @@ var SubscriptionManager = __webpack_require__(330);
 
 
 async function main() {
-    console.log("🚀 TokiDownloader Loaded (New Core v1.20.5)");
+    console.log("🚀 TokiDownloader Loaded (New Core v1.26.4)");
 
     // -- 0. Bootstrap UI Instances --
     const _logbox = ui/* LogBox */.ej.getInstance();
