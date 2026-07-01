@@ -4,6 +4,7 @@
     {
       "id": "blacktoon_webtoon",
       "name": "블랙툰 웹툰 전용 룰",
+      "_version": "1.25.0",
       "urlPattern": ".*/webtoon/.*",
       "category": "Webtoon",
       "meta": {
@@ -46,6 +47,7 @@
     {
       "id": "blacktoon_manhwa",
       "name": "블랙툰 만화 전용 룰",
+      "_version": "1.25.0",
       "urlPattern": ".*/manhwa/.*",
       "category": "Manga",
       "meta": {
@@ -88,6 +90,7 @@
     {
       "id": "blacktoon_novel",
       "name": "블랙툰 소설 전용 룰",
+      "_version": "1.25.0",
       "urlPattern": ".*/novel/.*",
       "category": "Novel",
       "meta": {

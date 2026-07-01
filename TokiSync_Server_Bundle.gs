@@ -1,4 +1,4 @@
-/* ⚙️ TokiSync Server Code Bundle v1.0.0 (Generated: 2026-06-16T18:59:53.107Z) */
+/* ⚙️ TokiSync Server Code Bundle v1.0.0 (Generated: 2026-07-01T14:14:48.073Z) */
 
 /* ========================================================================== */
 /* FILE: Main.gs */
@@ -42,21 +42,29 @@ function doGet(e) {
 var SERVER_VERSION = "v1.8.0"; // Drive API V3 Migration
 // API Key stored in Script Properties (Project Settings > Script Properties)
 // Set property: API_KEY = your_secret_key
-var API_KEY = PropertiesService.getScriptProperties().getProperty("API_KEY");
+
+function getApiKey_() {
+    return PropertiesService.getScriptProperties().getProperty("API_KEY");
+}
 
 function doPost(e) {
   Debug.start(); // 🐞 디버그 시작
   try {
-    const data = JSON.parse(e.postData.contents);
+    let data;
+    try {
+      data = JSON.parse(e.postData.contents);
+    } catch (parseErr) {
+      return createRes("error", "Invalid JSON in request body");
+    }
 
     // 0. API Key Validation (Security) - All Requests Including Viewer
-    if (!API_KEY) {
+    var apiKey = getApiKey_(); if (!apiKey) {
       return createRes(
         "error",
         "Server Configuration Error: API_KEY not set in Script Properties",
       );
     }
-    if (!data.apiKey || data.apiKey !== API_KEY) {
+    if (!data.apiKey || data.apiKey !== apiKey) {
       return createRes("error", "Unauthorized: Invalid API Key");
     }
 
@@ -103,8 +111,6 @@ function doPost(e) {
         result = saveSeriesInfo(data, rootFolderId);
       else if (data.type === "get_library")
         result = getLibraryIndex(rootFolderId);
-      else if (data.type === "update_library_status")
-        result = updateLibraryStatus(data, rootFolderId);
       else if (data.type === "get_server_info") {
         result = createRes("success", {
           name: "TokiSync API",
@@ -149,7 +155,7 @@ function TimeDriven_SweepMergeIndex() {
     
     // Call the Sweep function defined in View_LibraryService.gs
     if (typeof SweepMergeIndex === 'function') {
-        SweepMergeIndex(folderId, null);
+        SweepMergeIndex(folderId);
     } else {
         console.error("[SweepMergeIndex] SweepMergeIndex function not found. Verify deployment.");
     }
@@ -233,35 +239,22 @@ function findFolderId(folderName, rootFolderId) {
 }
 
 /**
- * [New] 카테고리(Webtoon/Novel) 구조를 반영하여 시리즈 폴더를 찾거나 생성합니다.
- * Legacy(Root 직속) 폴더가 있으면 그걸 우선 사용(마이그레이션 전 호환성).
+ * 시리즈 폴더를 Root 직속에서 찾거나 생성합니다. (Kavita 호환 플랫 구조)
+ * 기존 카테고리(Webtoon/Novel/Manga) 구조는 제거되었습니다.
  */
 function getOrCreateSeriesFolder(
   rootFolderId,
   folderName,
-  category = "Webtoon",
+  category,
   createIfMissing = true
 ) {
-  // 1. Check Legacy (Root Direct)
-  const legacyId = findFolderId(folderName, rootFolderId);
-  if (legacyId) {
-    Debug.log(`♻️ Found Legacy Series Folder in Root: ${legacyId}`);
-    return legacyId;
-  }
-
-  // 2. Check/Create Category Folder
-  const catName = category || "Webtoon";
-  const catId = DriveAccessService.ensureFolder(rootFolderId, catName);
-
-  // 3. Check Series in Category
-  const seriesId = findFolderId(folderName, catId);
+  const seriesId = findFolderId(folderName, rootFolderId);
   if (seriesId) return seriesId;
 
   if (!createIfMissing) return null;
 
-  // 4. Create New Series in Category
-  Debug.log(`🆕 Creating New Series Folder in ${catName}: ${folderName}`);
-  return DriveAccessService.ensureFolder(catId, folderName);
+  Debug.log(`🆕 Creating New Series Folder in Root: ${folderName}`);
+  return DriveAccessService.ensureFolder(rootFolderId, folderName);
 }
 
 /**
@@ -549,11 +542,10 @@ var DriveAccessService = {
 // 기능: 다운로드 기록 확인 (폴더/파일 스캔)
 function checkDownloadHistory(data, rootFolderId) {
   Debug.log(`🚀 checkDownloadHistory Start`);
-  // Use Helper with Category support (Create=false)
   const folderId = getOrCreateSeriesFolder(
     rootFolderId,
     data.folderName,
-    data.category,
+    null,
     false,
   );
 
@@ -609,11 +601,10 @@ function checkDownloadHistory(data, rootFolderId) {
 
 // 기능: 작품 정보(info.json) 저장
 function saveSeriesInfo(data, rootFolderId) {
-  // Use Helper with Category support (Create=true)
   const folderId = getOrCreateSeriesFolder(
     rootFolderId,
     data.folderName,
-    data.category,
+    null,
     true,
   );
 
@@ -673,45 +664,6 @@ function getLibraryIndex(rootFolderId) {
     }
   }
   return createRes("success", []);
-}
-
-// 기능: 라이브러리 상태 업데이트 (클라이언트 결과 저장)
-function updateLibraryStatus(data, rootFolderId) {
-  const results = DriveAccessService.list(rootFolderId, {
-    query: "name = 'index.json'",
-    fields: "files(id)"
-  });
-
-  if (results.length === 0) return createRes("error", "Index not found");
-
-  const fileId = results[0].id;
-  let library = [];
-  try {
-    const content = DriveAccessService.getFileContent(fileId);
-    library = JSON.parse(content);
-    if (!Array.isArray(library)) library = [];
-  } catch (e) {
-    return createRes("error", "Invalid JSON");
-  }
-
-  // 업데이트 반영
-  const updates = data.updates;
-  let changedCount = 0;
-
-  updates.forEach((u) => {
-    const item = library.find((i) => i.id === u.id);
-    if (item) {
-      item.latest_episode_in_site = u.latestEpisode;
-      item.last_checked_at = new Date().toISOString();
-      changedCount++;
-    }
-  });
-
-  if (changedCount > 0) {
-    DriveAccessService.updateFileContent(fileId, JSON.stringify(library));
-    return createRes("success", `Updated ${changedCount} items`);
-  }
-  return createRes("success", "No changes");
 }
 
 // =======================================================
@@ -877,7 +829,7 @@ function initResumableUpload(data, rootFolderId) {
   const folderId = getOrCreateSeriesFolder(
     rootFolderId,
     data.folderName,
-    data.category,
+    null,
     true,
   );
 
@@ -1074,6 +1026,19 @@ function View_Dispatcher(data) {
       if (!data.seriesId)
         throw new Error("seriesId is required for filename migration");
       resultBody = Migrate_RenameFiles(data.seriesId, data.folderId);
+    } else if (action === "view_migrate_kavita") {
+      // Legacy Kavita filename migration
+      const executeRename = data.executeRename === true;
+      resultBody = Migrate_KavitaFormat(data.folderId, executeRename);
+    } else if (action === "view_kavita_restructure") {
+      // Kavita flat structure migration (Phase 3)
+      if (!data.folderId) throw new Error("folderId is required for restructure");
+      const selectedIds = data.selectedIds || [];
+      resultBody = Kavita_Restructure(data.folderId, selectedIds);
+    } else if (action === "view_kavita_status") {
+      // Structure diagnosis
+      if (!data.folderId) throw new Error("folderId is required for status");
+      resultBody = Kavita_GetStatus(data.folderId);
     } else if (action === "view_get_merge_index") {
       // [v1.6.1] Fast Path Fallback: Get Merge Index Fragment directly
       if (!data.folderId || !data.sourceId) throw new Error("folderId and sourceId are required for merge index");
@@ -1109,7 +1074,7 @@ function View_Dispatcher(data) {
       const seriesId = getOrCreateSeriesFolder(
         folderId,
         data.folderName,
-        data.category || "Unknown",
+        null,
         false,
       );
       if (!seriesId) {
@@ -1505,6 +1470,19 @@ function View_getFileChunk(fileId, offset, length) {
       "Drive API Partial Fetch failed, falling back to DriveAccessService: " +
         e,
     );
+
+    try {
+      const meta = DriveAccessService.getMetadata(fileId);
+      const fileSize = parseInt(meta.size || '0');
+      var SAFE_LIMIT = 30 * 1024 * 1024; // 30MB
+      if (fileSize > SAFE_LIMIT) {
+        throw new Error(`File too large for fallback download: ${(fileSize/1024/1024).toFixed(1)}MB exceeds 30MB safety limit. Range fetch failed: ${e.message}`);
+      }
+    } catch (sizeCheckErr) {
+      if (sizeCheckErr.message.includes('too large')) throw sizeCheckErr;
+      // If meta fetch also fails, proceed with original fallback
+    }
+
     const bytes = DriveAccessService.getFileBytes(fileId);
 
     if (offset >= bytes.length) return null;
@@ -1533,6 +1511,64 @@ var INDEX_FILE_NAME = "index.json";
 var THUMB_FOLDER_NAME = "_Thumbnails";
 
 /**
+ * Execute an index.json read-modify-write operation with LockService protection.
+ * Prevents concurrent write race conditions between SweepMergeIndex,
+ * View_updateMetadata.
+ *
+ * @param {string} folderId - The root folder containing index.json
+ * @param {Function} modifyFn - receives (masterList array), returns modified masterList
+ * @param {number} maxRetries - retry count on lock failure (default 3)
+ * @returns {Array} the modified masterList after successful write
+ */
+function withIndexLock(folderId, modifyFn, maxRetries) {
+    if (maxRetries === undefined) maxRetries = 3;
+    for (var attempt = 0; attempt < maxRetries; attempt++) {
+        var lock = LockService.getScriptLock();
+        try {
+            if (!lock.tryLock(15000)) { // 15s timeout
+                console.warn("[IndexLock] Lock acquisition failed (attempt " + (attempt + 1) + "/" + maxRetries + ")");
+                continue;
+            }
+
+            // Read current index
+            var results = DriveAccessService.list(folderId, {
+                query: "name = '" + INDEX_FILE_NAME + "'",
+                fields: "files(id)"
+            });
+            var indexFile = results.length > 0 ? results[0] : null;
+            var masterList = [];
+            if (indexFile) {
+                var content = DriveAccessService.getFileContent(indexFile.id);
+                if (content && content.trim() !== "") {
+                    try { masterList = JSON.parse(content); } catch (e) { masterList = []; }
+                }
+            }
+
+            // Apply modification
+            masterList = modifyFn(masterList);
+
+            // Write back
+            var updatedJson = JSON.stringify(masterList);
+            if (indexFile) {
+                DriveAccessService.updateFileContent(indexFile.id, updatedJson);
+            } else {
+                DriveAccessService.createFile(folderId, INDEX_FILE_NAME, updatedJson, "application/json");
+            }
+
+            return masterList;
+        } catch (e) {
+            console.error("[IndexLock] Error on attempt " + (attempt + 1) + ": " + e.message);
+            if (attempt >= maxRetries - 1) throw e;
+        } finally {
+            if (lock) {
+                try { lock.releaseLock(); } catch (e) { /* ignore release errors */ }
+            }
+        }
+    }
+    throw new Error("[IndexLock] Failed to acquire lock after all retries");
+}
+
+/**
  * 해당 폴더(Libraries)의 시리즈 목록을 반환합니다.
  */
 function View_getSeriesList(
@@ -1556,7 +1592,7 @@ function View_getSeriesList(
           let cachedList = JSON.parse(content);
           
           // [v1.6.1] Merge Index Fragment Processing (Now standalone)
-          const updatedList = SweepMergeIndex(folderId, cachedList);
+          const updatedList = SweepMergeIndex(folderId);
           
           return updatedList;
         } catch (e) {}
@@ -1569,98 +1605,78 @@ function View_getSeriesList(
 }
 
 /**
- * [v1.6.1] Sweep the _MergeIndex queue and update the master index cached list.
+ * [v1.6.1] Sweep the _MergeIndex queue and update the master index.
+ * Uses withIndexLock to prevent concurrent write race conditions.
  * Can be called during viewer load or via a time-driven trigger.
  * @param {string} folderId The root folder ID
- * @param {Array} cachedList The currently loaded master index list (or null to load it)
  * @returns {Array} The updated cached list
  */
-function SweepMergeIndex(folderId, cachedList) {
-    let masterList = cachedList;
-    
-    // If no cachedList provided (e.g., from cron job), try to load it first
-    if (!masterList) {
-        try {
-            const results = DriveAccessService.list(folderId, {
-                query: `name = '${INDEX_FILE_NAME}'`,
-                fields: "files(id)"
+function SweepMergeIndex(folderId) {
+    return withIndexLock(folderId, function(masterList) {
+        if (!masterList || !Array.isArray(masterList)) return masterList;
+
+        let hasMerged = false;
+        let mergeFolders = DriveAccessService.list(folderId, {
+            query: "name = '_MergeIndex' and mimeType = 'application/vnd.google-apps.folder'",
+            fields: "files(id)"
+        });
+
+        if (mergeFolders.length > 0) {
+            var mFolderId = mergeFolders[0].id;
+            var mFiles = DriveAccessService.list(mFolderId, {
+                fields: "files(id, name)"
             });
-            if (results.length > 0) {
-                const content = DriveAccessService.getFileContent(results[0].id);
-                if (content && content.trim() !== "") {
-                    try { masterList = JSON.parse(content); } catch (e) { return null; }
-                }
-            }
-        } catch (e) {
-            Debug.log(`[SweepMergeIndex] Service Error reading index.json: ${e.message}`);
-            return null;
-        }
-    }
-    
-    if (!masterList || !Array.isArray(masterList)) return null;
 
-    let hasMerged = false;
-    let mergeFolders = DriveAccessService.list(folderId, {
-        query: "name = '_MergeIndex' and mimeType = 'application/vnd.google-apps.folder'",
-        fields: "files(id)"
-    });
+            mFiles.forEach(function(mFile) {
+                try {
+                    if (mFile.name.startsWith("_toki_merge_")) {
+                        var content = DriveAccessService.getFileContent(mFile.id);
+                        var fragData = JSON.parse(content);
 
-    if (mergeFolders.length > 0) {
-        const mFolderId = mergeFolders[0].id;
-        let mFiles = DriveAccessService.list(mFolderId, {
-            fields: "files(id, name)"
-        });
-        
-        mFiles.forEach(mFile => {
-            try {
-                if (mFile.name.startsWith("_toki_merge_")) {
-                    const content = DriveAccessService.getFileContent(mFile.id);
-                    const fragData = JSON.parse(content);
-                    
-                    const targetIndex = masterList.findIndex(s => s.sourceId === fragData.sourceId || s.id === fragData.id);
-                    if (targetIndex !== -1) {
-                        masterList[targetIndex].cacheFileId = fragData.cacheFileId;
-                        if (fragData.itemsCount !== undefined) {
-                            masterList[targetIndex].itemsCount = fragData.itemsCount;
-                        }
-                        if (fragData.lastUpdated) {
-                            masterList[targetIndex].lastModified = new Date(fragData.lastUpdated);
-                        }
-                        hasMerged = true;
-                        Debug.log(`[MergeIndex] Merged fragment into main list: ${fragData.sourceId}`);
-                    } else if (fragData.name && fragData.id) {
-                        const isDuplicate = masterList.some(s => s.sourceId === fragData.sourceId || s.id === fragData.id);
-                        if (!isDuplicate) {
-                            masterList.push({
-                                id: fragData.id,
-                                sourceId: fragData.sourceId || fragData.id,
-                                name: fragData.name,
-                                folderName: fragData.folderName || fragData.name,
-                                url: fragData.url || "",
-                                cacheFileId: fragData.cacheFileId,
-                                itemsCount: fragData.itemsCount || 0,
-                                category: fragData.category || "Unknown",
-                                created: fragData.created || new Date().toISOString(),
-                                lastModified: new Date(fragData.lastUpdated || Date.now())
-                            });
+                        var targetIndex = masterList.findIndex(function(s) {
+                            return s.sourceId === fragData.sourceId || s.id === fragData.id;
+                        });
+                        if (targetIndex !== -1) {
+                            masterList[targetIndex].cacheFileId = fragData.cacheFileId;
+                            if (fragData.itemsCount !== undefined) {
+                                masterList[targetIndex].itemsCount = fragData.itemsCount;
+                            }
+                            if (fragData.lastUpdated) {
+                                masterList[targetIndex].lastModified = new Date(fragData.lastUpdated);
+                            }
                             hasMerged = true;
-                            Debug.log(`[MergeIndex] Inserted NEW series into master list: ${fragData.name} (${fragData.sourceId})`);
+                            Debug.log("[MergeIndex] Merged fragment into main list: " + fragData.sourceId);
+                        } else if (fragData.name && fragData.id) {
+                            var isDuplicate = masterList.some(function(s) {
+                                return s.sourceId === fragData.sourceId || s.id === fragData.id;
+                            });
+                            if (!isDuplicate) {
+                                masterList.push({
+                                    id: fragData.id,
+                                    sourceId: fragData.sourceId || fragData.id,
+                                    name: fragData.name,
+                                    folderName: fragData.folderName || fragData.name,
+                                    url: fragData.url || "",
+                                    cacheFileId: fragData.cacheFileId,
+                                    itemsCount: fragData.itemsCount || 0,
+                                    category: fragData.category || "Unknown",
+                                    created: fragData.created || new Date().toISOString(),
+                                    lastModified: new Date(fragData.lastUpdated || Date.now())
+                                });
+                                hasMerged = true;
+                                Debug.log("[MergeIndex] Inserted NEW series into master list: " + fragData.name + " (" + fragData.sourceId + ")");
+                            }
                         }
+                        DriveAccessService.trash(mFile.id);
                     }
-                    DriveAccessService.trash(mFile.id);
+                } catch (e) {
+                    Debug.log("[MergeIndex] Failed to process fragment " + mFile.name + ": " + e);
                 }
-            } catch (e) {
-                Debug.log(`[MergeIndex] Failed to process fragment ${mFile.name}: ${e}`);
-            }
-        });
-    }
-    
-    if (hasMerged) {
-        View_saveIndex(folderId, masterList);
-        Debug.log("[MergeIndex] Saved updated master index after merging fragments.");
-    }
-    
-    return masterList;
+            });
+        }
+
+        return masterList;
+    });
 }
 
 /**
@@ -1701,8 +1717,9 @@ function View_rebuildLibraryIndex(folderId, continuationToken) {
       });
     }
 
-    // 2. Plan Targets
-    state.targets.push({ id: folderId, category: "Uncategorized" }); // Root
+    // 2. Plan Targets — Root 및 대분류 카테고리 플래닝 (Kavita 호환 및 기존 카테고리 하이브리드 지원)
+    state.targets.push({ id: folderId, category: "Uncategorized" });
+    
     const CATS = ["Webtoon", "Manga", "Novel"];
     const folders = DriveAccessService.list(folderId, {
       query: "mimeType = 'application/vnd.google-apps.folder'",
@@ -1725,7 +1742,7 @@ function View_rebuildLibraryIndex(folderId, continuationToken) {
     try {
       const response = DriveAccessService.listPaged(current.id, {
         pageToken: state.driveToken,
-        pageSize: 50, // 페이지별 처리량 조절
+        pageSize: 50,
         query: "mimeType = 'application/vnd.google-apps.folder'"
       });
 
@@ -1741,8 +1758,9 @@ function View_rebuildLibraryIndex(folderId, continuationToken) {
         if (
           ["Webtoon", "Manga", "Novel"].includes(name) &&
           current.category === "Uncategorized"
-        )
+        ) {
           continue;
+        }
 
         try {
           const s = processSeriesFolder(
@@ -1756,16 +1774,23 @@ function View_rebuildLibraryIndex(folderId, continuationToken) {
         }
       }
 
-      if (hasMore || response.nextPageToken) {
+      if (response.nextPageToken) {
         state.driveToken = response.nextPageToken;
-        // 내뱉기 전에 루프 중간 종료 여부 판단 (hasMore는 시간 초과, nextPageToken은 순수 로드 완료)
-        if (hasMore || response.nextPageToken) {
-            return {
-              status: "continue",
-              continuationToken: JSON.stringify(state),
-              list: seriesList,
-            };
-        }
+        return {
+          status: "continue",
+          continuationToken: JSON.stringify(state),
+          list: seriesList,
+        };
+      }
+
+      if (hasMore) {
+        state.step++;
+        state.driveToken = null;
+        return {
+          status: "continue",
+          continuationToken: JSON.stringify(state),
+          list: seriesList,
+        };
       } 
       
       state.step++;
@@ -1817,7 +1842,7 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
     status: "연재중",
     authors: [],
     summary: "",
-    category: categoryContext,
+    category: categoryContext || "Unknown",
   };
   let seriesName = folderName;
   let sourceId = "";
@@ -1849,10 +1874,10 @@ function processSeriesFolder(folder, categoryContext, thumbMap) {
         thumbnail: tid ? "" : (metaData.thumbnail || ""), 
         hasCover: !!tid,
         lastModified: metaData.lastUpdated || folder.modifiedTime,
-        category: metaData.category || categoryContext,
+            category: metaData.category || categoryContext || "Unknown",
         vendor: metaData.vendor || "",
         metadata: {
-            category: metaData.category || categoryContext,
+            category: metaData.category || categoryContext || "Unknown",
             status: normalizeStatus(metaData.status) || "연재중",
             authors: metaData.author ? [metaData.author] : [],
             summary: metaData.summary || "",
@@ -2000,44 +2025,30 @@ function View_updateMetadata(seriesId, metadata, rootFolderId) {
     DriveAccessService.createFile(seriesId, metaName, metaString, "application/json");
   }
   
-  // 4. Update index.json (Find and replace)
+  // 4. Update index.json (Find and replace) — with LockService protection
   if (rootFolderId) {
-    const results = DriveAccessService.list(rootFolderId, {
-      query: `name = '${INDEX_FILE_NAME}'`,
-      fields: "files(id)"
-    });
-    
-    if (results.length > 0) {
-      try {
-        const content = DriveAccessService.getFileContent(results[0].id);
-        if (content && content.trim() !== "") {
-          const list = JSON.parse(content);
-          const idx = list.findIndex(s => s.id === seriesId);
-          if (idx !== -1) {
-            list[idx].name = updatedMeta.name;
-            list[idx].category = updatedMeta.category;
-            list[idx].thumbnail = updatedMeta.thumbnail;
-            list[idx].thumbnailId = updatedMeta.thumbnailId;
-            list[idx].lastModified = updatedMeta.lastUpdated;
-            list[idx].vendor = updatedMeta.vendor;
-            list[idx].vendorId = updatedMeta.vendorId;
-            list[idx].originalSeriesTitle = updatedMeta.originalSeriesTitle;
-            if (!list[idx].metadata) list[idx].metadata = {};
-            list[idx].metadata.category = updatedMeta.category;
-            list[idx].metadata.status = updatedMeta.status;
-            list[idx].metadata.authors = updatedMeta.author ? [updatedMeta.author] : [];
-            list[idx].metadata.summary = updatedMeta.summary;
-            list[idx].metadata.vendor = updatedMeta.vendor;
-            list[idx].metadata.vendorId = updatedMeta.vendorId;
-            list[idx].metadata.originalSeriesTitle = updatedMeta.originalSeriesTitle;
-            
-            View_saveIndex(rootFolderId, list);
-          }
-        }
-      } catch (e) {
-        Logger.log("[Metadata] Failed to update index.json: " + e.toString());
+    withIndexLock(rootFolderId, function(masterList) {
+      var idx = masterList.findIndex(function(s) { return s.id === seriesId; });
+      if (idx !== -1) {
+        masterList[idx].name = updatedMeta.name;
+        masterList[idx].category = updatedMeta.category;
+        masterList[idx].thumbnail = updatedMeta.thumbnail;
+        masterList[idx].thumbnailId = updatedMeta.thumbnailId;
+        masterList[idx].lastModified = updatedMeta.lastUpdated;
+        masterList[idx].vendor = updatedMeta.vendor;
+        masterList[idx].vendorId = updatedMeta.vendorId;
+        masterList[idx].originalSeriesTitle = updatedMeta.originalSeriesTitle;
+        if (!masterList[idx].metadata) masterList[idx].metadata = {};
+        masterList[idx].metadata.category = updatedMeta.category;
+        masterList[idx].metadata.status = updatedMeta.status;
+        masterList[idx].metadata.authors = updatedMeta.author ? [updatedMeta.author] : [];
+        masterList[idx].metadata.summary = updatedMeta.summary;
+        masterList[idx].metadata.vendor = updatedMeta.vendor;
+        masterList[idx].metadata.vendorId = updatedMeta.vendorId;
+        masterList[idx].metadata.originalSeriesTitle = updatedMeta.originalSeriesTitle;
       }
-    }
+      return masterList;
+    });
   }
   
   return updatedMeta;
@@ -2230,7 +2241,7 @@ function View_authorizeCheck() {
  */
 
 // Centralized Thumbnail Folder Name provided by View_LibraryService.gs
-// const THUMB_FOLDER_NAME = "_Thumbnails";
+var THUMB_FOLDER_NAME = "_Thumbnails";
 
 /**
  * [Migration] Moves 'cover.jpg' from series folders to '_Thumbnails/{SeriesID}.jpg'
@@ -2583,6 +2594,284 @@ function Migrate_KavitaFormat(rootFolderId, executeRename = false) {
 
 
 /* ========================================================================== */
+/* FILE: View_KavitaService.gs */
+/* ========================================================================== */
+
+// =======================================================
+// 🔄 Kavita Library Structure Migration Service
+// =======================================================
+
+/**
+ * [Phase 3] 시리즈 폴더를 Root 직속 플랫 구조로 변환 (Kavita 호환)
+ * - CATS(Webtoon/Novel/Manga) 폴더에서 시리즈를 Root로 이동
+ * - 폴더명/파일명에서 [ID] 접두사 제거
+ * - _toki_meta.json에 _restructured: true 기록 (멱등성)
+ *
+ * @param {string} rootFolderId - Root 폴더 ID
+ * @param {string[]} selectedIds - 변환할 시리즈 폴더 ID 목록 (빈 배열 = 전체)
+ * @returns {Object} { ok, moved, total, errors }
+ */
+function Kavita_Restructure(rootFolderId, selectedIds) {
+  const result = { ok: true, moved: 0, total: 0, errors: [] };
+  const CATS = ["Webtoon", "Manga", "Novel"];
+  const startTime = new Date().getTime();
+  const TIME_LIMIT = 300000; // 5 minutes
+
+  // 1. Collect target series folders
+  let targets = [];
+  
+  if (selectedIds && selectedIds.length > 0) {
+    // Specific selection
+    targets = selectedIds.map(id => ({ id, name: DriveAccessService.getMetadata(id).name }));
+  } else {
+    // Scan all category folders
+    for (const catName of CATS) {
+      const catFolder = findFolderId(catName, rootFolderId);
+      if (!catFolder) continue;
+      const seriesList = DriveAccessService.list(catFolder, {
+        query: "mimeType = 'application/vnd.google-apps.folder'",
+        fields: "files(id, name)"
+      });
+      targets.push(...seriesList);
+    }
+  }
+
+  result.total = targets.length;
+  Debug.log(`[Kavita] 변환 대상: ${result.total}개 시리즈`);
+
+  // 2. Process each series
+  for (const series of targets) {
+    if (new Date().getTime() - startTime > TIME_LIMIT) {
+      Debug.log(`[Kavita] ⏰ 타임아웃 approaching, ${result.moved}/${result.total} 완료`);
+      break;
+    }
+
+    try {
+      const seriesMeta = _kavitaProcessSeries(series, rootFolderId);
+      if (seriesMeta) result.moved++;
+    } catch (e) {
+      result.errors.push({ id: series.id, reason: e.message });
+      Debug.error(`[Kavita] ❌ 실패: ${series.name}: ${e.message}`);
+    }
+  }
+
+  // 3. Clean up empty category folders
+  for (const catName of CATS) {
+    try {
+      const catFolder = findFolderId(catName, rootFolderId);
+      if (!catFolder) continue;
+      const remaining = DriveAccessService.list(catFolder, {
+        query: "mimeType = 'application/vnd.google-apps.folder'",
+        fields: "files(id)"
+      });
+      if (remaining.length === 0) {
+        DriveAccessService.trash(catFolder);
+        Debug.log(`[Kavita] 🗑️ 빈 카테고리 폴더 정리: ${catName}`);
+      }
+    } catch (e) {}
+  }
+
+  return result;
+}
+
+/**
+ * 개별 시리즈 폴더를 플랫 구조로 변환
+ */
+function _kavitaProcessSeries(series, rootFolderId) {
+  const folderId = series.id;
+  const folderName = series.name;
+  
+  // 멱등성: 이미 처리되었는지 확인
+  const metaResults = DriveAccessService.list(folderId, {
+    query: "name = '_toki_meta.json'",
+    fields: "files(id)"
+  });
+  
+  let alreadyRestructured = false;
+  if (metaResults.length > 0) {
+    try {
+      const content = DriveAccessService.getFileContent(metaResults[0].id);
+      const meta = JSON.parse(content);
+      alreadyRestructured = meta._restructured === true;
+    } catch (e) { Debug.error("[Kavita] processSeries error: " + e.message); }
+  }
+  
+  if (alreadyRestructured) {
+    Debug.log(`[Kavita] ⏭️ 이미 변환됨: ${folderName}`);
+    return null;
+  }
+
+  // Clean folder name: remove [ID] prefix
+  const cleanName = folderName.replace(/^\[[a-zA-Z0-9_\-]+\]\s*/, '').trim() || folderName;
+  
+  // If already in root and no [ID] prefix, just mark as done
+  if (cleanName === folderName && !folderName.match(/^\[/)) {
+    _kavitaMarkMigrated(folderId, folderName);
+    Debug.log(`[Kavita] ✅ 이미 플랫 구조: ${folderName}`);
+    return folderId;
+  }
+
+  // Create or find destination folder in root
+  let destFolderId;
+  try {
+    destFolderId = DriveAccessService.ensureFolder(rootFolderId, cleanName);
+  } catch (e) {
+    throw new Error(`대상 폴더 생성 실패: ${cleanName} (${e.message})`);
+  }
+
+  // Move all files
+  const files = DriveAccessService.list(folderId, {
+    query: "mimeType != 'application/vnd.google-apps.folder'",
+    fields: "files(id, name)"
+  });
+
+  for (const file of files) {
+    if (file.name === 'info.json' || file.name === '_toki_meta.json') {
+      DriveAccessService.move(file.id, folderId, destFolderId);
+      continue;
+    }
+    
+    // Clean file name: remove [ID] prefix
+    const cleanFileName = file.name.replace(/^\[[a-zA-Z0-9_\-]+\]\s*/, '').trim() || file.name;
+    if (cleanFileName !== file.name) {
+      DriveAccessService.patch(file.id, { name: cleanFileName });
+    }
+    DriveAccessService.move(file.id, folderId, destFolderId);
+  }
+
+  // Mark source folder as migrated
+  _kavitaMarkMigrated(destFolderId, cleanName);
+
+  // Trash the old series folder
+  try {
+    DriveAccessService.trash(folderId);
+  } catch (e) {
+    Debug.log(`[Kavita] ⚠️ 구 폴더 정리 실패 (무시 가능): ${folderId}`);
+  }
+
+  Debug.log(`[Kavita] ✅ 변환 완료: ${folderName} → ${cleanName}`);
+  return destFolderId;
+}
+
+function _kavitaMarkMigrated(folderId, seriesName) {
+  let meta = {};
+  let existing = [];
+  try {
+    existing = DriveAccessService.list(folderId, {
+      query: "name = '_toki_meta.json'",
+      fields: "files(id)"
+    });
+    if (existing.length > 0) {
+      const raw = DriveAccessService.getFileContent(existing[0].id);
+      try {
+        meta = JSON.parse(raw);
+      } catch (parseErr) {
+        Debug.error(`[Kavita] _toki_meta.json parse failed for ${seriesName}: ${parseErr.message}. Skip write to prevent data loss.`);
+        return;
+      }
+    }
+  } catch (e) {
+    Debug.error(`[Kavita] Drive access failed for ${seriesName}: ${e.message}`);
+    return;
+  }
+
+  meta._restructured = true;
+  meta._restructuredAt = new Date().toISOString();
+  meta.name = meta.name || seriesName;
+  meta.lastUpdated = new Date().toISOString();
+
+  const body = JSON.stringify(meta, null, 2);
+  if (existing.length > 0) {
+    DriveAccessService.updateFileContent(existing[0].id, body, "application/json");
+  } else {
+    DriveAccessService.createFile(folderId, "_toki_meta.json", body, "application/json");
+  }
+}
+
+/**
+ * 현재 라이브러리 구조 진단
+ */
+function Kavita_GetStatus(rootFolderId) {
+  const CATS = ["Webtoon", "Manga", "Novel"];
+  const SYSTEM_FOLDERS = ["_Thumbnails", "_MergeIndex"];
+  
+  const result = {
+    stats: { totalSeries: 0, legacyCategory: 0, alreadyFlat: 0, restructured: 0 },
+    byCategory: [],
+    conflicts: []
+  };
+  
+  const nameCount = {};
+  
+  // Scan category folders
+  for (const catName of CATS) {
+    const catFolder = findFolderId(catName, rootFolderId);
+    if (!catFolder) continue;
+    
+    const seriesList = DriveAccessService.list(catFolder, {
+      query: "mimeType = 'application/vnd.google-apps.folder'",
+      fields: "files(id, name)"
+    });
+    
+    if (seriesList.length === 0) continue;
+    
+    const entry = { name: catName, series: [] };
+    for (const s of seriesList) {
+      const cleanName = s.name.replace(/^\[[a-zA-Z0-9_\-]+\]\s*/, '').trim() || s.name;
+      entry.series.push({ id: s.id, name: s.name, cleanName });
+      
+      // Check for conflicts
+      if (nameCount[cleanName]) {
+        nameCount[cleanName].push({ path: `${catName}/${s.name}`, id: s.id });
+      } else {
+        nameCount[cleanName] = [{ path: `${catName}/${s.name}`, id: s.id }];
+      }
+      
+      // Check if already restructured
+      try {
+        const metaFiles = DriveAccessService.list(s.id, {
+          query: "name = '_toki_meta.json'",
+          fields: "files(id)"
+        });
+        if (metaFiles.length > 0) {
+          const content = DriveAccessService.getFileContent(metaFiles[0].id);
+          const meta = JSON.parse(content);
+          if (meta._restructured) result.stats.restructured++;
+        }
+      } catch (e) {}
+      
+      result.stats.legacyCategory++;
+    }
+    result.byCategory.push(entry);
+  }
+  
+  // Scan root for already-flat series
+  const rootFolders = DriveAccessService.list(rootFolderId, {
+    query: "mimeType = 'application/vnd.google-apps.folder'",
+    fields: "files(id, name)"
+  });
+  
+  for (const f of rootFolders) {
+    if (CATS.includes(f.name) || SYSTEM_FOLDERS.includes(f.name)) continue;
+    if (!f.name.match(/^\[/)) {
+      result.stats.alreadyFlat++;
+    }
+  }
+  
+  result.stats.totalSeries = result.stats.legacyCategory + result.stats.alreadyFlat;
+  
+  // Find conflicts
+  for (const [name, sources] of Object.entries(nameCount)) {
+    if (sources.length > 1) {
+      result.conflicts.push({ name, sources });
+    }
+  }
+  
+  return result;
+}
+
+
+/* ========================================================================== */
 /* FILE: Debug.gs */
 /* ========================================================================== */
 
@@ -2605,6 +2894,13 @@ var Debug = {
     const timestamp = `[+${elapsed}ms]`;
     console.log(msg); // Stackdriver에도 남김
     this.logs.push(`${timestamp} ${msg}`);
+  },
+
+  warn: function (msg) {
+    const elapsed = new Date().getTime() - this.startTime;
+    const timestamp = `[+${elapsed}ms]`;
+    console.warn(msg);
+    this.logs.push(`⚠️ ${timestamp} ${msg}`);
   },
 
   error: function (msg, err) {
