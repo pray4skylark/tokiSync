@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.26.4
+// @version      1.26.5
 // @description  Toki series sites -> Google Drive syncing tool (Bundled)
 // @author       pray4skylark
 // @updateURL    https://pray4skylark.github.io/tokiSync/tokiSync.user.js
@@ -270,6 +270,7 @@ const addEpisodesToQueue = (episodes, novelTitle) => {
         matchedRule: ep.matchedRule || {},
         protocolDomain: ep.protocolDomain || '',
         seriesMetadata: ep.seriesMetadata || {},
+        forceOverwrite: ep.forceOverwrite || false,
         status: 'pending',
         progressPercent: 0,
         stage: WORKER_STAGE.INIT,
@@ -1157,7 +1158,7 @@ async function getOrCreateThumbnailFolder(token, parentId) {
  * Sends data in chunks to a Google Drive Resumable Upload session
  */
 async function sendResumableChunks(uploadUrl, blob, token, fileName) {
-    const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB (Minimum for Drive is 256KB, 5MB is standard)
+    const CHUNK_SIZE = 5 * 1024 * 1024;
     const totalSize = blob.size;
     let start = 0;
 
@@ -1165,7 +1166,7 @@ async function sendResumableChunks(uploadUrl, blob, token, fileName) {
         const end = Math.min(start + CHUNK_SIZE, totalSize);
         const chunk = blob.slice(start, end);
         const contentRange = `bytes ${start}-${end - 1}/${totalSize}`;
-        
+
         await new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method: 'PUT',
@@ -1177,31 +1178,27 @@ async function sendResumableChunks(uploadUrl, blob, token, fileName) {
                 },
                 data: chunk,
                 binary: true,
-                timeout: 300000, // 5 minutes per chunk
+                timeout: 300000,
                 onload: (res) => {
-                    if (res.status === 308) {
-                        // Resume Incomplete (Standard Response for chunks)
-                        resolve();
-                    } else if (res.status >= 200 && res.status < 300) {
-                        // Done (Final chunk)
+                    if (res.status === 308 || (res.status >= 200 && res.status < 300)) {
                         resolve();
                     } else {
+                        _EventBus_js__WEBPACK_IMPORTED_MODULE_1__/* .EventBus */ .l.emit(_EventBus_js__WEBPACK_IMPORTED_MODULE_1__/* .EVT */ .c.LOG, { msg: `❌ [${fileName}] 청크 업로드 실패 (${res.status})`, level: 'error', tag: 'Upload' });
                         reject(new Error(`Chunk upload failed: ${res.status} ${res.responseText}`));
                     }
                 },
-                onerror: reject,
-                ontimeout: () => reject(new Error(`Chunk upload timed out: ${contentRange}`))
+                onerror: () => {
+                    _EventBus_js__WEBPACK_IMPORTED_MODULE_1__/* .EventBus */ .l.emit(_EventBus_js__WEBPACK_IMPORTED_MODULE_1__/* .EVT */ .c.LOG, { msg: `❌ [${fileName}] 청크 네트워크 오류`, level: 'error', tag: 'Upload' });
+                    reject(new Error('Chunk upload network error'));
+                },
+                ontimeout: () => {
+                    _EventBus_js__WEBPACK_IMPORTED_MODULE_1__/* .EventBus */ .l.emit(_EventBus_js__WEBPACK_IMPORTED_MODULE_1__/* .EVT */ .c.LOG, { msg: `⏰ [${fileName}] 청크 타임아웃`, level: 'error', tag: 'Upload' });
+                    reject(new Error(`Chunk upload timed out: ${contentRange}`));
+                }
             });
         });
-        
+
         start = end;
-        const progress = Math.min(100, Math.floor((start / totalSize) * 100));
-        console.log(`[DirectUpload] ${fileName} -> ${progress}% (${start}/${totalSize})`);
-        _EventBus_js__WEBPACK_IMPORTED_MODULE_1__/* .EventBus */ .l.emit(_EventBus_js__WEBPACK_IMPORTED_MODULE_1__/* .EVT */ .c.LOG, {
-            msg: `☁️ [${fileName}] Drive 업로드 중... ${progress}% (${Math.floor(start / 1024 / 1024)}MB / ${Math.floor(totalSize / 1024 / 1024)}MB)`,
-            level: 'info',
-            tag: 'Upload'
-        });
     }
 }
 
@@ -1210,7 +1207,11 @@ async function sendResumableChunks(uploadUrl, blob, token, fileName) {
  */
 async function uploadDirect(blob, folderName, fileName, metadata = {}) {
     try {
-        console.log(`[DirectUpload] Preparing: ${fileName} (${blob.size} bytes)`);
+        const { forceOverwrite = false } = metadata;
+        if (forceOverwrite) {
+            console.log(`[DirectUpload] Force overwrite mode: ${fileName}`);
+        }
+        _EventBus_js__WEBPACK_IMPORTED_MODULE_1__/* .EventBus */ .l.emit(_EventBus_js__WEBPACK_IMPORTED_MODULE_1__/* .EVT */ .c.LOG, { msg: `☁️ [${fileName}] Drive 직접 업로드 준비 중... (${(blob.size / 1024 / 1024).toFixed(1)}MB)`, level: 'info', tag: 'Upload' });
         
         const config = (0,_config_js__WEBPACK_IMPORTED_MODULE_0__/* .getConfig */ .zj)();
         const token = await getToken();
@@ -1260,10 +1261,11 @@ async function uploadDirect(blob, folderName, fileName, metadata = {}) {
             
             if (searchRes.files && searchRes.files.length > 0) {
                 existingFileId = searchRes.files[0].id;
-                console.log(`[DirectUpload] Existing file found: ${existingFileId} (Mode: UPDATE)`);
+                _EventBus_js__WEBPACK_IMPORTED_MODULE_1__/* .EventBus */ .l.emit(_EventBus_js__WEBPACK_IMPORTED_MODULE_1__/* .EVT */ .c.LOG, { msg: `📎 [${fileName}] 기존 파일 발견 → 업데이트(PATCH) 모드`, level: 'info', tag: 'Upload' });
             }
         } catch (searchErr) {
             console.warn('[DirectUpload] Existing file check failed:', searchErr);
+            throw new Error('기존 파일 검색 실패: ' + searchErr.message);
         }
 
         // 4. Initialize Resumable Session
@@ -1303,26 +1305,28 @@ async function uploadDirect(blob, folderName, fileName, metadata = {}) {
                             sessionUri.searchParams.set('upload_id', uploadIdMatch[1].trim());
                             resolve(sessionUri.toString());
                         } else {
-                            console.error('[DirectUpload] Response Headers:', res.responseHeaders);
-                            console.error('[DirectUpload] Response Body:', res.responseText);
+                            _EventBus_js__WEBPACK_IMPORTED_MODULE_1__/* .EventBus */ .l.emit(_EventBus_js__WEBPACK_IMPORTED_MODULE_1__/* .EVT */ .c.LOG, { msg: `❌ [${fileName}] 업로드 세션 URL 추출 실패`, level: 'error', tag: 'Upload' });
                             reject(new Error(`Failed to extract session URL. Headers: ${res.responseHeaders}`));
                         }
                     } else {
+                        _EventBus_js__WEBPACK_IMPORTED_MODULE_1__/* .EventBus */ .l.emit(_EventBus_js__WEBPACK_IMPORTED_MODULE_1__/* .EVT */ .c.LOG, { msg: `❌ [${fileName}] 업로드 세션 초기화 실패 (HTTP ${res.status})`, level: 'error', tag: 'Upload' });
                         reject(new Error(`Session init failed with status: ${res.status}`));
                     }
                 },
-                onerror: reject
+                onerror: () => {
+                    _EventBus_js__WEBPACK_IMPORTED_MODULE_1__/* .EventBus */ .l.emit(_EventBus_js__WEBPACK_IMPORTED_MODULE_1__/* .EVT */ .c.LOG, { msg: `❌ [${fileName}] 업로드 세션 네트워크 오류`, level: 'error', tag: 'Upload' });
+                    reject(new Error('Session init network error'));
+                }
             });
         });
 
         // 5. Send chunks
         await sendResumableChunks(uploadUrl, blob, token, finalFileName);
-        console.log(`[DirectUpload] ✅ Upload successful: ${finalFileName}`);
+        _EventBus_js__WEBPACK_IMPORTED_MODULE_1__/* .EventBus */ .l.emit(_EventBus_js__WEBPACK_IMPORTED_MODULE_1__/* .EVT */ .c.LOG, { msg: `✅ [${finalFileName}] Drive 업로드 완료!`, level: 'success', tag: 'Upload' });
         return;
 
     } catch (error) {
-        console.error(`[DirectUpload] Error:`, error);
-        _logger_js__WEBPACK_IMPORTED_MODULE_2__.logger.error(`[DirectUpload] ${error.message}`, 'Network:Upload');
+        _EventBus_js__WEBPACK_IMPORTED_MODULE_1__/* .EventBus */ .l.emit(_EventBus_js__WEBPACK_IMPORTED_MODULE_1__/* .EVT */ .c.LOG, { msg: `❌ [${fileName}] Drive 업로드 실패: ${error.message}`, level: 'error', tag: 'Upload' });
         throw error;
     }
 }
@@ -2348,7 +2352,8 @@ async function uploadViaGASRelay(blob, folderName, fileName, options = {}) {
                 folderName: folderName, 
                 fileName: fileName,
                 category: category,
-                apiKey: config.apiKey
+                apiKey: config.apiKey,
+                forceOverwrite: options.forceOverwrite || false
             }),
             headers: { "Content-Type": "text/plain" },
             timeout: 30000,
@@ -2708,7 +2713,7 @@ ${tocNav}
 class RuleManager {
     // Built-in sample rules as fallback/templates (Offline Seeding)
     static get _version() {
-        return  true ? "1.26.4" : 0;
+        return  true ? "1.26.5" : 0;
     }
 
     static #builtInRules = [
@@ -3637,7 +3642,8 @@ function initBatchWorkerController() {
                     folderId: item.folderId,
                     folderName: targetFolderName,
                     category: category,
-                    destination: destination
+                    destination: destination,
+                    forceOverwrite: item.forceOverwrite || false
                 });
             } finally {
                 clearInterval(keepalive);
@@ -4239,22 +4245,28 @@ var RuleManager = __webpack_require__(543);
  */
 
 class DomInspector {
-    constructor() {
+    constructor(options = {}) {
         this.root = document.body;
         this.treeData = null;
         this.nodeMap = [];
+        this.elementToNode = new Map();
         this.filterText = '';
         this.onApply = null;
         this.lastSelector = '';
-        this.maxDepth = 12;
         this.selectedNode = null;
+        this.options = {
+            enablePseudo: true,
+            enableShadow: true,
+            maxDepth: 999,
+            ...options
+        };
     }
 
     /**
      * Walk the DOM and build a simplified tree.
      */
     simplify(element, depth = 0) {
-        if (depth > this.maxDepth) return null;
+        if (depth > this.options.maxDepth) return null;
 
         if (element.nodeType === Node.TEXT_NODE) {
             const text = element.textContent.replace(/\s+/g, ' ').trim();
@@ -4265,12 +4277,8 @@ class DomInspector {
         if (element.nodeType !== Node.ELEMENT_NODE) return null;
 
         const tag = element.tagName.toLowerCase();
-        const skip = ['script','style','link','meta','noscript','iframe','svg','path','br','hr','wbr'];
+        const skip = ['script', 'style'];
         if (skip.includes(tag)) return null;
-
-        const rect = element.getBoundingClientRect();
-        const noLayout = rect.width === 0 && rect.height === 0 && tag !== 'img' && tag !== 'input' && tag !== 'br';
-        if (noLayout) return null;
 
         const node = {
             type: 'element',
@@ -4279,10 +4287,11 @@ class DomInspector {
             classes: [],
             attrs: {},
             text: null,
-            hidden: false,
+            hidden: null,
             children: [],
             elementRef: element,
-            matched: false
+            matched: false,
+            shadow: false
         };
 
         for (const c of element.classList) {
@@ -4291,54 +4300,177 @@ class DomInspector {
             }
         }
 
+        // CSS evasion detection
         const style = window.getComputedStyle(element);
-        node.hidden = style.display === 'none' || style.visibility === 'hidden';
+        node.hidden = this._detectHidden(style, element);
 
-        const important = ['href','src','data-num','data-src','data-lazy','data-original','alt','title','value','type','name','data-id'];
-        for (const a of important) {
-            const v = element.getAttribute(a);
-            if (v) node.attrs[a] = v.length > 80 ? v.substring(0, 80) + '…' : v;
-        }
+        // Collect attributes
+        this._collectAttrs(element, node);
 
-        const directText = element.childNodes.length === 1 && element.childNodes[0].nodeType === Node.TEXT_NODE;
-        const noChildren = element.children.length === 0;
-        if (directText || noChildren) {
-            const t = element.textContent.replace(/\s+/g, ' ').trim();
-            if (t) node.text = t.length > 80 ? t.substring(0, 80) + '…' : t;
-        }
-
+        // Process child nodes
         for (const child of element.childNodes) {
             const s = this.simplify(child, depth + 1);
             if (s) node.children.push(s);
         }
 
+        // Pseudo-elements
+        if (this.options.enablePseudo) {
+            this._addPseudoElements(element, node);
+        }
+
+        // Shadow DOM
+        if (this.options.enableShadow && element.shadowRoot) {
+            for (const child of element.shadowRoot.childNodes) {
+                const s = this.simplify(child, depth + 1);
+                if (s) {
+                    s.shadow = true;
+                    node.children.push(s);
+                }
+            }
+        }
+
+        // Collapse single text child
         if (node.children.length === 1 && node.children[0].type === 'text' && !node.text) {
             node.text = node.children[0].value;
             node.children = [];
         }
 
+        // Build reverse index
+        this.elementToNode.set(element, node);
+
         return node;
+    }
+
+    /**
+     * Detect CSS-based hiding/evasion strategies.
+     * Returns a string flag or null.
+     */
+    _detectHidden(style, element) {
+        if (style.display === 'none') return 'display-none';
+        if (style.visibility === 'hidden') return 'visibility-hidden';
+
+        const opacity = parseFloat(style.opacity);
+        if (!isNaN(opacity) && opacity < 0.5) return 'faded';
+
+        const pos = style.position;
+        if (pos === 'absolute' || pos === 'fixed') {
+            const left = parseFloat(style.left);
+            const top = parseFloat(style.top);
+            if (left <= -9999 || top <= -9999) return 'offscreen';
+        }
+
+        const clipPath = style.clipPath || '';
+        if (clipPath.startsWith('inset(50%)')) return 'clipped';
+
+        const fontSize = parseFloat(style.fontSize);
+        if (!isNaN(fontSize) && fontSize === 0) return 'zero-font';
+
+        if (style.pointerEvents === 'none') return 'no-pointer';
+
+        return null;
+    }
+
+    /**
+     * Collect attributes from an element.
+     */
+    _collectAttrs(element, node) {
+        const important = ['href', 'src', 'data-num', 'data-lazy', 'data-original', 'alt', 'title', 'value', 'type', 'name', 'data-id'];
+        for (const a of important) {
+            const v = element.getAttribute(a);
+            if (v) node.attrs[a] = v.length > 80 ? v.substring(0, 80) + '\u2026' : v;
+        }
+
+        // Collect ALL data-* attributes
+        for (const attr of element.attributes) {
+            const name = attr.name;
+            if (name.startsWith('data-') && !node.attrs[name]) {
+                const v = attr.value;
+                node.attrs[name] = v.length > 80 ? v.substring(0, 80) + '\u2026' : v;
+            }
+        }
+
+        // aria-* attributes
+        for (const attr of element.attributes) {
+            if (attr.name.startsWith('aria-')) {
+                const v = attr.value;
+                node.attrs[attr.name] = v.length > 80 ? v.substring(0, 80) + '\u2026' : v;
+            }
+        }
+
+        // Additional single attributes
+        const singles = ['role', 'style', 'loading'];
+        for (const a of singles) {
+            const v = element.getAttribute(a);
+            if (v && !node.attrs[a]) {
+                node.attrs[a] = v.length > 80 ? v.substring(0, 80) + '\u2026' : v;
+            }
+        }
+    }
+
+    /**
+     * Add pseudo-element nodes (::before / ::after).
+     */
+    _addPseudoElements(element, node) {
+        const computed = window.getComputedStyle(element);
+        for (const pseudo of ['::before', '::after']) {
+            const ps = window.getComputedStyle(element, pseudo);
+            if (ps.content && ps.content !== 'none' && ps.content !== 'normal') {
+                node.children.push({
+                    type: 'pseudo',
+                    name: pseudo,
+                    content: ps.content,
+                    hidden: null,
+                    children: []
+                });
+            }
+        }
     }
 
     build() {
         this.nodeMap = [];
+        this.elementToNode = new Map();
         this.treeData = this.simplify(this.root);
     }
 
     /**
      * Render the tree as DevTools-style HTML.
+     * Uses chunked rendering for large trees (>200 nodes).
      */
-    renderTree(node, depth = 0) {
-        if (!node) return '';
-        if (node.type === 'text') return '';
+    renderTree(container) {
+        this.nodeMap = [];
+        const totalNodes = this._countElementNodes(this.treeData);
+
+        if (totalNodes <= 200) {
+            // Sync render for small trees
+            const html = this._renderTreeSync(this.treeData);
+            container.innerHTML = html;
+            return;
+        }
+
+        // Chunked render for large trees
+        this._renderTreeChunked(container);
+    }
+
+    _countElementNodes(node) {
+        if (!node || node.type === 'text') return 0;
+        let count = 1;
+        for (const child of node.children) {
+            count += this._countElementNodes(child);
+        }
+        return count;
+    }
+
+    _renderTreeSync(node, depth = 0) {
+        if (!node || node.type === 'text') return '';
+        if (node.type === 'pseudo') return this._renderPseudoNode(node, depth);
 
         const idx = this.nodeMap.length;
         this.nodeMap.push(node);
         node._idx = idx;
 
-        const hasChildren = node.children.some(c => c.type === 'element');
+        const hasChildren = node.children.some(c => c.type === 'element' || c.type === 'pseudo');
         const expandByDefault = depth < 3;
-        const arrow = hasChildren ? (expandByDefault ? '▼' : '▶') : '  ';
+        const arrow = hasChildren ? (expandByDefault ? '\u25BC' : '\u25B6') : '  ';
 
         const tagHtml = `<span class="di-tag">${node.tag}</span>`;
         const idHtml = node.id ? `<span class="di-id">#${node.id}</span>` : '';
@@ -4351,27 +4483,80 @@ class DomInspector {
         const textHtml = node.text
             ? ` <span class="di-text">"${node.text}"</span>`
             : '';
-        const hiddenAttr = node.hidden ? ' di-dimmed' : '';
+        const hiddenClass = node.hidden ? ' di-dimmed' : '';
+        const shadowBadge = node.shadow ? '<span class="di-shadow-badge">\u{1F4A0}</span>' : '';
 
-        let html = `<div class="di-line${hiddenAttr}" data-idx="${idx}" style="padding-left:${depth * 20}px">
+        let html = `<div class="di-line${hiddenClass}" data-idx="${idx}" style="padding-left:${depth * 20}px">
             <span class="di-arrow">${arrow}</span>
-            ${tagHtml}${idHtml}${clsHtml}${attrHtml}${textHtml}
+            ${shadowBadge}${tagHtml}${idHtml}${clsHtml}${attrHtml}${textHtml}
         </div>`;
 
         if (hasChildren && expandByDefault) {
             const childrenHtml = node.children
-                .filter(c => c.type === 'element')
-                .map(c => this.renderTree(c, depth + 1))
+                .filter(c => c.type === 'element' || c.type === 'pseudo')
+                .map(c => this._renderTreeSync(c, depth + 1))
                 .join('');
             html += `<div class="di-children" data-parent="${idx}">${childrenHtml}</div>`;
         } else if (hasChildren) {
             const childrenHtml = node.children
-                .filter(c => c.type === 'element')
-                .map(c => this.renderTree(c, depth + 1))
+                .filter(c => c.type === 'element' || c.type === 'pseudo')
+                .map(c => this._renderTreeSync(c, depth + 1))
                 .join('');
             html += `<div class="di-children di-collapsed" data-parent="${idx}">${childrenHtml}</div>`;
         }
 
+        return html;
+    }
+
+    _renderTreeChunked(container) {
+        this.nodeMap = [];
+        const batchSize = 100;
+        const pending = [];
+        this._collectRenderQueue(this.treeData, pending, 0);
+
+        let offset = 0;
+        const renderBatch = () => {
+            const batch = pending.slice(offset, offset + batchSize);
+            offset += batch.length;
+
+            for (const { node, depth } of batch) {
+                this.nodeMap.push(node);
+                node._idx = node._idx !== undefined ? node._idx : this.nodeMap.length - 1;
+            }
+
+            if (offset < pending.length) {
+                requestAnimationFrame(renderBatch);
+            } else {
+                // All queued — now build full HTML
+                container.innerHTML = this._renderTreeSync(this.treeData);
+            }
+        };
+
+        requestAnimationFrame(renderBatch);
+    }
+
+    _collectRenderQueue(node, queue, depth) {
+        if (!node || node.type === 'text') return;
+        queue.push({ node, depth });
+        node._idx = queue.length - 1;
+        for (const child of node.children) {
+            if (child.type === 'element' || child.type === 'pseudo') {
+                this._collectRenderQueue(child, queue, depth + 1);
+            }
+        }
+    }
+
+    _renderPseudoNode(node, depth) {
+        const idx = this.nodeMap.length;
+        this.nodeMap.push(node);
+        node._idx = idx;
+
+        const hiddenClass = node.hidden ? ' di-dimmed' : '';
+        let html = `<div class="di-line di-pseudo${hiddenClass}" data-idx="${idx}" style="padding-left:${depth * 20}px">
+            <span class="di-arrow">  </span>
+            <span class="di-pseudo-name">${node.name}</span>
+            <span class="di-text">"${node.content}"</span>
+        </div>`;
         return html;
     }
 
@@ -4380,7 +4565,6 @@ class DomInspector {
         const lower = text.toLowerCase();
         let match = node.tag.includes(lower) ||
             node.classes.some(c => c.includes(lower)) ||
-            (node.text && node.text.toLowerCase().includes(lower)) ||
             Object.values(node.attrs).some(v => v.toLowerCase().includes(lower));
         for (const child of node.children) {
             if (this.filterNodes(child, text)) match = true;
@@ -4391,9 +4575,12 @@ class DomInspector {
 
     renderTreeFiltered(node, depth = 0) {
         if (!node || node.type === 'text') return '';
+        if (node.type === 'pseudo') {
+            return this._renderPseudoNode(node, depth);
+        }
         if (!node.matched) {
             for (const child of node.children) {
-                if (child.type === 'element' && child.matched) {
+                if ((child.type === 'element' || child.type === 'pseudo') && child.matched) {
                     return this.renderTreeFiltered(child, depth);
                 }
             }
@@ -4404,8 +4591,8 @@ class DomInspector {
         this.nodeMap.push(node);
         node._idx = idx;
 
-        const hasVisibleChildren = node.children.some(c => c.type === 'element' && c.matched);
-        const arrow = hasVisibleChildren ? '▼' : '  ';
+        const hasVisibleChildren = node.children.some(c => (c.type === 'element' || c.type === 'pseudo') && c.matched);
+        const arrow = hasVisibleChildren ? '\u25BC' : '  ';
 
         const tagHtml = `<span class="di-tag">${node.tag}</span>`;
         const idHtml = node.id ? `<span class="di-id">#${node.id}</span>` : '';
@@ -4418,16 +4605,16 @@ class DomInspector {
         const textHtml = node.text
             ? ` <span class="di-text">"${node.text}"</span>`
             : '';
-        const hiddenAttr = node.hidden ? ' di-dimmed' : '';
+        const hiddenClass = node.hidden ? ' di-dimmed' : '';
         const matchedAttr = node.matched ? ' di-highlight' : '';
 
-        let html = `<div class="di-line${hiddenAttr}${matchedAttr}" data-idx="${idx}" style="padding-left:${depth * 20}px">
+        let html = `<div class="di-line${hiddenClass}${matchedAttr}" data-idx="${idx}" style="padding-left:${depth * 20}px">
             <span class="di-arrow">${arrow}</span>
             ${tagHtml}${idHtml}${clsHtml}${attrHtml}${textHtml}
         </div>`;
 
         const childrenHtml = node.children
-            .filter(c => c.type === 'element' && c.matched)
+            .filter(c => (c.type === 'element' || c.type === 'pseudo') && c.matched)
             .map(c => this.renderTreeFiltered(c, depth + 1))
             .join('');
 
@@ -4444,16 +4631,27 @@ class DomInspector {
     toSelector(node) {
         if (!node || node.type !== 'element') return '';
 
+        // 1. id unique
         if (node.id) {
-            const s = `#${node.id}`;
+            const s = `#${CSS.escape(node.id)}`;
             if (document.querySelectorAll(s).length === 1) return s;
         }
 
+        // 2. class unique
         if (node.classes.length > 0) {
             const s = `${node.tag}.${node.classes.join('.')}`;
             if (document.querySelectorAll(s).length === 1) return s;
         }
 
+        // 3. data attribute unique
+        const dataAttrs = Object.keys(node.attrs).filter(k => k.startsWith('data-'));
+        for (const key of dataAttrs) {
+            const val = node.attrs[key];
+            const s = `${node.tag}[${key}="${val}"]`;
+            if (document.querySelectorAll(s).length === 1) return s;
+        }
+
+        // 4/5. Build path with nth-of-type
         const path = [];
         let el = node.elementRef;
         while (el && el !== document.body && el !== document.documentElement) {
@@ -4462,7 +4660,7 @@ class DomInspector {
             const classes = Array.from(el.classList).filter(c => !c.startsWith('toki-') && !c.startsWith('sc-'));
 
             let seg = tag;
-            if (id) { path.unshift(`#${id}`); break; }
+            if (id) { path.unshift(`#${CSS.escape(id)}`); break; }
             if (classes.length > 0) seg += `.${classes.join('.')}`;
 
             const parent = el.parentElement;
@@ -4470,7 +4668,7 @@ class DomInspector {
                 const sameTag = Array.from(parent.children).filter(c => c.tagName === el.tagName);
                 if (sameTag.length > 1) {
                     const nth = sameTag.indexOf(el) + 1;
-                    seg += `:nth-child(${nth})`;
+                    seg += `:nth-of-type(${nth})`;
                 }
             }
 
@@ -4478,13 +4676,7 @@ class DomInspector {
             el = el.parentElement;
         }
 
-        let sel = path.join(' > ');
-        if (node.classes.length > 0) {
-            const s = `${node.tag}.${node.classes.join('.')}`;
-            if (document.querySelectorAll(s).length === 1) return s;
-        }
-
-        return sel;
+        return path.join(' > ');
     }
 
     /**
@@ -4497,32 +4689,51 @@ class DomInspector {
     }
 
     _render(container) {
-        this.nodeMap = [];
-        const treeHtml = this.renderTree(this.treeData);
-
         container.innerHTML = `
             <div class="di-panel">
                 <div class="di-toolbar">
-                    <div class="di-title">🧬 DOM 검사기</div>
+                    <div class="di-title">\u{1F9EC} DOM \uAC80\uC0AC\uAE30</div>
                     <div class="di-toolbar-right">
-                        <span class="di-count">${this.nodeMap.length} elements</span>
-                        <button class="di-refresh" title="DOM 새로고침">↻</button>
+                        <span class="di-count">0 elements</span>
+                        <button class="di-refresh" title="DOM \uC0C8\uB85C\uACE0\uCE68">\u21BB</button>
                     </div>
                 </div>
                 <div class="di-filter-bar">
-                    <input type="text" class="di-filter" placeholder="🔍 태그 / 클래스 / 텍스트 검색..." />
+                    <input type="text" class="di-filter" placeholder="\u{1F50D} \uD0DC\uADF8 / \uD074\uB798\uC2A4 / \uD14D\uC2A4\uD2B8 \uAC80\uC0C9..." />
                 </div>
                 <div class="di-tree-wrap">
-                    <div class="di-tree">${treeHtml}</div>
+                    <div class="di-tree"></div>
                 </div>
                 <div class="di-detail" id="di-detail">
-                    <div class="di-detail-header">📋 요소 정보</div>
+                    <div class="di-detail-header">\u{1F4CB} \uC694\uC18C \uC815\uBCF4</div>
                     <div class="di-detail-body" id="di-detail-body">
-                        <span class="di-detail-placeholder">트리에서 요소를 클릭하세요</span>
+                        <span class="di-detail-placeholder">\uD2B8\uB9AC\uC5D0\uC11C \uC694\uC18C\uB97C \uD074\uB9AD\uD558\uC138\uC694</span>
                     </div>
                 </div>
             </div>
         `;
+
+        const tree = container.querySelector('.di-tree');
+        this.renderTree(tree);
+
+        // Update count after render
+        const countEl = container.querySelector('.di-count');
+        if (countEl) {
+            const updateCount = () => { countEl.textContent = `${this.nodeMap.length} elements`; };
+            // For chunked rendering, poll until stable
+            if (this.nodeMap.length === 0) {
+                const poll = setInterval(() => {
+                    updateCount();
+                    if (this.nodeMap.length > 0 && tree.innerHTML.length > 0) {
+                        clearInterval(poll);
+                        updateCount();
+                    }
+                }, 50);
+                setTimeout(() => clearInterval(poll), 3000);
+            } else {
+                updateCount();
+            }
+        }
 
         this._bindEvents(container);
     }
@@ -4544,7 +4755,7 @@ class DomInspector {
             if (!children) return;
             const isOpen = !children.classList.contains('di-collapsed');
             children.classList.toggle('di-collapsed');
-            arrow.textContent = isOpen ? '▶' : '▼';
+            arrow.textContent = isOpen ? '\u25B6' : '\u25BC';
         });
 
         // Line click (not on arrow) → select element
@@ -4571,7 +4782,7 @@ class DomInspector {
             clearTimeout(filterTimer);
             filterTimer = setTimeout(() => {
                 this._applyFilter(filter.value, tree);
-            }, 200);
+            }, 150);
         };
 
         // Refresh
@@ -4599,6 +4810,7 @@ class DomInspector {
         const idStr = node.id ? `#${node.id}` : '-';
         const clsStr = node.classes.length > 0 ? node.classes.join(' ') : '-';
         const textStr = node.text ? node.text.substring(0, 100) : '-';
+        const hiddenStr = node.hidden ? node.hidden : '-';
         const selectorStr = selector;
 
         // Encode selector safely for the code element
@@ -4606,22 +4818,24 @@ class DomInspector {
 
         detailBody.innerHTML = `
             <div class="di-detail-grid">
-                <div class="di-detail-label">태그</div>
+                <div class="di-detail-label">\uD0DC\uADF8</div>
                 <div class="di-detail-val"><span class="di-tag">${tagStr}</span></div>
                 <div class="di-detail-label">ID</div>
                 <div class="di-detail-val"><span class="di-id">${idStr}</span></div>
-                <div class="di-detail-label">클래스</div>
+                <div class="di-detail-label">\uD074\uB798\uC2A4</div>
                 <div class="di-detail-val"><span class="di-class">${clsStr}</span></div>
-                <div class="di-detail-label">텍스트</div>
+                <div class="di-detail-label">\uD14D\uC2A4\uD2B8</div>
                 <div class="di-detail-val di-detail-text">${textStr}</div>
+                <div class="di-detail-label">\uC228\uAE68\uAE40</div>
+                <div class="di-detail-val"><span class="di-class">${hiddenStr}</span></div>
             </div>
             <div class="di-detail-selector">
-                <div class="di-detail-label">생성된 셀렉터</div>
+                <div class="di-detail-label">\uC0DD\uC131\uB41C \uC140\uB809\uD130</div>
                 <div class="di-selector-row">
                     <code class="di-selector-code">${encodedSelector}</code>
                     <div class="di-selector-actions">
-                        <button class="di-btn-copy">📋</button>
-                        <button class="di-btn-apply" title="현재 입력 필드에 셀렉터 적용">📝 적용</button>
+                        <button class="di-btn-copy">\u{1F4CB}</button>
+                        <button class="di-btn-apply" title="\uD604\uC7AC \uC785\uB825 \uD544\uB4DC\uC5D0 \uC140\uB809\uD130 \uC801\uC6A9">\u{1F4DD} \uC801\uC6A9</button>
                     </div>
                 </div>
             </div>
@@ -4632,8 +4846,8 @@ class DomInspector {
         if (copyBtn) {
             copyBtn.onclick = () => {
                 this._copyToClipboard(selectorStr);
-                copyBtn.textContent = '✅';
-                setTimeout(() => { copyBtn.textContent = '📋'; }, 1500);
+                copyBtn.textContent = '\u2705';
+                setTimeout(() => { copyBtn.textContent = '\u{1F4CB}'; }, 1500);
             };
         }
 
@@ -4643,8 +4857,8 @@ class DomInspector {
             applyBtn.onclick = () => {
                 if (this.onApply && selector) {
                     this.onApply(selector);
-                    applyBtn.textContent = '✅ 적용됨';
-                    setTimeout(() => { applyBtn.textContent = '📝 적용'; }, 1500);
+                    applyBtn.textContent = '\u2705 \uC801\uC6A9\uB428';
+                    setTimeout(() => { applyBtn.textContent = '\u{1F4DD} \uC801\uC6A9'; }, 1500);
                 }
             };
         }
@@ -4652,15 +4866,35 @@ class DomInspector {
 
     _applyFilter(text, tree) {
         this.filterText = text;
-        this.nodeMap = [];
 
         if (!text.trim()) {
             this.build();
-            tree.innerHTML = this.renderTree(this.treeData);
+            this.renderTree(tree);
             return;
         }
 
+        const keyword = text.toLowerCase();
+
+        // TreeWalker full-text search
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        let textNode;
+        while (textNode = walker.nextNode()) {
+            const content = textNode.textContent.toLowerCase();
+            if (content.includes(keyword)) {
+                let parent = textNode.parentElement;
+                while (parent && parent !== document.body) {
+                    const treeNode = this.elementToNode.get(parent);
+                    if (treeNode && !treeNode.matched) {
+                        treeNode.matched = true;
+                    }
+                    parent = parent.parentElement;
+                }
+            }
+        }
+
+        // Also filter by tag/class/attr
         this.filterNodes(this.treeData, text);
+
         tree.innerHTML = this.renderTreeFiltered(this.treeData);
     }
 
@@ -4697,7 +4931,7 @@ class DomInspector {
             document.execCommand('copy');
             document.body.removeChild(ta);
         } catch (e) {
-            console.warn('[DomInspector] 클립보드 복사 실패:', e);
+            console.warn('[DomInspector] \uD074\uB9BD\uBCF4\uB4DC \uBCF5\uC0AC \uC2E4\uD328:', e);
         }
     }
 
@@ -4779,7 +5013,7 @@ class FormRuleEditor {
     }
 
     render() {
-        const scriptVer =  true ? "1.26.4" : 0;
+        const scriptVer =  true ? "1.26.5" : 0;
         this.overlay.innerHTML = `
             <div class="toki-modal toki-form-editor-modal">
                 <div class="toki-modal-header">
@@ -5014,7 +5248,7 @@ class FormRuleEditor {
                                 </div>
                             </div>
                             <div class="toki-form-grid">
-                                <div class="toki-form-row" style="grid-column: span 1;">
+                                <div class="toki-form-row" style="grid-column: span 1">
                                     <div class="toki-form-row-header">
                                         <span class="toki-form-row-label">제외 셀렉터 (exclude) (반점 구분)</span>
                                         <div class="toki-flex-row-8">
@@ -5035,18 +5269,18 @@ class FormRuleEditor {
                     <!-- Right Column: JSON Preview & Sandbox -->
                     <div class="toki-form-editor-right">
                         <div class="toki-flex-between">
-                            <span class="toki-form-row-label" style="font-weight: 800;">⚙️ 실시간 완성 JSON 규칙</span>
+                            <span class="toki-form-row-label toki-font-extrabold">⚙️ 실시간 완성 JSON 규칙</span>
                             <span id="form-json-status" class="toki-badge-match ok">✓ Valid</span>
                         </div>
-                        <textarea class="toki-tree-json-preview toki-flex-1" id="form-json-editor" spellcheck="false" style="font-size: 11px; line-height:1.4;"></textarea>
+                        <textarea class="toki-tree-json-preview toki-flex-1 toki-text-11 toki-leading-14" id="form-json-editor" spellcheck="false"></textarea>
                         
                         <div class="toki-form-card" style="margin: 0; padding: 12px; background: rgba(0,0,0,0.02);">
-                            <div class="toki-form-row-label" style="font-weight: 800; color: var(--toki-primary);">🧪 로컬 셀렉터 가상 테스트</div>
+                            <div class="toki-form-row-label toki-font-extrabold toki-text-primary">🧪 로컬 셀렉터 가상 테스트</div>
                             <div class="toki-flex-row-8">
                                 <input type="text" id="form-test-url" class="toki-input-compact toki-flex-1" style="height:32px; font-size:12px; padding: 4px 10px;" value="${window.location.href}">
                                 <button class="toki-btn-rule toki-text-success" id="form-btn-test" style="height:32px; padding:0 12px;">테스트</button>
                             </div>
-                            <div id="form-test-result" class="toki-text-xs" style="margin-top: 4px; color: var(--toki-text-muted);">
+                            <div id="form-test-result" class="toki-text-xs toki-mt-4 toki-text-muted">
                                 현재 페이지 또는 지정한 URL 주소의 DOM 파싱 검증을 원클릭으로 가상 작동해보세요.
                             </div>
                         </div>
@@ -5521,18 +5755,18 @@ class FormRuleEditor {
         if (!rightPanel) return;
         rightPanel.innerHTML = `
             <div class="toki-flex-between">
-                <span class="toki-form-row-label" style="font-weight: 800;">⚙️ 실시간 완성 JSON 규칙</span>
+                <span class="toki-form-row-label toki-font-extrabold">⚙️ 실시간 완성 JSON 규칙</span>
                 <span id="form-json-status" class="toki-badge-match ok">✓ Valid</span>
             </div>
-            <textarea class="toki-tree-json-preview toki-flex-1" id="form-json-editor" spellcheck="false" style="font-size: 11px; line-height:1.4;"></textarea>
+            <textarea class="toki-tree-json-preview toki-flex-1 toki-text-11 toki-leading-14" id="form-json-editor" spellcheck="false"></textarea>
             
             <div class="toki-form-card" style="margin: 0; padding: 12px; background: rgba(0,0,0,0.02);">
-                <div class="toki-form-row-label" style="font-weight: 800; color: var(--toki-primary);">🧪 로컬 셀렉터 가상 테스트</div>
+                <div class="toki-form-row-label toki-font-extrabold toki-text-primary">🧪 로컬 셀렉터 가상 테스트</div>
                 <div class="toki-flex-row-8">
                     <input type="text" id="form-test-url" class="toki-input-compact toki-flex-1" style="height:32px; font-size:12px; padding: 4px 10px;" value="${window.location.href}">
                     <button class="toki-btn-rule toki-text-success" id="form-btn-test" style="height:32px; padding:0 12px;">테스트</button>
                 </div>
-                <div id="form-test-result" class="toki-text-xs" style="margin-top: 4px; color: var(--toki-text-muted);">
+                <div id="form-test-result" class="toki-text-xs toki-mt-4 toki-text-muted">
                     현재 페이지 또는 지정한 URL 주소의 DOM 파싱 검증을 원클릭으로 가상 작동해보세요.
                 </div>
             </div>
@@ -5984,14 +6218,14 @@ class MenuModal {
                     </div>
                     
                     <div id="toki-inline-progress" style="display: none; padding: 12px; background: rgba(0,0,0,0.04); border-radius: 8px; margin-top: 12px; border: 1px solid rgba(0,0,0,0.06);">
-                        <div style="font-weight: 600; margin-bottom: 8px; font-size: 13px; display: flex; justify-content: space-between;" id="toki-inline-header">
+                        <div class="toki-font-semibold toki-mb-8 toki-text-13 toki-flex-between" id="toki-inline-header">
                             <span id="toki-inline-text">수집 준비 중...</span>
-                            <span id="toki-inline-percent" style="color: var(--toki-primary, #6366f1);">0%</span>
+                            <span id="toki-inline-percent" class="toki-text-primary">0%</span>
                         </div>
                         <div class="toki-progress-bar-container" style="background: rgba(0,0,0,0.08); border-radius: 4px; height: 8px; overflow: hidden; margin-bottom: 12px; position: relative;">
                             <div id="toki-inline-bar" class="toki-progress-overall-bar-fill" style="width: 0%; height: 100%; background: var(--toki-primary, #6366f1); transition: width 0.3s ease;"></div>
                         </div>
-                        <div class="toki-btn-group-row" style="gap: 8px;">
+                        <div class="toki-btn-group-row toki-gap-8">
                             <button class="toki-btn-action toki-btn-secondary toki-flex-1" id="toki-inline-pause" style="height: 36px; padding: 0;">
                                 <span>⏸️ 일시 정지</span>
                             </button>
@@ -6047,9 +6281,9 @@ class MenuModal {
 
                     <div class="toki-control-group">
                         <label class="toki-label">이미지 스캔 속도
-                            <span id="toki-scan-speed-val" style="font-weight: bold; color: var(--toki-primary, #6366f1);">1000ms</span>
+                            <span id="toki-scan-speed-val" class="toki-font-bold toki-text-primary">1000ms</span>
                         </label>
-                        <input type="range" id="toki-sel-scanspeed" min="100" max="5000" step="100" value="1000" class="toki-range" style="width: 100%;">
+                        <input type="range" id="toki-sel-scanspeed" min="100" max="5000" step="100" value="1000" class="toki-range toki-w-full">
                         <div class="toki-hint" style="font-size: 11px; color: #888; margin-top: 4px;">
                             100ms(빠름/불안정) ─ 1000ms(기본/권장) ─ 3000ms(안정) ─ 5000ms(확실)
                         </div>
@@ -6133,7 +6367,7 @@ class MenuModal {
                             <span>🔄 지금 즉시 동기화</span>
                         </button>
                     </div>
-                    <p class="toki-text-xs toki-text-center toki-line-16">
+                    <p class="toki-text-xs toki-text-center toki-leading-16">
                         구글 드라이브와의 연결을 확인하고 동기화 이력을 체크합니다.
                     </p>
                 </div>
@@ -6178,7 +6412,7 @@ class MenuModal {
                     <button class="toki-dashboard-modal-close" id="toki-btn-modal-progress-close" title="닫기">&times;</button>
                 </div>
                 <div class="toki-dashboard-modal-content">
-                    <div id="toki-logbox-progress" style="display: block;">
+                    <div id="toki-logbox-progress" class="toki-visible-block">
                         <div id="toki-progress-header">
                             <span id="toki-progress-overall-text">진행률: 0% (0 / 0)</span>
                             <div id="toki-progress-overall-controls">
@@ -6215,7 +6449,7 @@ class MenuModal {
                     <button class="toki-dashboard-modal-close" id="toki-btn-modal-logs-close" title="닫기">&times;</button>
                 </div>
                 <div class="toki-dashboard-modal-content">
-                    <div id="toki-dashboard-log-section" style="display: flex;">
+                    <div id="toki-dashboard-log-section" class="toki-visible-flex">
                         <div class="toki-log-tabs">
                             <button class="toki-log-tab-btn active" data-logtab="service">📋 서비스 로그</button>
                             <button class="toki-log-tab-btn" data-logtab="debug">🛠️ 디버그 콘솔</button>
@@ -6615,7 +6849,7 @@ class MenuModal {
 }
 
 ;// ./src/core/ui/ui.css
-var ui_namespaceObject = "@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');\n\n:root {\n    --toki-primary: #2563eb;\n    --toki-primary-dark: #1d4ed8;\n    --toki-accent: #facc15;\n    --toki-bg: rgba(248, 250, 252, 0.9);\n    --toki-text: #1e293b;\n    --toki-text-muted: #64748b;\n    --toki-border: rgba(255, 255, 255, 0.6);\n    --toki-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);\n    --toki-font: 'Inter', -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif;\n}\n\n/* LogBox Styles */\n#toki-logbox {\n    position: fixed;\n    bottom: 100px;\n    right: 30px;\n    width: 480px;\n    height: auto;\n    min-height: 250px;\n    max-height: 500px;\n    background: var(--toki-bg);\n    color: var(--toki-text);\n    font-family: 'Cascadia Code', Consolas, monospace;\n    font-size: 12px;\n    border: 1px solid var(--toki-border);\n    border-radius: 16px;\n    z-index: 9999;\n    display: none;\n    flex-direction: column;\n    box-shadow: var(--toki-shadow);\n    backdrop-filter: blur(20px);\n    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);\n}\n\n#toki-logbox-header {\n    padding: 12px 16px;\n    background: rgba(255, 255, 255, 0.4);\n    border-bottom: 1px solid rgba(0, 0, 0, 0.05);\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    border-top-left-radius: 16px;\n    border-top-right-radius: 16px;\n    cursor: move;\n}\n\n#toki-logbox-title {\n    font-weight: 700;\n    font-size: 13px;\n    letter-spacing: -0.01em;\n}\n\n#toki-logbox-controls span {\n    cursor: pointer;\n    margin-left: 12px;\n    color: var(--toki-text-muted);\n    font-size: 14px;\n    transition: transform 0.2s, color 0.2s;\n    display: inline-block;\n}\n\n#toki-logbox-controls span:hover {\n    color: var(--toki-primary);\n    transform: scale(1.15);\n}\n\n#toki-logbox-content {\n    flex: 1;\n    overflow-y: auto;\n    padding: 12px;\n    margin: 0;\n    list-style: none;\n}\n\n#toki-logbox-content li {\n    margin-bottom: 4px;\n    word-break: break-all;\n    padding: 4px 8px;\n    border-radius: 6px;\n    line-height: 1.4;\n    color: #f1f5f9; /* 밝은 회백색 지정으로 가독성 극대화 */\n}\n\n#toki-logbox-content li.critical {\n    color: #be123c;\n    font-weight: 700;\n    background: rgba(225, 29, 72, 0.1);\n    border-left: 3px solid #e11d48;\n}\n\n#toki-logbox-content li.error { color: #e11d48; }\n#toki-logbox-content li.warn { color: #d97706; }\n#toki-logbox-content li.success { color: #059669; font-weight: 600; }\n#toki-logbox-content li.info { color: #38bdf8; font-weight: 500; }\n\n/* Modal Styles */\n.toki-modal-overlay {\n    position: fixed;\n    top: 0;\n    left: 0;\n    width: 100%;\n    height: 100%;\n    background: rgba(15, 23, 42, 0.2);\n    backdrop-filter: blur(12px);\n    z-index: 9999;\n    display: flex;\n    justify-content: center;\n    align-items: center;\n    opacity: 0;\n    animation: tokiFadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;\n}\n\n.toki-modal {\n    width: 520px;\n    max-width: 95%;\n    background: var(--toki-bg);\n    border: 1px solid var(--toki-border);\n    border-radius: 28px;\n    box-shadow: var(--toki-shadow);\n    overflow: hidden;\n    display: flex;\n    flex-direction: column;\n    transform: translateY(30px) scale(0.95);\n    animation: tokiSlideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;\n    backdrop-filter: blur(30px);\n    color: var(--toki-text);\n    font-family: var(--toki-font);\n}\n\n.toki-modal-header {\n    padding: 24px 32px;\n    background: rgba(255, 255, 255, 0.4);\n    border-bottom: 1px solid rgba(0, 0, 0, 0.05);\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n}\n\n.toki-modal-title {\n    font-size: 24px;\n    font-weight: 800;\n    color: #0f172a;\n    display: flex;\n    align-items: center;\n    gap: 12px;\n    letter-spacing: -0.03em;\n}\n\n.toki-modal-close {\n    background: rgba(0, 0, 0, 0.05);\n    border: none;\n    color: var(--toki-text-muted);\n    width: 36px;\n    height: 36px;\n    border-radius: 50%;\n    cursor: pointer;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);\n    font-size: 20px;\n}\n\n.toki-modal-close:hover {\n    background: #ef4444;\n    color: #fff;\n    transform: rotate(90deg);\n}\n\n.toki-btn-ghost {\n    background: rgba(0, 0, 0, 0.05);\n    border: none;\n    color: var(--toki-text-muted);\n    padding: 6px 14px;\n    border-radius: 12px;\n    cursor: pointer;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    transition: all 0.2s;\n    font-size: 13px;\n    font-weight: 600;\n    gap: 6px;\n}\n\n.toki-btn-ghost:hover {\n    background: rgba(0, 0, 0, 0.08);\n    color: var(--toki-text);\n}\n\n/* Tabs */\n.toki-tabs {\n    display: flex;\n    background: rgba(255, 255, 255, 0.3);\n    padding: 8px;\n    gap: 6px;\n    border-bottom: 1px solid rgba(0, 0, 0, 0.05);\n}\n\n.toki-tab-btn {\n    flex: 1;\n    padding: 12px;\n    background: none;\n    border: none;\n    color: var(--toki-text-muted);\n    font-size: 14px;\n    font-weight: 700;\n    cursor: pointer;\n    transition: all 0.3s;\n    border-radius: 14px;\n    display: flex;\n    justify-content: center;\n    align-items: center;\n    gap: 8px;\n}\n\n.toki-tab-btn:hover {\n    color: var(--toki-text);\n    background: rgba(255, 255, 255, 0.6);\n}\n\n.toki-tab-btn.active {\n    background: #fff;\n    color: var(--toki-primary);\n    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);\n}\n\n.toki-tab-content {\n    display: none;\n    padding: 32px;\n    animation: tokiTabFadeIn 0.4s ease-out;\n}\n\n.toki-tab-content.active { display: block; }\n\n/* Components */\n.toki-section-title {\n    font-size: 11px;\n    font-weight: 800;\n    color: var(--toki-primary);\n    text-transform: uppercase;\n    letter-spacing: 0.1em;\n    margin: 24px 0 12px 4px;\n    opacity: 0.8;\n}\n\n.toki-control-group {\n    margin-bottom: 20px;\n    position: relative;\n}\n\n.toki-label {\n    display: block;\n    font-size: 13px;\n    font-weight: 700;\n    color: var(--toki-text-muted);\n    margin-bottom: 8px;\n    margin-left: 4px;\n}\n\n.toki-input, .toki-select, .toki-textarea {\n    box-sizing: border-box;\n    width: 100%;\n    padding: 14px 18px;\n    background: rgba(255, 255, 255, 0.8);\n    border: 1px solid rgba(0, 0, 0, 0.08);\n    border-radius: 16px;\n    color: var(--toki-text) !important;\n    font-size: 15px;\n    font-weight: 600;\n    appearance: none;\n    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);\n    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);\n}\n\n.toki-input:hover, .toki-select:hover, .toki-textarea:hover {\n    border-color: var(--toki-primary);\n    background-color: #fff;\n    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.08);\n}\n\n.toki-input:focus, .toki-select:focus, .toki-textarea:focus {\n    outline: none;\n    border-color: var(--toki-primary);\n    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);\n    background-color: #fff;\n}\n\n.toki-textarea {\n    resize: vertical;\n    line-height: 1.5;\n}\n\n.toki-select {\n    cursor: pointer;\n    background-image: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2364748b'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E\");\n    background-repeat: no-repeat;\n    background-position: right 16px center;\n    background-size: 16px;\n}\n\n.toki-btn-action {\n    width: 100%;\n    height: 56px;\n    background: var(--toki-primary);\n    color: #fff !important;\n    border: none;\n    border-radius: 18px;\n    font-size: 16px;\n    font-weight: 700;\n    cursor: pointer;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    gap: 12px;\n    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);\n    box-shadow: 0 8px 15px rgba(37, 99, 235, 0.2);\n}\n\n.toki-btn-action:hover {\n    transform: translateY(-3px);\n    box-shadow: 0 12px 20px rgba(37, 99, 235, 0.35);\n    filter: brightness(1.05);\n}\n\n.toki-btn-secondary {\n    background: rgba(255, 255, 255, 0.8);\n    color: #475569 !important;\n    border: 1px solid rgba(0, 0, 0, 0.05);\n    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);\n}\n\n.toki-btn-secondary:hover {\n    background: #fff;\n    color: var(--toki-text) !important;\n}\n\n.toki-btn-danger {\n    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%) !important;\n    color: #ffffff !important;\n    border: none !important;\n    box-shadow: 0 4px 10px rgba(239, 68, 68, 0.2) !important;\n}\n\n.toki-btn-danger:hover {\n    background: linear-gradient(135deg, #f87171 0%, #ef4444 100%) !important;\n    box-shadow: 0 6px 15px rgba(239, 68, 68, 0.35) !important;\n}\n\n/* Status & Indicators */\n.toki-status-dot {\n    width: 8px;\n    height: 8px;\n    border-radius: 50%;\n    display: inline-block;\n    margin-right: 6px;\n}\n\n.toki-status-online {\n    background: #10b981;\n    box-shadow: 0 0 8px #10b981;\n}\n\n.toki-downloaded {\n    background: rgba(16, 185, 129, 0.08) !important;\n    border-left: 4px solid #10b981 !important;\n    opacity: 0.75;\n    transition: all 0.3s ease;\n}\n\n.toki-downloaded:hover {\n    opacity: 1;\n    background: rgba(16, 185, 129, 0.15) !important;\n}\n\n/* FAB */\n.toki-fab {\n    position: fixed;\n    bottom: 30px;\n    right: 30px;\n    width: 64px;\n    height: 64px;\n    background: linear-gradient(135deg, #2563eb, #0ea5e9);\n    border-radius: 20px;\n    box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.4);\n    display: flex;\n    justify-content: center;\n    align-items: center;\n    cursor: pointer;\n    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);\n    z-index: 9998;\n}\n\n.toki-fab:hover {\n    transform: translateY(-5px) rotate(5deg);\n    box-shadow: 0 20px 25px -5px rgba(37, 99, 235, 0.5);\n}\n\n.toki-fab svg {\n    width: 28px;\n    height: 28px;\n    fill: #fff;\n}\n\n\n\n.toki-btn-rule {\n    background: transparent;\n    border: 1px solid #ddd;\n    padding: 6px 12px;\n    border-radius: 8px;\n    font-size: 12px;\n    cursor: pointer;\n    transition: all 0.2s;\n}\n\n.toki-btn-rule:hover {\n    background: #f8fafc;\n    border-color: #94a3b8;\n}\n\n/* Animations */\n@keyframes tokiFadeIn {\n    from { opacity: 0; }\n    to { opacity: 1; }\n}\n\n@keyframes tokiTabFadeIn {\n    from { opacity: 0; transform: translateX(10px); }\n    to { opacity: 1; transform: translateX(0); }\n}\n\n@keyframes tokiSlideUp {\n    from { opacity: 0; transform: translateY(30px) scale(0.95); }\n    to { opacity: 1; transform: translateY(0) scale(1); }\n}\n\n/* --- Structural Layouts for Inline Replacement --- */\n\n/* Horizontal Button Row (e.g., Download buttons) */\n.toki-btn-group-row {\n    display: flex;\n    gap: 12px;\n    align-items: center;\n}\n.toki-btn-group-row .toki-btn-action {\n    height: 52px;\n    flex: 1;\n}\n.toki-btn-group-row .toki-flex-1-4 {\n    flex: 1.4;\n}\n\n/* Vertical Button Stack (e.g., Tool buttons) */\n.toki-btn-group-stack {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n}\n.toki-btn-group-stack .toki-btn-action {\n    height: 44px;\n    justify-content: flex-start;\n    padding-left: 20px;\n}\n\n/* 1-Column Form Grid */\n.toki-form-grid {\n    display: grid;\n    grid-template-columns: 1fr;\n    gap: 14px;\n}\n\n/* Utility Shortcuts */\n.toki-flex-between { display: flex; justify-content: space-between; align-items: center; }\n.toki-divider { border: 0; border-top: 1px solid rgba(0,0,0,0.05); margin: 24px 0; }\n.toki-mt-0 { margin-top: 0 !important; }\n.toki-mt-8 { margin-top: 8px !important; }\n.toki-mt-32 { margin-top: 32px !important; }\n.toki-ml-4 { margin-left: 4px !important; }\n.toki-mb-5 { margin-bottom: 5px !important; }\n.toki-mb-10 { margin-bottom: 10px !important; }\n.toki-mb-24 { margin-bottom: 24px !important; }\n.toki-flex-1 { flex: 1; }\n.toki-flex-row { display: flex; gap: 4px; align-items: center; }\n.toki-flex-row-8 { display: flex; gap: 8px; align-items: center; }\n.toki-flex-row-10 { display: flex; gap: 10px; align-items: center; }\n\n/* Text Utilities */\n.toki-text-xs { font-size: 11px; color: #94a3b8; }\n.toki-text-sm { font-size: 12px; }\n.toki-text-base { font-size: 14px; }\n.toki-text-lg { font-size: 20px; font-weight: 700; }\n.toki-text-success { color: #4ade80 !important; }\n.toki-text-danger { color: #ff5555 !important; }\n.toki-text-primary { color: var(--toki-primary) !important; }\n.toki-text-center { text-align: center; }\n.toki-line-16 { line-height: 1.6; }\n\n/* Specialized Components */\n.toki-modal-main { padding: 32px; width: 520px; max-height: 85vh; overflow-y: auto; }\n.toki-btn-gradient-green { \n    background: linear-gradient(135deg, #10b981, #059669) !important; \n    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2) !important;\n}\n\n.toki-btn-lavender { background: #6a5acd !important; font-weight: bold !important; }\n.toki-btn-slate { background: rgba(0,0,0,0.02) !important; border-style: dashed !important; border-radius: 20px !important; }\n.toki-hidden { display: none !important; }\n\n/* Helper Boxes */\n.toki-helper-box-blue {\n    margin: -10px 0 20px 0; padding: 14px; \n    background: rgba(37, 99, 235, 0.05); border: 1px solid rgba(37, 99, 235, 0.1); \n    border-radius: 18px;\n}\n\n/* Captcha Overlay */\n.toki-captcha-overlay {\n    position: fixed; top: 0; left: 0; width: 100%; height: 100%;\n    background: rgba(0,0,0,0.8); z-index: 10001;\n    display: flex; flex-direction: column; align-items: center; justify-content: center;\n    color: white; font-family: var(--toki-font);\n}\n.toki-captcha-frame {\n    width: 80%; height: 60%; background: white; \n    border-radius: 20px; overflow: hidden; \n    margin-bottom: 20px; box-shadow: 0 20px 50px rgba(0,0,0,0.5);\n}\n\n/* Component: Helper Description Text */\n.toki-helper-desc { line-height: 1.5; font-weight: 500; }\n\n/* Component: Small Button (e.g., Test Native) */\n.toki-btn-sm { height: 36px !important; font-size: 12px !important; border-radius: 12px !important; }\n\n/* Component: Sync Button (height 48px) */\n.toki-btn-sync { height: 48px !important; }\n\n/* Component: Modal Header without border */\n.toki-modal-header-borderless { border: none !important; }\n\n/* Component: Code Textarea */\n.toki-textarea-code { min-height: 120px; font-family: monospace; }\n\n/* Visibility Toggles */\n.toki-visible-flex { display: flex !important; }\n.toki-visible-block { display: block !important; }\n.toki-hidden { display: none !important; }\n\n/* Status Badges & Indicators */\n.toki-badge {\n    margin-left: 5px;\n    font-size: 12px;\n    vertical-align: middle;\n}\n\n.toki-downloaded {\n    opacity: 0.6;\n    background-color: rgba(74, 222, 128, 0.05) !important;\n    transition: opacity 0.3s ease;\n}\n.toki-downloaded:hover {\n    opacity: 1;\n}\n\n/* Iframe Elements */\n.toki-downloader-iframe {\n    width: 100%;\n    height: 600px;\n    opacity: 0.1;\n    pointer-events: none;\n    border: none;\n    margin-top: 40px;\n}\n\n.toki-captcha-iframe {\n    width: 100%;\n    height: 100%;\n    border: none;\n}\n\n/* Info Card & History Styles */\n.toki-info-card {\n    background: rgba(255, 255, 255, 0.4);\n    border: 1px solid rgba(0, 0, 0, 0.05);\n    border-radius: 12px;\n    padding: 12px 16px;\n    margin-bottom: 20px;\n}\n\n.toki-info-row {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    padding: 6px 0;\n}\n\n.toki-info-row:not(:last-child) {\n    border-bottom: 1px dashed rgba(0, 0, 0, 0.05);\n}\n\n.toki-info-label {\n    font-size: 13px;\n    color: var(--toki-text-muted);\n    font-weight: 500;\n}\n\n.toki-info-val {\n    font-size: 13px;\n    color: var(--toki-text);\n    font-weight: 700;\n    display: flex;\n    align-items: center;\n    gap: 6px;\n}\n\n/* --- Multi-Queue Progress Monitor Panel (v1.21.0) --- */\n#toki-logbox-progress {\n    padding: 14px 18px;\n    background: rgba(255, 255, 255, 0.25);\n    border-bottom: 1px solid rgba(0, 0, 0, 0.05);\n    backdrop-filter: blur(10px);\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n}\n\n#toki-progress-header {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n}\n\n#toki-progress-overall-text {\n    font-size: 12px;\n    font-weight: 800;\n    color: var(--toki-primary);\n    letter-spacing: -0.02em;\n    background: linear-gradient(135deg, #4f46e5, #06b6d4);\n    -webkit-background-clip: text;\n    -webkit-text-fill-color: transparent;\n}\n\n}\n\n#toki-progress-overall-controls {\n    display: flex;\n    gap: 8px;\n    align-items: center;\n}\n\n.toki-progress-btn {\n    font-size: 13px;\n    cursor: pointer;\n    transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), filter 0.2s ease, opacity 0.2s ease;\n    user-select: none;\n    opacity: 0.85;\n}\n\n.toki-progress-btn:hover {\n    transform: scale(1.25);\n    opacity: 1;\n    filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.6));\n}\n\n#toki-btn-queue-stop:hover {\n    filter: drop-shadow(0 0 6px #ef4444);\n}\n\n.toki-progress-bar-paused {\n    background: linear-gradient(90deg, #9ca3af 0%, #6b7280 50%, #4b5563 100%) !important;\n    box-shadow: 0 1px 3px rgba(107, 114, 128, 0.4) !important;\n    animation: tokiPulsePaused 2s infinite ease-in-out;\n}\n\n@keyframes tokiPulsePaused {\n    0%, 100% { opacity: 1; }\n    50% { opacity: 0.65; }\n}\n\n.toki-empty-queue-msg {\n    display: flex;\n    flex-direction: column;\n    align-items: center;\n    justify-content: center;\n    padding: 24px 16px;\n    background: rgba(255, 255, 255, 0.04);\n    border: 1px dashed rgba(0, 0, 0, 0.08);\n    border-radius: 12px;\n    text-align: center;\n    gap: 6px;\n    margin: 8px 0;\n    backdrop-filter: blur(5px);\n}\n\n.toki-empty-queue-msg span {\n    font-size: 13px;\n    font-weight: 700;\n    color: var(--toki-primary, #6366f1);\n    opacity: 0.85;\n}\n\n.toki-empty-queue-msg p {\n    font-size: 11px;\n    color: #4b5563;\n    opacity: 0.75;\n    margin: 0;\n    line-height: 1.4;\n}\n\n.toki-progress-bar-container {\n    width: 100%;\n    height: 8px;\n    background: rgba(0, 0, 0, 0.06);\n    border-radius: 999px;\n    overflow: hidden;\n    position: relative;\n    border: 1px solid rgba(255, 255, 255, 0.5);\n    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);\n}\n\n.toki-progress-bar-fill {\n    height: 100%;\n    width: 0%;\n    background: linear-gradient(90deg, #6366f1 0%, #3b82f6 50%, #06b6d4 100%);\n    border-radius: 999px;\n    transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);\n    box-shadow: 0 1px 3px rgba(99, 102, 241, 0.4);\n}\n\n#toki-progress-workers-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n    margin-top: 6px;\n    max-height: 160px;\n    overflow-y: auto;\n    padding-right: 4px;\n}\n\n/* Custom Scrollbar for Workers List */\n#toki-progress-workers-list::-webkit-scrollbar {\n    width: 4px;\n}\n#toki-progress-workers-list::-webkit-scrollbar-track {\n    background: transparent;\n}\n#toki-progress-workers-list::-webkit-scrollbar-thumb {\n    background: rgba(0, 0, 0, 0.1);\n    border-radius: 999px;\n}\n\n.toki-worker-progress-item {\n    background: rgba(255, 255, 255, 0.35);\n    border: 1px solid rgba(255, 255, 255, 0.5);\n    border-radius: 10px;\n    padding: 8px 12px;\n    display: flex;\n    flex-direction: column;\n    gap: 6px;\n    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);\n    transition: all 0.2s ease;\n}\n\n.toki-worker-progress-item:hover {\n    background: rgba(255, 255, 255, 0.55);\n    border-color: rgba(37, 99, 235, 0.15);\n    transform: translateY(-1px);\n    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.04);\n}\n\n.toki-worker-stage {\n    font-size: 11px;\n    font-weight: 700;\n    color: var(--toki-text-muted);\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n}\n\n.toki-worker-bar-container {\n    width: 100%;\n    height: 5px;\n    background: rgba(0, 0, 0, 0.04);\n    border-radius: 999px;\n    overflow: hidden;\n}\n\n.toki-worker-bar-fill {\n    height: 100%;\n    background: linear-gradient(90deg, #10b981 0%, #34d399 100%);\n    border-radius: 999px;\n    transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1);\n}\n\n/* --- 📋 Realtime Queue List & Badges (v1.21.0) --- */\n#toki-progress-queue-section {\n    margin-top: 10px;\n    border-top: 1px solid rgba(0, 0, 0, 0.06);\n    padding-top: 8px;\n    display: flex;\n    flex-direction: column;\n    gap: 6px;\n}\n\n#toki-queue-section-header {\n    font-size: 11px;\n    font-weight: 700;\n    color: var(--toki-text-muted);\n    opacity: 0.85;\n}\n\n#toki-progress-queue-list {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n    max-height: 120px;\n    overflow-y: auto;\n    padding-right: 2px;\n}\n\n#toki-progress-queue-list::-webkit-scrollbar {\n    width: 4px;\n}\n#toki-progress-queue-list::-webkit-scrollbar-track {\n    background: transparent;\n}\n#toki-progress-queue-list::-webkit-scrollbar-thumb {\n    background: rgba(0, 0, 0, 0.08);\n    border-radius: 999px;\n}\n\n.toki-queue-list-item {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    padding: 5px 8px;\n    background: rgba(255, 255, 255, 0.25);\n    border: 1px solid rgba(255, 255, 255, 0.4);\n    border-radius: 6px;\n    font-size: 11px;\n    transition: all 0.2s ease;\n}\n\n.toki-queue-list-item:hover {\n    background: rgba(255, 255, 255, 0.45);\n    transform: translateX(1px);\n}\n\n.toki-queue-item-meta {\n    display: flex;\n    align-items: center;\n    gap: 8px;\n    flex: 1;\n    min-width: 0;\n}\n\n.toki-queue-item-title {\n    color: var(--toki-text);\n    font-weight: 500;\n    white-space: nowrap;\n    overflow: hidden;\n    text-overflow: ellipsis;\n}\n\n.toki-queue-item-delete {\n    font-size: 10px;\n    cursor: pointer;\n    opacity: 0.6;\n    transition: all 0.15s ease;\n    padding: 2px;\n}\n\n.toki-queue-item-delete:hover {\n    opacity: 1;\n    transform: scale(1.2);\n}\n\n/* 세련된 HSL 상태 배지 */\n.toki-badge {\n    padding: 2px 6px;\n    border-radius: 4px;\n    font-size: 9px;\n    font-weight: 700;\n    white-space: nowrap;\n    text-transform: uppercase;\n}\n\n/* 대기 (🟡 HSL Tailored Yellow) */\n.toki-badge-pending {\n    background: hsl(45, 93%, 94%);\n    color: hsl(45, 90%, 35%);\n    border: 1px solid hsl(45, 93%, 85%);\n}\n\n/* 진행 (🟢 HSL Tailored Emerald) */\n.toki-badge-processing {\n    background: hsl(150, 84%, 93%);\n    color: hsl(150, 84%, 25%);\n    border: 1px solid hsl(150, 84%, 82%);\n}\n\n/* 완료 (🔵 HSL Tailored Sapphire) */\n.toki-badge-completed {\n    background: hsl(220, 95%, 94%);\n    color: hsl(220, 90%, 40%);\n    border: 1px solid hsl(220, 95%, 86%);\n}\n\n/* 실패 (🔴 HSL Tailored Ruby) */\n.toki-badge-failed {\n    background: hsl(0, 93%, 94%);\n    color: hsl(0, 90%, 45%);\n    border: 1px solid hsl(0, 93%, 86%);\n}\n\n/* --- FormRuleEditor: Hybrid Two-Track Parser GUI (v1.21.0) --- */\n.toki-form-editor-modal {\n    width: min(95vw, 1200px) !important;\n    max-height: min(85vh, 700px) !important;\n    border-radius: 24px !important;\n}\n\n.toki-form-editor-container {\n    display: flex !important;\n    flex-direction: row !important;\n    flex-wrap: nowrap !important;\n    flex: 1;\n    overflow: auto !important;\n    gap: 20px;\n    padding: 20px;\n    background: rgba(255, 255, 255, 0.15);\n}\n\n.toki-form-editor-left {\n    flex: 1.2 !important;\n    min-width: 550px !important;\n    overflow-y: auto;\n    display: flex;\n    flex-direction: column;\n    gap: 16px;\n    padding-right: 8px;\n}\n\n.toki-form-editor-left::-webkit-scrollbar {\n    width: 6px;\n}\n.toki-form-editor-left::-webkit-scrollbar-track {\n    background: transparent;\n}\n.toki-form-editor-left::-webkit-scrollbar-thumb {\n    background: rgba(0, 0, 0, 0.08);\n    border-radius: 999px;\n}\n\n.toki-form-editor-right {\n    flex: 1 !important;\n    min-width: 450px !important;\n    display: flex;\n    flex-direction: column;\n    gap: 16px;\n    background: rgba(255, 255, 255, 0.4);\n    padding: 20px;\n    border-radius: 18px;\n    border: 1px solid rgba(255, 255, 255, 0.5);\n    overflow: hidden;\n}\n\n.toki-form-card {\n    background: rgba(255, 255, 255, 0.45);\n    border: 1px solid rgba(0, 0, 0, 0.04);\n    border-radius: 16px;\n    padding: 16px 20px;\n    display: flex;\n    flex-direction: column;\n    gap: 12px;\n    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.01);\n    transition: all 0.2s ease;\n}\n\n.toki-form-card:hover {\n    background: rgba(255, 255, 255, 0.65);\n    border-color: rgba(37, 99, 235, 0.1);\n    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.02);\n}\n\n.toki-form-card-title {\n    font-size: 13px;\n    font-weight: 800;\n    color: var(--toki-primary);\n    text-transform: uppercase;\n    letter-spacing: 0.02em;\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    border-bottom: 1px solid rgba(0, 0, 0, 0.03);\n    padding-bottom: 8px;\n}\n\n.toki-form-row {\n    display: flex;\n    flex-direction: column;\n    gap: 6px;\n}\n\n.toki-form-row-header {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n}\n\n.toki-form-row-label {\n    font-size: 12px;\n    font-weight: 700;\n    color: var(--toki-text-muted);\n}\n\n.toki-input-compact {\n    width: 100%;\n    box-sizing: border-box;\n    min-width: 0;\n    padding: 10px 14px;\n    background: rgba(255, 255, 255, 0.7);\n    border: 1px solid rgba(0, 0, 0, 0.06);\n    border-radius: 10px;\n    font-size: 13px;\n    font-family: inherit;\n    transition: all 0.2s ease;\n}\n\n.toki-input-compact:focus {\n    outline: none;\n    border-color: var(--toki-primary);\n    background: #fff;\n    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);\n}\n\n.toki-badge-match {\n    font-size: 10px;\n    font-weight: 800;\n    padding: 2px 6px;\n    border-radius: 6px;\n    transition: all 0.2s ease;\n}\n\n.toki-badge-match.ok {\n    background: rgba(16, 185, 129, 0.1);\n    color: #10b981;\n}\n\n.toki-badge-match.zero {\n    background: rgba(245, 158, 11, 0.1);\n    color: #f59e0b;\n}\n\n.toki-badge-match.error {\n    background: rgba(239, 68, 68, 0.1);\n    color: #ef4444;\n}\n\n.toki-form-dropper-btn {\n    cursor: pointer;\n    font-size: 14px;\n    transition: transform 0.2s;\n    user-select: none;\n}\n.toki-form-dropper-btn:hover {\n    transform: scale(1.2);\n}\n\n.toki-form-verify-btn {\n    cursor: pointer;\n    font-size: 14px;\n    transition: transform 0.2s;\n    user-select: none;\n}\n.toki-form-verify-btn:hover {\n    transform: scale(1.2);\n}\n\n.toki-form-verify-result {\n    font-size: 11px;\n    font-weight: 600;\n    margin-top: 4px;\n    padding: 6px 10px;\n    border-radius: 8px;\n    line-height: 1.4;\n    word-break: break-all;\n}\n.toki-form-verify-result.success {\n    background: rgba(16, 185, 129, 0.08);\n    color: #10b981;\n    border: 1px solid rgba(16, 185, 129, 0.15);\n}\n.toki-form-verify-result.error {\n    background: rgba(239, 68, 68, 0.08);\n    color: #ef4444;\n    border: 1px solid rgba(239, 68, 68, 0.15);\n}\n\n/* --- 📱 Compact Responsive LogBox for Popups & Small Screens (v1.21.0 추가) --- */\n@media (max-width: 500px) {\n    #toki-logbox {\n        width: 100% !important;\n        height: 100% !important;\n        max-height: 100% !important;\n        bottom: 0 !important;\n        right: 0 !important;\n        left: 0 !important;\n        top: 0 !important;\n        border-radius: 0 !important;\n        border: none !important;\n        box-shadow: none !important;\n    }\n    /* 팝업에서는 전체 화면을 채우므로 드래그 헤더 무효화 및 모바일 친화형 축소 */\n    #toki-logbox-header {\n        cursor: default !important;\n        padding: 8px 12px !important;\n        border-top-left-radius: 0 !important;\n        border-top-right-radius: 0 !important;\n    }\n    #toki-logbox-content {\n        padding: 8px !important;\n        display: block !important; /* 팝업 상세로그 강제 개방 */\n        height: calc(100% - 35px) !important; /* 헤더를 제외한 영역 100% 점유 */\n        max-height: calc(100% - 35px) !important;\n    }\n    /* 팝업 내 불필요한 컨트롤 및 큐 진행률 카드 영역 강제 은닉 (사용자 피드백 반영) */\n    #toki-btn-audio, #toki-btn-report, #toki-logbox-progress {\n        display: none !important;\n    }\n}\n\n\n\n\n/* --- Dashboard Popup Specific Layout --- */\n#toki-dashboard-popup {\n    display: flex;\n    flex-direction: column;\n    width: 100vw;\n    height: 100vh;\n    margin: 0;\n    background: var(--toki-bg);\n    border: none;\n    border-radius: 0;\n    box-shadow: none;\n    overflow: hidden;\n}\n\n#toki-dashboard-header {\n    padding: 24px 32px;\n    background: rgba(255, 255, 255, 0.4);\n    border-bottom: 1px solid rgba(0, 0, 0, 0.05);\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n}\n\n#toki-dashboard-title {\n    font-size: 24px;\n    font-weight: 800;\n    color: #0f172a;\n    display: flex;\n    align-items: center;\n    gap: 12px;\n    letter-spacing: -0.03em;\n}\n\n#toki-dashboard-header-controls {\n    display: flex;\n    gap: 12px;\n    align-items: center;\n}\n\n#toki-dashboard-log-section {\n    padding: 16px 20px;\n    background: rgba(0, 0, 0, 0.05);\n    border-radius: 12px;\n    margin: 0 20px 20px 20px;\n    display: flex;\n    flex-direction: column;\n    height: 250px; /* 실시간 로그창 영역 높이 명시 */\n    overflow: hidden;\n}\n\n#toki-dashboard-log-section #toki-logbox-content {\n    flex: 1;\n    overflow-y: auto; /* 내부 스크롤 강제 */\n    padding: 12px;\n    margin: 0;\n    list-style: none;\n    background: rgba(0, 0, 0, 0.2); /* 로그 시인성 제고를 위한 세련된 다크 패널 */\n    border-radius: 8px;\n    border: 1px solid rgba(255, 255, 255, 0.03);\n}\n\n#toki-log-header {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    font-weight: 700;\n    margin-bottom: 12px;\n    color: var(--toki-text-muted);\n}\n\n/* --- 대시보드 커스텀 모달 레이아웃 (v1.21.6 추가) --- */\n.toki-dashboard-modal-overlay {\n    position: fixed;\n    top: 0;\n    left: 0;\n    width: 100vw;\n    height: 100vh;\n    background: rgba(15, 23, 42, 0.75);\n    backdrop-filter: blur(8px);\n    z-index: 10005;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    animation: tokiFadeIn 0.25s ease-out;\n}\n\n.toki-dashboard-modal {\n    width: 90%;\n    max-width: 680px;\n    background: var(--toki-bg, #1a1a2e);\n    border: 1px solid rgba(255, 255, 255, 0.08);\n    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);\n    border-radius: 24px;\n    display: flex;\n    flex-direction: column;\n    overflow: hidden;\n    animation: tokiSlideUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);\n    color: #e0e0e0;\n}\n\n.toki-dashboard-modal-header {\n    padding: 18px 24px;\n    border-bottom: 1px solid rgba(255, 255, 255, 0.05);\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    background: rgba(255, 255, 255, 0.02);\n}\n\n.toki-dashboard-modal-title {\n    font-size: 15px;\n    font-weight: 800;\n    color: var(--toki-primary, #6366f1);\n}\n\n.toki-dashboard-modal-close {\n    background: transparent;\n    border: none;\n    font-size: 24px;\n    font-weight: 700;\n    color: #94a3b8;\n    cursor: pointer;\n    line-height: 1;\n    transition: all 0.2s ease;\n}\n\n.toki-dashboard-modal-close:hover {\n    color: #ef4444;\n    transform: scale(1.1);\n}\n\n.toki-dashboard-modal-content {\n    padding: 20px;\n    overflow-y: auto;\n    max-height: 75vh;\n}\n\n/* 진행상황 모달 내 레이아웃 오버라이드 */\n#toki-modal-progress #toki-logbox-progress {\n    background: transparent !important;\n    border: none !important;\n    padding: 0 !important;\n    backdrop-filter: none !important;\n}\n#toki-modal-progress #toki-progress-queue-list {\n    max-height: 220px;\n}\n\n/* 로그 모달 내 레이아웃 오버라이드 */\n#toki-modal-logs #toki-dashboard-log-section {\n    margin: 0 !important;\n    padding: 0 !important;\n    background: transparent !important;\n    height: 400px !important;\n}\n#toki-modal-logs .toki-log-panel {\n    height: 330px !important;\n    max-height: 330px !important;\n    overflow-y: auto;\n}\n\n/* 대기열 모달 최대화 시의 너비 및 리스트 세로 높이 확장 */\n.toki-dashboard-modal-overlay.toki-queue-maximized .toki-dashboard-modal {\n    max-width: 850px !important;\n}\n.toki-dashboard-modal-overlay.toki-queue-maximized #toki-progress-queue-list {\n    max-height: 480px !important;\n    height: 480px !important;\n}\n\n/* 탭 본문 영역 세로 스크롤 활성화 (v1.21.8) */\n.toki-modal-body {\n    flex: 1;\n    overflow-y: auto !important;\n    max-height: calc(100vh - 120px);\n    padding-bottom: 40px;\n}\n\n/* Custom Scrollbar for Modal Body */\n.toki-modal-body::-webkit-scrollbar {\n    width: 6px;\n}\n.toki-modal-body::-webkit-scrollbar-track {\n    background: transparent;\n}\n.toki-modal-body::-webkit-scrollbar-thumb {\n    background: rgba(0, 0, 0, 0.12);\n    border-radius: 999px;\n}\n.toki-modal-body::-webkit-scrollbar-thumb:hover {\n    background: rgba(0, 0, 0, 0.25);\n}\n\n/* --- 🧬 DOM Inspector Panel (v2 — DevTools Style) --- */\n.toki-inspector-mount {\n    flex: 1;\n    display: flex;\n    flex-direction: column;\n    overflow: hidden;\n    min-height: 0;\n    border-radius: 12px;\n}\n\n.di-panel {\n    flex: 1;\n    display: flex;\n    flex-direction: column;\n    background: #1e1e2e;\n    overflow: hidden;\n    font-family: 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;\n    font-size: 12px;\n    line-height: 1.6;\n    color: #cdd6f4;\n}\n\n/* ── Toolbar ── */\n.di-toolbar {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    padding: 7px 14px;\n    background: #181825;\n    border-bottom: 1px solid #313244;\n    flex-shrink: 0;\n}\n\n.di-title {\n    font-weight: 700;\n    font-size: 12px;\n    color: #cba6f7;\n    letter-spacing: -0.01em;\n}\n\n.di-toolbar-right {\n    display: flex;\n    align-items: center;\n    gap: 10px;\n}\n\n.di-count {\n    font-size: 10px;\n    color: #585b70;\n}\n\n.di-refresh {\n    background: #313244;\n    border: none;\n    border-radius: 5px;\n    color: #6c7086;\n    cursor: pointer;\n    padding: 1px 7px;\n    font-size: 14px;\n    line-height: 1.5;\n    transition: all 0.15s;\n}\n\n.di-refresh:hover {\n    background: #45475a;\n    color: #cdd6f4;\n}\n\n/* ── Filter ── */\n.di-filter-bar {\n    padding: 5px 14px;\n    background: #181825;\n    border-bottom: 1px solid #313244;\n    flex-shrink: 0;\n}\n\n.di-filter {\n    width: 100%;\n    box-sizing: border-box;\n    background: #313244;\n    border: 1px solid #45475a;\n    border-radius: 5px;\n    padding: 4px 9px;\n    font-size: 11px;\n    color: #cdd6f4;\n    font-family: inherit;\n    outline: none;\n}\n\n.di-filter::placeholder { color: #585b70; }\n.di-filter:focus { border-color: #cba6f7; }\n\n/* ── Tree area ── */\n.di-tree-wrap {\n    flex: 1;\n    overflow-y: auto;\n    overflow-x: auto;\n    min-height: 0;\n    background: #1e1e2e;\n}\n\n.di-tree-wrap::-webkit-scrollbar { width: 4px; height: 4px; }\n.di-tree-wrap::-webkit-scrollbar-track { background: transparent; }\n.di-tree-wrap::-webkit-scrollbar-thumb { background: #45475a; border-radius: 999px; }\n\n.di-tree {\n    padding: 2px 0;\n}\n\n/* ── Tree lines ── */\n.di-line {\n    padding: 0 14px 0 0;\n    cursor: pointer;\n    white-space: nowrap;\n    font-size: 11px;\n    line-height: 22px;\n    user-select: none;\n    border-left: 2px solid transparent;\n}\n\n.di-line:hover {\n    background: rgba(203, 166, 247, 0.06);\n}\n\n.di-line.di-selected {\n    background: rgba(203, 166, 247, 0.12);\n    border-left-color: #cba6f7;\n}\n\n.di-line.di-dimmed { opacity: 0.35; }\n\n.di-arrow {\n    display: inline-block;\n    width: 13px;\n    text-align: center;\n    color: #6c7086;\n    font-size: 8px;\n    cursor: pointer;\n    flex-shrink: 0;\n    user-select: none;\n    margin-right: 1px;\n}\n\n.di-arrow:hover { color: #cdd6f4; }\n\n/* Children */\n.di-children { display: block; }\n.di-children.di-collapsed { display: none; }\n\n/* ── Syntax colors ── */\n.di-tag    { color: #89b4fa; }\n.di-id     { color: #f9e2af; }\n.di-class  { color: #a6e3a1; }\n.di-attr   { color: #fab387; }\n.di-text   { color: #cba6f7; }\n\n/* ── Detail panel ── */\n.di-detail {\n    flex-shrink: 0;\n    border-top: 1px solid #313244;\n    background: #181825;\n    max-height: 220px;\n    overflow-y: auto;\n}\n\n.di-detail-header {\n    padding: 6px 14px;\n    font-size: 10px;\n    font-weight: 700;\n    color: #585b70;\n    text-transform: uppercase;\n    letter-spacing: 0.04em;\n    background: rgba(255,255,255,0.02);\n    border-bottom: 1px solid #313244;\n    position: sticky;\n    top: 0;\n}\n\n.di-detail-body {\n    padding: 8px 14px 10px;\n}\n\n.di-detail-placeholder {\n    color: #585b70;\n    font-size: 11px;\n    font-style: italic;\n}\n\n.di-detail-grid {\n    display: grid;\n    grid-template-columns: 52px 1fr;\n    gap: 2px 8px;\n    font-size: 11px;\n}\n\n.di-detail-label {\n    color: #585b70;\n    font-weight: 600;\n    text-align: right;\n    line-height: 20px;\n}\n\n.di-detail-val {\n    color: #cdd6f4;\n    word-break: break-all;\n    line-height: 20px;\n}\n\n.di-detail-text {\n    max-height: 38px;\n    overflow: hidden;\n    text-overflow: ellipsis;\n}\n\n.di-detail-selector {\n    margin-top: 8px;\n    padding-top: 6px;\n    border-top: 1px solid #313244;\n}\n\n.di-selector-row {\n    display: flex;\n    gap: 5px;\n    align-items: center;\n    margin-top: 4px;\n}\n\n.di-selector-actions {\n    display: flex;\n    gap: 4px;\n    flex-shrink: 0;\n}\n\n.di-selector-code {\n    flex: 1;\n    min-width: 0;\n    background: #11111b;\n    border: 1px solid #313244;\n    border-radius: 5px;\n    padding: 5px 9px;\n    font-size: 11px;\n    color: #f5c2e7;\n    overflow-x: auto;\n    white-space: nowrap;\n}\n\n.di-btn-copy,\n.di-btn-apply {\n    border: none;\n    border-radius: 5px;\n    padding: 5px 10px;\n    font-size: 12px;\n    cursor: pointer;\n    transition: all 0.12s;\n    flex-shrink: 0;\n    font-family: inherit;\n    font-weight: 600;\n}\n\n.di-btn-copy {\n    background: #313244;\n    color: #a6adc8;\n}\n\n.di-btn-copy:hover {\n    background: #45475a;\n    color: #cdd6f4;\n}\n\n.di-btn-apply {\n    background: #cba6f7;\n    color: #1e1e2e;\n}\n\n.di-btn-apply:hover {\n    background: #b4befe;\n    transform: translateY(-1px);\n}\n\n/* ── Inspector toggle button active state ── */\n.toki-btn-inspector.active {\n    background: #cba6f7 !important;\n    color: #1e1e2e !important;\n    border-color: #cba6f7 !important;\n    font-weight: 700 !important;\n}\n\n/* ── 구독 관리 패널 ── */\n.toki-btn-sub.active {\n    background: #f59e0b !important;\n    color: #1e293b !important;\n    border-color: #f59e0b !important;\n    font-weight: 700 !important;\n}\n\n.sub-panel {\n    flex: 1;\n    display: flex;\n    flex-direction: column;\n    gap: 12px;\n    overflow: hidden;\n    min-height: 0;\n}\n\n.sub-header {\n    font-size: 13px;\n    font-weight: 800;\n    color: #f59e0b;\n    padding-bottom: 8px;\n    border-bottom: 1px solid rgba(0,0,0,0.05);\n}\n\n.sub-add-area {\n    display: flex;\n    gap: 6px;\n    flex-wrap: wrap;\n}\n\n.sub-url-input {\n    flex: 3;\n    min-width: 200px;\n    box-sizing: border-box;\n    padding: 8px 12px;\n    background: rgba(255,255,255,0.7);\n    border: 1px solid rgba(0,0,0,0.06);\n    border-radius: 8px;\n    font-size: 12px;\n    font-family: inherit;\n}\n\n.sub-name-input {\n    flex: 1;\n    min-width: 100px;\n    box-sizing: border-box;\n    padding: 8px 12px;\n    background: rgba(255,255,255,0.7);\n    border: 1px solid rgba(0,0,0,0.06);\n    border-radius: 8px;\n    font-size: 12px;\n    font-family: inherit;\n}\n\n.sub-url-input:focus, .sub-name-input:focus {\n    outline: none;\n    border-color: #f59e0b;\n    background: #fff;\n}\n\n.sub-btn-add {\n    padding: 8px 14px;\n    background: #f59e0b;\n    color: #fff;\n    border: none;\n    border-radius: 8px;\n    font-size: 12px;\n    font-weight: 700;\n    cursor: pointer;\n    transition: all 0.15s;\n}\n\n.sub-btn-add:hover {\n    background: #d97706;\n    transform: translateY(-1px);\n}\n\n.sub-list {\n    flex: 1;\n    overflow-y: auto;\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n    min-height: 0;\n}\n\n.sub-list::-webkit-scrollbar { width: 5px; }\n.sub-list::-webkit-scrollbar-track { background: transparent; }\n.sub-list::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.08); border-radius: 999px; }\n\n.sub-empty {\n    padding: 24px 16px;\n    text-align: center;\n    color: #94a3b8;\n    font-size: 12px;\n    line-height: 1.6;\n    background: rgba(255,255,255,0.3);\n    border-radius: 12px;\n    border: 1px dashed rgba(0,0,0,0.06);\n}\n\n.sub-item {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    gap: 8px;\n    padding: 10px 12px;\n    background: rgba(255,255,255,0.4);\n    border: 1px solid rgba(0,0,0,0.04);\n    border-radius: 10px;\n    transition: all 0.15s;\n}\n\n.sub-item:hover {\n    background: rgba(255,255,255,0.6);\n}\n\n.sub-item-ok { border-left: 3px solid #10b981; }\n.sub-item-pending { border-left: 3px solid #f59e0b; }\n\n.sub-item-info {\n    flex: 1;\n    min-width: 0;\n}\n\n.sub-item-name {\n    font-size: 12px;\n    font-weight: 700;\n    color: #1e293b;\n}\n\n.sub-item-url {\n    font-size: 10px;\n    color: #64748b;\n    word-break: break-all;\n    margin-top: 2px;\n}\n\n.sub-item-meta {\n    font-size: 10px;\n    color: #94a3b8;\n    margin-top: 2px;\n}\n\n.sub-item-actions {\n    display: flex;\n    gap: 4px;\n    flex-shrink: 0;\n}\n\n.sub-btn-refresh-sm, .sub-btn-remove {\n    border: none;\n    border-radius: 6px;\n    padding: 4px 8px;\n    font-size: 13px;\n    cursor: pointer;\n    transition: all 0.15s;\n    background: rgba(0,0,0,0.03);\n}\n\n.sub-btn-refresh-sm:hover { background: #e2e8f0; }\n.sub-btn-remove:hover { background: #fee2e2; }\n\n.sub-actions {\n    display: flex;\n    gap: 8px;\n    align-items: center;\n    padding-top: 4px;\n}\n\n.sub-btn-refresh {\n    padding: 8px 16px;\n    background: #6366f1;\n    color: #fff;\n    border: none;\n    border-radius: 8px;\n    font-size: 12px;\n    font-weight: 700;\n    cursor: pointer;\n    transition: all 0.15s;\n}\n\n.sub-btn-refresh:hover {\n    background: #4f46e5;\n    transform: translateY(-1px);\n}\n\n.sub-status {\n    font-size: 11px;\n    color: #64748b;\n    flex: 1;\n    text-align: right;\n}\n\n/* ── Log Tab Bar ── */\n.toki-log-tabs {\n    display: flex;\n    align-items: center;\n    gap: 4px;\n    margin-bottom: 8px;\n    flex-shrink: 0;\n}\n\n.toki-log-tab-btn {\n    background: rgba(255, 255, 255, 0.04);\n    border: 1px solid transparent;\n    padding: 4px 12px;\n    border-radius: 6px;\n    cursor: pointer;\n    font-size: 11px;\n    font-weight: 600;\n    color: #94a3b8;\n    transition: all 0.15s;\n    font-family: inherit;\n}\n\n.toki-log-tab-btn:hover {\n    background: rgba(255, 255, 255, 0.1);\n    color: #e0e0e0;\n}\n\n.toki-log-tab-btn.active {\n    background: rgba(99, 102, 241, 0.15);\n    border-color: rgba(99, 102, 241, 0.3);\n    color: #a5b4fc;\n}\n\n.toki-log-tabs-right {\n    margin-left: auto;\n}\n\n.toki-log-tabs-right button {\n    background: none;\n    border: none;\n    cursor: pointer;\n    font-size: 12px;\n    color: #e6a23c;\n    padding: 4px 8px;\n    border-radius: 4px;\n    font-family: inherit;\n    transition: color 0.15s;\n}\n\n.toki-log-tabs-right button:hover {\n    color: #f59e0b;\n}\n\n/* ── Log Panels ── */\n.toki-log-panel {\n    display: none !important;\n    flex-direction: column;\n    flex: 1;\n    overflow: hidden;\n}\n\n.toki-log-panel.active {\n    display: flex !important;\n}\n\n/* ── Debug Console ── */\n#toki-debug-console-header {\n    display: flex;\n    align-items: center;\n    gap: 8px;\n    margin-bottom: 6px;\n    flex-shrink: 0;\n}\n\n.toki-console-toggle-btn {\n    background: rgba(255, 255, 255, 0.06);\n    border: 1px solid rgba(255, 255, 255, 0.1);\n    padding: 3px 10px;\n    border-radius: 4px;\n    cursor: pointer;\n    font-size: 11px;\n    color: #94a3b8;\n    font-family: inherit;\n    font-weight: 600;\n    transition: all 0.15s;\n}\n\n.toki-console-toggle-btn:hover {\n    background: rgba(255, 255, 255, 0.12);\n}\n\n.toki-console-toggle-btn.on {\n    color: #4ade80;\n    border-color: rgba(74, 222, 128, 0.3);\n}\n\n.toki-console-status {\n    font-size: 10px;\n    color: #64748b;\n}\n\n#toki-debug-console-content {\n    flex: 1;\n    overflow-y: auto;\n    padding: 8px;\n    margin: 0;\n    list-style: none;\n    background: rgba(0, 0, 0, 0.2);\n    border-radius: 8px;\n    border: 1px solid rgba(255, 255, 255, 0.03);\n    min-height: 280px;\n    font-family: 'Cascadia Code', Consolas, monospace;\n    font-size: 11px;\n}\n\n#toki-debug-console-content::-webkit-scrollbar {\n    width: 4px;\n}\n#toki-debug-console-content::-webkit-scrollbar-track {\n    background: transparent;\n}\n#toki-debug-console-content::-webkit-scrollbar-thumb {\n    background: rgba(255, 255, 255, 0.08);\n    border-radius: 999px;\n}\n\n#toki-debug-console-content li {\n    margin-bottom: 2px;\n    padding: 2px 6px;\n    border-radius: 3px;\n    word-break: break-all;\n    line-height: 1.5;\n}\n\n#toki-debug-console-content li.log,\n#toki-debug-console-content li.info {\n    color: #e0e0e0;\n}\n\n#toki-debug-console-content li.warn {\n    color: #f9e2af;\n}\n\n#toki-debug-console-content li.error,\n#toki-debug-console-content li.critical {\n    color: #f38ba8;\n}\n\n#toki-debug-console-content li.success {\n    color: #a6e3a1;\n}\n";
+var ui_namespaceObject = "@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');\n\n:root {\n    --toki-primary: #2563eb;\n    --toki-primary-dark: #1d4ed8;\n    --toki-accent: #facc15;\n    --toki-bg: rgba(248, 250, 252, 0.9);\n    --toki-text: #1e293b;\n    --toki-text-muted: #64748b;\n    --toki-border: rgba(255, 255, 255, 0.6);\n    --toki-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);\n    --toki-font: 'Inter', -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif;\n}\n\n/* ==========================================\n   Layer 1: Atomic Utility Classes\n   ========================================== */\n\n/* Layout */\n.toki-flex { display: flex; }\n.toki-flex-col { display: flex; flex-direction: column; }\n.toki-flex-wrap { flex-wrap: wrap; }\n.toki-flex-center { display: flex; align-items: center; }\n.toki-flex-col-center { display: flex; flex-direction: column; align-items: center; }\n.toki-inline-flex { display: inline-flex; }\n.toki-grid { display: grid; }\n\n/* Gap */\n.toki-gap-2 { gap: 2px; }\n.toki-gap-4 { gap: 4px; }\n.toki-gap-5 { gap: 5px; }\n.toki-gap-6 { gap: 6px; }\n.toki-gap-8 { gap: 8px; }\n.toki-gap-10 { gap: 10px; }\n.toki-gap-12 { gap: 12px; }\n.toki-gap-14 { gap: 14px; }\n.toki-gap-16 { gap: 16px; }\n.toki-gap-20 { gap: 20px; }\n\n/* Padding */\n.toki-p-0 { padding: 0; }\n.toki-p-2 { padding: 2px; }\n.toki-p-4 { padding: 4px; }\n.toki-p-6 { padding: 6px; }\n.toki-p-8 { padding: 8px; }\n.toki-p-10 { padding: 10px; }\n.toki-p-12 { padding: 12px; }\n.toki-p-14 { padding: 14px; }\n.toki-p-16 { padding: 16px; }\n.toki-p-18 { padding: 18px; }\n.toki-p-20 { padding: 20px; }\n.toki-p-24 { padding: 24px; }\n.toki-p-32 { padding: 32px; }\n.toki-px-4 { padding-left: 4px; padding-right: 4px; }\n.toki-px-6 { padding-left: 6px; padding-right: 6px; }\n.toki-px-8 { padding-left: 8px; padding-right: 8px; }\n.toki-px-10 { padding-left: 10px; padding-right: 10px; }\n.toki-px-12 { padding-left: 12px; padding-right: 12px; }\n.toki-px-14 { padding-left: 14px; padding-right: 14px; }\n.toki-px-16 { padding-left: 16px; padding-right: 16px; }\n.toki-px-20 { padding-left: 20px; padding-right: 20px; }\n.toki-px-24 { padding-left: 24px; padding-right: 24px; }\n.toki-px-32 { padding-left: 32px; padding-right: 32px; }\n.toki-py-2 { padding-top: 2px; padding-bottom: 2px; }\n.toki-py-4 { padding-top: 4px; padding-bottom: 4px; }\n.toki-py-6 { padding-top: 6px; padding-bottom: 6px; }\n.toki-py-8 { padding-top: 8px; padding-bottom: 8px; }\n.toki-py-10 { padding-top: 10px; padding-bottom: 10px; }\n.toki-py-12 { padding-top: 12px; padding-bottom: 12px; }\n.toki-py-14 { padding-top: 14px; padding-bottom: 14px; }\n\n/* Margin */\n.toki-m-0 { margin: 0; }\n.toki-mt-2 { margin-top: 2px; }\n.toki-mt-4 { margin-top: 4px; }\n.toki-mt-6 { margin-top: 6px; }\n.toki-mt-8 { margin-top: 8px; }\n.toki-mt-12 { margin-top: 12px; }\n.toki-mt-20 { margin-top: 20px; }\n.toki-mt-24 { margin-top: 24px; }\n.toki-mt-32 { margin-top: 32px; }\n.toki-mt-40 { margin-top: 40px; }\n.toki-mb-2 { margin-bottom: 2px; }\n.toki-mb-4 { margin-bottom: 4px; }\n.toki-mb-5 { margin-bottom: 5px; }\n.toki-mb-6 { margin-bottom: 6px; }\n.toki-mb-8 { margin-bottom: 8px; }\n.toki-mb-10 { margin-bottom: 10px; }\n.toki-mb-12 { margin-bottom: 12px; }\n.toki-mb-20 { margin-bottom: 20px; }\n.toki-mb-24 { margin-bottom: 24px; }\n.toki-ml-4 { margin-left: 4px; }\n.toki-ml-8 { margin-left: 8px; }\n.toki-ml-auto { margin-left: auto; }\n\n/* Typography */\n.toki-text-8 { font-size: 8px; }\n.toki-text-9 { font-size: 9px; }\n.toki-text-10 { font-size: 10px; }\n.toki-text-11 { font-size: 11px; }\n.toki-text-12 { font-size: 12px; }\n.toki-text-13 { font-size: 13px; }\n.toki-text-14 { font-size: 14px; }\n.toki-text-15 { font-size: 15px; }\n.toki-text-16 { font-size: 16px; }\n.toki-text-20 { font-size: 20px; }\n.toki-text-24 { font-size: 24px; }\n.toki-text-muted { color: var(--toki-text-muted); }\n.toki-text-primary { color: var(--toki-primary); }\n.toki-text-danger { color: #ff5555; }\n.toki-text-success { color: #4ade80; }\n.toki-font-medium { font-weight: 500; }\n.toki-font-semibold { font-weight: 600; }\n.toki-font-bold { font-weight: 700; }\n.toki-font-extrabold { font-weight: 800; }\n.toki-leading-1 { line-height: 1; }\n.toki-leading-14 { line-height: 1.4; }\n.toki-leading-15 { line-height: 1.5; }\n.toki-leading-16 { line-height: 1.6; }\n.toki-text-center { text-align: center; }\n\n/* Visual */\n.toki-rounded-3 { border-radius: 3px; }\n.toki-rounded-4 { border-radius: 4px; }\n.toki-rounded-5 { border-radius: 5px; }\n.toki-rounded-6 { border-radius: 6px; }\n.toki-rounded-8 { border-radius: 8px; }\n.toki-rounded-10 { border-radius: 10px; }\n.toki-rounded-12 { border-radius: 12px; }\n.toki-rounded-14 { border-radius: 14px; }\n.toki-rounded-16 { border-radius: 16px; }\n.toki-rounded-18 { border-radius: 18px; }\n.toki-rounded-20 { border-radius: 20px; }\n.toki-rounded-24 { border-radius: 24px; }\n.toki-rounded-28 { border-radius: 28px; }\n.toki-rounded-full { border-radius: 999px; }\n.toki-shadow-sm { box-shadow: 0 1px 3px rgba(0,0,0,0.1); }\n.toki-shadow { box-shadow: var(--toki-shadow); }\n.toki-surface { background: var(--toki-bg); }\n.toki-border-light { border: 1px solid var(--toki-border); }\n.toki-transition { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }\n.toki-w-full { width: 100%; }\n.toki-h-full { height: 100%; }\n.toki-cursor-pointer { cursor: pointer; }\n.toki-cursor-help { cursor: help; }\n.toki-relative { position: relative; }\n.toki-overflow-hidden { overflow: hidden; }\n\n/* Composite Utilities (convenience combos) */\n.toki-flex-1 { flex: 1; }\n.toki-flex-between { display: flex; justify-content: space-between; align-items: center; }\n.toki-flex-row { display: flex; gap: 4px; align-items: center; }\n.toki-flex-row-8 { display: flex; gap: 8px; align-items: center; }\n.toki-flex-row-10 { display: flex; gap: 10px; align-items: center; }\n.toki-visible-flex { display: flex !important; }\n.toki-visible-block { display: block !important; }\n.toki-hidden { display: none !important; }\n.toki-text-xs { font-size: 11px; color: #94a3b8; }\n.toki-text-sm { font-size: 12px; }\n.toki-text-lg { font-size: 20px; font-weight: 700; }\n.toki-divider { border: 0; border-top: 1px solid rgba(0,0,0,0.05); margin: 24px 0; }\n\n/* LogBox Styles */\n#toki-logbox {\n    position: fixed;\n    bottom: 100px;\n    right: 30px;\n    width: 480px;\n    height: auto;\n    min-height: 250px;\n    max-height: 500px;\n    background: var(--toki-bg);\n    color: var(--toki-text);\n    font-family: 'Cascadia Code', Consolas, monospace;\n    font-size: 12px;\n    border: 1px solid var(--toki-border);\n    border-radius: 16px;\n    z-index: 9999;\n    display: none;\n    flex-direction: column;\n    box-shadow: var(--toki-shadow);\n    backdrop-filter: blur(20px);\n    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);\n}\n\n#toki-logbox-header {\n    padding: 12px 16px;\n    background: rgba(255, 255, 255, 0.4);\n    border-bottom: 1px solid rgba(0, 0, 0, 0.05);\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    border-top-left-radius: 16px;\n    border-top-right-radius: 16px;\n    cursor: move;\n}\n\n#toki-logbox-title {\n    font-weight: 700;\n    font-size: 13px;\n    letter-spacing: -0.01em;\n}\n\n#toki-logbox-controls span {\n    cursor: pointer;\n    margin-left: 12px;\n    color: var(--toki-text-muted);\n    font-size: 14px;\n    transition: transform 0.2s, color 0.2s;\n    display: inline-block;\n}\n\n#toki-logbox-controls span:hover {\n    color: var(--toki-primary);\n    transform: scale(1.15);\n}\n\n#toki-logbox-content {\n    flex: 1;\n    overflow-y: auto;\n    padding: 12px;\n    margin: 0;\n    list-style: none;\n}\n\n#toki-logbox-content li {\n    margin-bottom: 4px;\n    word-break: break-all;\n    padding: 4px 8px;\n    border-radius: 6px;\n    line-height: 1.4;\n    color: #f1f5f9; /* 밝은 회백색 지정으로 가독성 극대화 */\n}\n\n#toki-logbox-content li.critical {\n    color: #be123c;\n    font-weight: 700;\n    background: rgba(225, 29, 72, 0.1);\n    border-left: 3px solid #e11d48;\n}\n\n#toki-logbox-content li.error { color: #e11d48; }\n#toki-logbox-content li.warn { color: #d97706; }\n#toki-logbox-content li.success { color: #059669; font-weight: 600; }\n#toki-logbox-content li.info { color: #38bdf8; font-weight: 500; }\n\n/* Modal Styles */\n.toki-modal-overlay {\n    position: fixed;\n    top: 0;\n    left: 0;\n    width: 100%;\n    height: 100%;\n    background: rgba(15, 23, 42, 0.2);\n    backdrop-filter: blur(12px);\n    z-index: 9999;\n    display: flex;\n    justify-content: center;\n    align-items: center;\n    opacity: 0;\n    animation: tokiFadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;\n}\n\n.toki-modal {\n    width: 520px;\n    max-width: 95%;\n    background: var(--toki-bg);\n    border: 1px solid var(--toki-border);\n    border-radius: 28px;\n    box-shadow: var(--toki-shadow);\n    overflow: hidden;\n    display: flex;\n    flex-direction: column;\n    transform: translateY(30px) scale(0.95);\n    animation: tokiSlideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;\n    backdrop-filter: blur(30px);\n    color: var(--toki-text);\n    font-family: var(--toki-font);\n}\n\n.toki-modal-header {\n    padding: 24px 32px;\n    background: rgba(255, 255, 255, 0.4);\n    border-bottom: 1px solid rgba(0, 0, 0, 0.05);\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n}\n\n.toki-modal-title {\n    font-size: 24px;\n    font-weight: 800;\n    color: #0f172a;\n    display: flex;\n    align-items: center;\n    gap: 12px;\n    letter-spacing: -0.03em;\n}\n\n.toki-modal-close {\n    background: rgba(0, 0, 0, 0.05);\n    border: none;\n    color: var(--toki-text-muted);\n    width: 36px;\n    height: 36px;\n    border-radius: 50%;\n    cursor: pointer;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);\n    font-size: 20px;\n}\n\n.toki-modal-close:hover {\n    background: #ef4444;\n    color: #fff;\n    transform: rotate(90deg);\n}\n\n.toki-btn-ghost {\n    background: rgba(0, 0, 0, 0.05);\n    border: none;\n    color: var(--toki-text-muted);\n    padding: 6px 14px;\n    border-radius: 12px;\n    cursor: pointer;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    transition: all 0.2s;\n    font-size: 13px;\n    font-weight: 600;\n    gap: 6px;\n}\n\n.toki-btn-ghost:hover {\n    background: rgba(0, 0, 0, 0.08);\n    color: var(--toki-text);\n}\n\n/* Tabs */\n.toki-tabs {\n    display: flex;\n    background: rgba(255, 255, 255, 0.3);\n    padding: 8px;\n    gap: 6px;\n    border-bottom: 1px solid rgba(0, 0, 0, 0.05);\n}\n\n.toki-tab-btn {\n    flex: 1;\n    padding: 12px;\n    background: none;\n    border: none;\n    color: var(--toki-text-muted);\n    font-size: 14px;\n    font-weight: 700;\n    cursor: pointer;\n    transition: all 0.3s;\n    border-radius: 14px;\n    display: flex;\n    justify-content: center;\n    align-items: center;\n    gap: 8px;\n}\n\n.toki-tab-btn:hover {\n    color: var(--toki-text);\n    background: rgba(255, 255, 255, 0.6);\n}\n\n.toki-tab-btn.active {\n    background: #fff;\n    color: var(--toki-primary);\n    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);\n}\n\n.toki-tab-content {\n    display: none;\n    padding: 32px;\n    animation: tokiTabFadeIn 0.4s ease-out;\n}\n\n.toki-tab-content.active { display: block; }\n\n/* Components */\n.toki-section-title {\n    font-size: 11px;\n    font-weight: 800;\n    color: var(--toki-primary);\n    text-transform: uppercase;\n    letter-spacing: 0.1em;\n    margin: 24px 0 12px 4px;\n    opacity: 0.8;\n}\n\n.toki-control-group {\n    margin-bottom: 20px;\n    position: relative;\n}\n\n.toki-label {\n    display: block;\n    font-size: 13px;\n    font-weight: 700;\n    color: var(--toki-text-muted);\n    margin-bottom: 8px;\n    margin-left: 4px;\n}\n\n.toki-input, .toki-select, .toki-textarea {\n    box-sizing: border-box;\n    width: 100%;\n    padding: 14px 18px;\n    background: rgba(255, 255, 255, 0.8);\n    border: 1px solid rgba(0, 0, 0, 0.08);\n    border-radius: 16px;\n    color: var(--toki-text) !important;\n    font-size: 15px;\n    font-weight: 600;\n    appearance: none;\n    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);\n    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);\n}\n\n.toki-input:hover, .toki-select:hover, .toki-textarea:hover {\n    border-color: var(--toki-primary);\n    background-color: #fff;\n    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.08);\n}\n\n.toki-input:focus, .toki-select:focus, .toki-textarea:focus {\n    outline: none;\n    border-color: var(--toki-primary);\n    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);\n    background-color: #fff;\n}\n\n.toki-textarea {\n    resize: vertical;\n    line-height: 1.5;\n}\n\n.toki-select {\n    cursor: pointer;\n    background-image: url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2364748b'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E\");\n    background-repeat: no-repeat;\n    background-position: right 16px center;\n    background-size: 16px;\n}\n\n.toki-btn-action {\n    width: 100%;\n    height: 56px;\n    background: var(--toki-primary);\n    color: #fff !important;\n    border: none;\n    border-radius: 18px;\n    font-size: 16px;\n    font-weight: 700;\n    cursor: pointer;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    gap: 12px;\n    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);\n    box-shadow: 0 8px 15px rgba(37, 99, 235, 0.2);\n}\n\n.toki-btn-action:hover {\n    transform: translateY(-3px);\n    box-shadow: 0 12px 20px rgba(37, 99, 235, 0.35);\n    filter: brightness(1.05);\n}\n\n.toki-btn-secondary {\n    background: rgba(255, 255, 255, 0.8);\n    color: #475569 !important;\n    border: 1px solid rgba(0, 0, 0, 0.05);\n    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);\n}\n\n.toki-btn-secondary:hover {\n    background: #fff;\n    color: var(--toki-text) !important;\n}\n\n.toki-btn-danger {\n    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%) !important;\n    color: #ffffff !important;\n    border: none !important;\n    box-shadow: 0 4px 10px rgba(239, 68, 68, 0.2) !important;\n}\n\n.toki-btn-danger:hover {\n    background: linear-gradient(135deg, #f87171 0%, #ef4444 100%) !important;\n    box-shadow: 0 6px 15px rgba(239, 68, 68, 0.35) !important;\n}\n\n/* Status & Indicators */\n.toki-status-dot {\n    width: 8px;\n    height: 8px;\n    border-radius: 50%;\n    display: inline-block;\n    margin-right: 6px;\n}\n\n.toki-status-online {\n    background: #10b981;\n    box-shadow: 0 0 8px #10b981;\n}\n\n.toki-downloaded {\n    background: rgba(16, 185, 129, 0.08) !important;\n    border-left: 4px solid #10b981 !important;\n    opacity: 0.75;\n    transition: all 0.3s ease;\n}\n\n.toki-downloaded:hover {\n    opacity: 1;\n    background: rgba(16, 185, 129, 0.15) !important;\n}\n\n/* FAB */\n.toki-fab {\n    position: fixed;\n    bottom: 30px;\n    right: 30px;\n    width: 64px;\n    height: 64px;\n    background: linear-gradient(135deg, #2563eb, #0ea5e9);\n    border-radius: 20px;\n    box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.4);\n    display: flex;\n    justify-content: center;\n    align-items: center;\n    cursor: pointer;\n    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);\n    z-index: 9998;\n}\n\n.toki-fab:hover {\n    transform: translateY(-5px) rotate(5deg);\n    box-shadow: 0 20px 25px -5px rgba(37, 99, 235, 0.5);\n}\n\n.toki-fab svg {\n    width: 28px;\n    height: 28px;\n    fill: #fff;\n}\n\n\n\n.toki-btn-rule {\n    background: transparent;\n    border: 1px solid #ddd;\n    padding: 6px 12px;\n    border-radius: 8px;\n    font-size: 12px;\n    cursor: pointer;\n    transition: all 0.2s;\n}\n\n.toki-btn-rule:hover {\n    background: #f8fafc;\n    border-color: #94a3b8;\n}\n\n/* Animations */\n@keyframes tokiFadeIn {\n    from { opacity: 0; }\n    to { opacity: 1; }\n}\n\n@keyframes tokiTabFadeIn {\n    from { opacity: 0; transform: translateX(10px); }\n    to { opacity: 1; transform: translateX(0); }\n}\n\n@keyframes tokiSlideUp {\n    from { opacity: 0; transform: translateY(30px) scale(0.95); }\n    to { opacity: 1; transform: translateY(0) scale(1); }\n}\n\n/* --- Structural Layouts for Inline Replacement --- */\n\n/* Horizontal Button Row (e.g., Download buttons) */\n.toki-btn-group-row {\n    display: flex;\n    gap: 12px;\n    align-items: center;\n}\n.toki-btn-group-row .toki-btn-action {\n    height: 52px;\n    flex: 1;\n}\n.toki-btn-group-row .toki-flex-1-4 {\n    flex: 1.4;\n}\n\n/* Vertical Button Stack (e.g., Tool buttons) */\n.toki-btn-group-stack {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n}\n.toki-btn-group-stack .toki-btn-action {\n    height: 44px;\n    justify-content: flex-start;\n    padding-left: 20px;\n}\n\n/* 1-Column Form Grid */\n.toki-form-grid {\n    display: grid;\n    grid-template-columns: 1fr;\n    gap: 14px;\n}\n\n/* Composite & Borderline Utilities */\n.toki-modal-main { padding: 32px; width: 520px; max-height: 85vh; overflow-y: auto; }\n.toki-btn-gradient-green { \n    background: linear-gradient(135deg, #10b981, #059669); \n    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);\n}\n\n.toki-btn-lavender { background: #6a5acd; font-weight: bold; }\n.toki-btn-slate { background: rgba(0,0,0,0.02); border-style: dashed; border-radius: 20px; }\n\n/* Helper Boxes */\n.toki-helper-box-blue {\n    margin: -10px 0 20px 0; padding: 14px; \n    background: rgba(37, 99, 235, 0.05); border: 1px solid rgba(37, 99, 235, 0.1); \n    border-radius: 18px;\n}\n\n/* Captcha Overlay */\n.toki-captcha-overlay {\n    position: fixed; top: 0; left: 0; width: 100%; height: 100%;\n    background: rgba(0,0,0,0.8); z-index: 10001;\n    display: flex; flex-direction: column; align-items: center; justify-content: center;\n    color: white; font-family: var(--toki-font);\n}\n.toki-captcha-frame {\n    width: 80%; height: 60%; background: white; \n    border-radius: 20px; overflow: hidden; \n    margin-bottom: 20px; box-shadow: 0 20px 50px rgba(0,0,0,0.5);\n}\n\n/* Component: Helper Description Text */\n.toki-helper-desc { line-height: 1.5; font-weight: 500; }\n\n/* Component: Small Button (e.g., Test Native) */\n.toki-btn-sm { height: 36px; font-size: 12px; border-radius: 12px; }\n\n/* Component: Sync Button (height 48px) */\n.toki-btn-sync { height: 48px; }\n\n/* Component: Modal Header without border */\n.toki-modal-header-borderless { border: none; }\n\n/* Component: Code Textarea */\n.toki-textarea-code { min-height: 120px; font-family: monospace; }\n\n/* Status Badges & Indicators */\n.toki-badge {\n    margin-left: 5px;\n    font-size: 12px;\n    vertical-align: middle;\n}\n\n.toki-downloaded {\n    opacity: 0.6;\n    background-color: rgba(74, 222, 128, 0.05) !important;\n    transition: opacity 0.3s ease;\n}\n.toki-downloaded:hover {\n    opacity: 1;\n}\n\n/* Iframe Elements */\n.toki-downloader-iframe {\n    width: 100%;\n    height: 600px;\n    opacity: 0.1;\n    pointer-events: none;\n    border: none;\n    margin-top: 40px;\n}\n\n.toki-captcha-iframe {\n    width: 100%;\n    height: 100%;\n    border: none;\n}\n\n/* Info Card & History Styles */\n.toki-info-card {\n    background: rgba(255, 255, 255, 0.4);\n    border: 1px solid rgba(0, 0, 0, 0.05);\n    border-radius: 12px;\n    padding: 12px 16px;\n    margin-bottom: 20px;\n}\n\n.toki-info-row {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    padding: 6px 0;\n}\n\n.toki-info-row:not(:last-child) {\n    border-bottom: 1px dashed rgba(0, 0, 0, 0.05);\n}\n\n.toki-info-label {\n    font-size: 13px;\n    color: var(--toki-text-muted);\n    font-weight: 500;\n}\n\n.toki-info-val {\n    font-size: 13px;\n    color: var(--toki-text);\n    font-weight: 700;\n    display: flex;\n    align-items: center;\n    gap: 6px;\n}\n\n/* --- Multi-Queue Progress Monitor Panel (v1.21.0) --- */\n#toki-logbox-progress {\n    padding: 14px 18px;\n    background: rgba(255, 255, 255, 0.25);\n    border-bottom: 1px solid rgba(0, 0, 0, 0.05);\n    backdrop-filter: blur(10px);\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n}\n\n#toki-progress-header {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n}\n\n#toki-progress-overall-text {\n    font-size: 12px;\n    font-weight: 800;\n    color: var(--toki-primary);\n    letter-spacing: -0.02em;\n    background: linear-gradient(135deg, #4f46e5, #06b6d4);\n    -webkit-background-clip: text;\n    -webkit-text-fill-color: transparent;\n}\n\n}\n\n#toki-progress-overall-controls {\n    display: flex;\n    gap: 8px;\n    align-items: center;\n}\n\n.toki-progress-btn {\n    font-size: 13px;\n    cursor: pointer;\n    transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), filter 0.2s ease, opacity 0.2s ease;\n    user-select: none;\n    opacity: 0.85;\n}\n\n.toki-progress-btn:hover {\n    transform: scale(1.25);\n    opacity: 1;\n    filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.6));\n}\n\n#toki-btn-queue-stop:hover {\n    filter: drop-shadow(0 0 6px #ef4444);\n}\n\n.toki-progress-bar-paused {\n    background: linear-gradient(90deg, #9ca3af 0%, #6b7280 50%, #4b5563 100%) !important;\n    box-shadow: 0 1px 3px rgba(107, 114, 128, 0.4) !important;\n    animation: tokiPulsePaused 2s infinite ease-in-out;\n}\n\n@keyframes tokiPulsePaused {\n    0%, 100% { opacity: 1; }\n    50% { opacity: 0.65; }\n}\n\n.toki-empty-queue-msg {\n    display: flex;\n    flex-direction: column;\n    align-items: center;\n    justify-content: center;\n    padding: 24px 16px;\n    background: rgba(255, 255, 255, 0.04);\n    border: 1px dashed rgba(0, 0, 0, 0.08);\n    border-radius: 12px;\n    text-align: center;\n    gap: 6px;\n    margin: 8px 0;\n    backdrop-filter: blur(5px);\n}\n\n.toki-empty-queue-msg span {\n    font-size: 13px;\n    font-weight: 700;\n    color: var(--toki-primary, #6366f1);\n    opacity: 0.85;\n}\n\n.toki-empty-queue-msg p {\n    font-size: 11px;\n    color: #4b5563;\n    opacity: 0.75;\n    margin: 0;\n    line-height: 1.4;\n}\n\n.toki-progress-bar-container {\n    width: 100%;\n    height: 8px;\n    background: rgba(0, 0, 0, 0.06);\n    border-radius: 999px;\n    overflow: hidden;\n    position: relative;\n    border: 1px solid rgba(255, 255, 255, 0.5);\n    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);\n}\n\n.toki-progress-bar-fill {\n    height: 100%;\n    width: 0%;\n    background: linear-gradient(90deg, #6366f1 0%, #3b82f6 50%, #06b6d4 100%);\n    border-radius: 999px;\n    transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);\n    box-shadow: 0 1px 3px rgba(99, 102, 241, 0.4);\n}\n\n#toki-progress-workers-list {\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n    margin-top: 6px;\n    max-height: 160px;\n    overflow-y: auto;\n    padding-right: 4px;\n}\n\n/* Custom Scrollbar for Workers List */\n#toki-progress-workers-list::-webkit-scrollbar {\n    width: 4px;\n}\n#toki-progress-workers-list::-webkit-scrollbar-track {\n    background: transparent;\n}\n#toki-progress-workers-list::-webkit-scrollbar-thumb {\n    background: rgba(0, 0, 0, 0.1);\n    border-radius: 999px;\n}\n\n.toki-worker-progress-item {\n    background: rgba(255, 255, 255, 0.35);\n    border: 1px solid rgba(255, 255, 255, 0.5);\n    border-radius: 10px;\n    padding: 8px 12px;\n    display: flex;\n    flex-direction: column;\n    gap: 6px;\n    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);\n    transition: all 0.2s ease;\n}\n\n.toki-worker-progress-item:hover {\n    background: rgba(255, 255, 255, 0.55);\n    border-color: rgba(37, 99, 235, 0.15);\n    transform: translateY(-1px);\n    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.04);\n}\n\n.toki-worker-stage {\n    font-size: 11px;\n    font-weight: 700;\n    color: var(--toki-text-muted);\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n}\n\n.toki-worker-bar-container {\n    width: 100%;\n    height: 5px;\n    background: rgba(0, 0, 0, 0.04);\n    border-radius: 999px;\n    overflow: hidden;\n}\n\n.toki-worker-bar-fill {\n    height: 100%;\n    background: linear-gradient(90deg, #10b981 0%, #34d399 100%);\n    border-radius: 999px;\n    transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1);\n}\n\n/* --- 📋 Realtime Queue List & Badges (v1.21.0) --- */\n#toki-progress-queue-section {\n    margin-top: 10px;\n    border-top: 1px solid rgba(0, 0, 0, 0.06);\n    padding-top: 8px;\n    display: flex;\n    flex-direction: column;\n    gap: 6px;\n}\n\n#toki-queue-section-header {\n    font-size: 11px;\n    font-weight: 700;\n    color: var(--toki-text-muted);\n    opacity: 0.85;\n}\n\n#toki-progress-queue-list {\n    display: flex;\n    flex-direction: column;\n    gap: 4px;\n    max-height: 120px;\n    overflow-y: auto;\n    padding-right: 2px;\n}\n\n#toki-progress-queue-list::-webkit-scrollbar {\n    width: 4px;\n}\n#toki-progress-queue-list::-webkit-scrollbar-track {\n    background: transparent;\n}\n#toki-progress-queue-list::-webkit-scrollbar-thumb {\n    background: rgba(0, 0, 0, 0.08);\n    border-radius: 999px;\n}\n\n.toki-queue-list-item {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    padding: 5px 8px;\n    background: rgba(255, 255, 255, 0.25);\n    border: 1px solid rgba(255, 255, 255, 0.4);\n    border-radius: 6px;\n    font-size: 11px;\n    transition: all 0.2s ease;\n}\n\n.toki-queue-list-item:hover {\n    background: rgba(255, 255, 255, 0.45);\n    transform: translateX(1px);\n}\n\n.toki-queue-item-meta {\n    display: flex;\n    align-items: center;\n    gap: 8px;\n    flex: 1;\n    min-width: 0;\n}\n\n.toki-queue-item-title {\n    color: var(--toki-text);\n    font-weight: 500;\n    white-space: nowrap;\n    overflow: hidden;\n    text-overflow: ellipsis;\n}\n\n.toki-queue-item-delete {\n    font-size: 10px;\n    cursor: pointer;\n    opacity: 0.6;\n    transition: all 0.15s ease;\n    padding: 2px;\n}\n\n.toki-queue-item-delete:hover {\n    opacity: 1;\n    transform: scale(1.2);\n}\n\n/* 세련된 HSL 상태 배지 */\n.toki-badge {\n    padding: 2px 6px;\n    border-radius: 4px;\n    font-size: 9px;\n    font-weight: 700;\n    white-space: nowrap;\n    text-transform: uppercase;\n}\n\n/* 대기 (🟡 HSL Tailored Yellow) */\n.toki-badge-pending {\n    background: hsl(45, 93%, 94%);\n    color: hsl(45, 90%, 35%);\n    border: 1px solid hsl(45, 93%, 85%);\n}\n\n/* 진행 (🟢 HSL Tailored Emerald) */\n.toki-badge-processing {\n    background: hsl(150, 84%, 93%);\n    color: hsl(150, 84%, 25%);\n    border: 1px solid hsl(150, 84%, 82%);\n}\n\n/* 완료 (🔵 HSL Tailored Sapphire) */\n.toki-badge-completed {\n    background: hsl(220, 95%, 94%);\n    color: hsl(220, 90%, 40%);\n    border: 1px solid hsl(220, 95%, 86%);\n}\n\n/* 실패 (🔴 HSL Tailored Ruby) */\n.toki-badge-failed {\n    background: hsl(0, 93%, 94%);\n    color: hsl(0, 90%, 45%);\n    border: 1px solid hsl(0, 93%, 86%);\n}\n\n/* --- FormRuleEditor: Hybrid Two-Track Parser GUI (v1.21.0) --- */\n.toki-form-editor-modal {\n    width: min(95vw, 1200px) !important;\n    max-height: min(85vh, 700px) !important;\n    border-radius: 24px !important;\n}\n\n.toki-form-editor-container {\n    display: flex !important;\n    flex-direction: row !important;\n    flex-wrap: nowrap !important;\n    flex: 1;\n    overflow: auto !important;\n    gap: 20px;\n    padding: 20px;\n    background: rgba(255, 255, 255, 0.15);\n}\n\n.toki-form-editor-left {\n    flex: 1.2 !important;\n    min-width: 550px !important;\n    overflow-y: auto;\n    display: flex;\n    flex-direction: column;\n    gap: 16px;\n    padding-right: 8px;\n}\n\n.toki-form-editor-left::-webkit-scrollbar {\n    width: 6px;\n}\n.toki-form-editor-left::-webkit-scrollbar-track {\n    background: transparent;\n}\n.toki-form-editor-left::-webkit-scrollbar-thumb {\n    background: rgba(0, 0, 0, 0.08);\n    border-radius: 999px;\n}\n\n.toki-form-editor-right {\n    flex: 1 !important;\n    min-width: 450px !important;\n    display: flex;\n    flex-direction: column;\n    gap: 16px;\n    background: rgba(255, 255, 255, 0.4);\n    padding: 20px;\n    border-radius: 18px;\n    border: 1px solid rgba(255, 255, 255, 0.5);\n    overflow: hidden;\n}\n\n.toki-form-card {\n    background: rgba(255, 255, 255, 0.45);\n    border: 1px solid rgba(0, 0, 0, 0.04);\n    border-radius: 16px;\n    padding: 16px 20px;\n    display: flex;\n    flex-direction: column;\n    gap: 12px;\n    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.01);\n    transition: all 0.2s ease;\n}\n\n.toki-form-card:hover {\n    background: rgba(255, 255, 255, 0.65);\n    border-color: rgba(37, 99, 235, 0.1);\n    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.02);\n}\n\n.toki-form-card-title {\n    font-size: 13px;\n    font-weight: 800;\n    color: var(--toki-primary);\n    text-transform: uppercase;\n    letter-spacing: 0.02em;\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    border-bottom: 1px solid rgba(0, 0, 0, 0.03);\n    padding-bottom: 8px;\n}\n\n.toki-form-row {\n    display: flex;\n    flex-direction: column;\n    gap: 6px;\n}\n\n.toki-form-row-header {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n}\n\n.toki-form-row-label {\n    font-size: 12px;\n    font-weight: 700;\n    color: var(--toki-text-muted);\n}\n\n.toki-input-compact {\n    width: 100%;\n    box-sizing: border-box;\n    min-width: 0;\n    padding: 10px 14px;\n    background: rgba(255, 255, 255, 0.7);\n    border: 1px solid rgba(0, 0, 0, 0.06);\n    border-radius: 10px;\n    font-size: 13px;\n    font-family: inherit;\n    transition: all 0.2s ease;\n}\n\n.toki-input-compact:focus {\n    outline: none;\n    border-color: var(--toki-primary);\n    background: #fff;\n    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);\n}\n\n.toki-badge-match {\n    font-size: 10px;\n    font-weight: 800;\n    padding: 2px 6px;\n    border-radius: 6px;\n    transition: all 0.2s ease;\n}\n\n.toki-badge-match.ok {\n    background: rgba(16, 185, 129, 0.1);\n    color: #10b981;\n}\n\n.toki-badge-match.zero {\n    background: rgba(245, 158, 11, 0.1);\n    color: #f59e0b;\n}\n\n.toki-badge-match.error {\n    background: rgba(239, 68, 68, 0.1);\n    color: #ef4444;\n}\n\n.toki-form-dropper-btn {\n    cursor: pointer;\n    font-size: 14px;\n    transition: transform 0.2s;\n    user-select: none;\n}\n.toki-form-dropper-btn:hover {\n    transform: scale(1.2);\n}\n\n.toki-form-verify-btn {\n    cursor: pointer;\n    font-size: 14px;\n    transition: transform 0.2s;\n    user-select: none;\n}\n.toki-form-verify-btn:hover {\n    transform: scale(1.2);\n}\n\n.toki-form-verify-result {\n    font-size: 11px;\n    font-weight: 600;\n    margin-top: 4px;\n    padding: 6px 10px;\n    border-radius: 8px;\n    line-height: 1.4;\n    word-break: break-all;\n}\n.toki-form-verify-result.success {\n    background: rgba(16, 185, 129, 0.08);\n    color: #10b981;\n    border: 1px solid rgba(16, 185, 129, 0.15);\n}\n.toki-form-verify-result.error {\n    background: rgba(239, 68, 68, 0.08);\n    color: #ef4444;\n    border: 1px solid rgba(239, 68, 68, 0.15);\n}\n\n/* --- 📱 Compact Responsive LogBox for Popups & Small Screens (v1.21.0 추가) --- */\n@media (max-width: 500px) {\n    #toki-logbox {\n        width: 100% !important;\n        height: 100% !important;\n        max-height: 100% !important;\n        bottom: 0 !important;\n        right: 0 !important;\n        left: 0 !important;\n        top: 0 !important;\n        border-radius: 0 !important;\n        border: none !important;\n        box-shadow: none !important;\n    }\n    /* 팝업에서는 전체 화면을 채우므로 드래그 헤더 무효화 및 모바일 친화형 축소 */\n    #toki-logbox-header {\n        cursor: default !important;\n        padding: 8px 12px !important;\n        border-top-left-radius: 0 !important;\n        border-top-right-radius: 0 !important;\n    }\n    #toki-logbox-content {\n        padding: 8px !important;\n        display: block !important; /* 팝업 상세로그 강제 개방 */\n        height: calc(100% - 35px) !important; /* 헤더를 제외한 영역 100% 점유 */\n        max-height: calc(100% - 35px) !important;\n    }\n    /* 팝업 내 불필요한 컨트롤 및 큐 진행률 카드 영역 강제 은닉 (사용자 피드백 반영) */\n    #toki-btn-audio, #toki-btn-report, #toki-logbox-progress {\n        display: none !important;\n    }\n}\n\n\n\n\n/* --- Dashboard Popup Specific Layout --- */\n#toki-dashboard-popup {\n    display: flex;\n    flex-direction: column;\n    width: 100vw;\n    height: 100vh;\n    margin: 0;\n    background: var(--toki-bg);\n    border: none;\n    border-radius: 0;\n    box-shadow: none;\n    overflow: hidden;\n}\n\n#toki-dashboard-header {\n    padding: 24px 32px;\n    background: rgba(255, 255, 255, 0.4);\n    border-bottom: 1px solid rgba(0, 0, 0, 0.05);\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n}\n\n#toki-dashboard-title {\n    font-size: 24px;\n    font-weight: 800;\n    color: #0f172a;\n    display: flex;\n    align-items: center;\n    gap: 12px;\n    letter-spacing: -0.03em;\n}\n\n#toki-dashboard-header-controls {\n    display: flex;\n    gap: 12px;\n    align-items: center;\n}\n\n#toki-dashboard-log-section {\n    padding: 16px 20px;\n    background: rgba(0, 0, 0, 0.05);\n    border-radius: 12px;\n    margin: 0 20px 20px 20px;\n    display: flex;\n    flex-direction: column;\n    height: 250px; /* 실시간 로그창 영역 높이 명시 */\n    overflow: hidden;\n}\n\n#toki-dashboard-log-section #toki-logbox-content {\n    flex: 1;\n    overflow-y: auto; /* 내부 스크롤 강제 */\n    padding: 12px;\n    margin: 0;\n    list-style: none;\n    background: rgba(0, 0, 0, 0.2); /* 로그 시인성 제고를 위한 세련된 다크 패널 */\n    border-radius: 8px;\n    border: 1px solid rgba(255, 255, 255, 0.03);\n}\n\n#toki-log-header {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    font-weight: 700;\n    margin-bottom: 12px;\n    color: var(--toki-text-muted);\n}\n\n/* --- 대시보드 커스텀 모달 레이아웃 (v1.21.6 추가) --- */\n.toki-dashboard-modal-overlay {\n    position: fixed;\n    top: 0;\n    left: 0;\n    width: 100vw;\n    height: 100vh;\n    background: rgba(15, 23, 42, 0.75);\n    backdrop-filter: blur(8px);\n    z-index: 10005;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    animation: tokiFadeIn 0.25s ease-out;\n}\n\n.toki-dashboard-modal {\n    width: 90%;\n    max-width: 680px;\n    background: var(--toki-bg, #1a1a2e);\n    border: 1px solid rgba(255, 255, 255, 0.08);\n    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);\n    border-radius: 24px;\n    display: flex;\n    flex-direction: column;\n    overflow: hidden;\n    animation: tokiSlideUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);\n    color: #e0e0e0;\n}\n\n.toki-dashboard-modal-header {\n    padding: 18px 24px;\n    border-bottom: 1px solid rgba(255, 255, 255, 0.05);\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    background: rgba(255, 255, 255, 0.02);\n}\n\n.toki-dashboard-modal-title {\n    font-size: 15px;\n    font-weight: 800;\n    color: var(--toki-primary, #6366f1);\n}\n\n.toki-dashboard-modal-close {\n    background: transparent;\n    border: none;\n    font-size: 24px;\n    font-weight: 700;\n    color: #94a3b8;\n    cursor: pointer;\n    line-height: 1;\n    transition: all 0.2s ease;\n}\n\n.toki-dashboard-modal-close:hover {\n    color: #ef4444;\n    transform: scale(1.1);\n}\n\n.toki-dashboard-modal-content {\n    padding: 20px;\n    overflow-y: auto;\n    max-height: 75vh;\n}\n\n/* 진행상황 모달 내 레이아웃 오버라이드 */\n#toki-modal-progress #toki-logbox-progress {\n    background: transparent !important;\n    border: none !important;\n    padding: 0 !important;\n    backdrop-filter: none !important;\n}\n#toki-modal-progress #toki-progress-queue-list {\n    max-height: 220px;\n}\n\n/* 로그 모달 내 레이아웃 오버라이드 */\n#toki-modal-logs #toki-dashboard-log-section {\n    margin: 0 !important;\n    padding: 0 !important;\n    background: transparent !important;\n    height: 400px !important;\n}\n#toki-modal-logs .toki-log-panel {\n    height: 330px !important;\n    max-height: 330px !important;\n    overflow-y: auto;\n}\n\n/* 대기열 모달 최대화 시의 너비 및 리스트 세로 높이 확장 */\n.toki-dashboard-modal-overlay.toki-queue-maximized .toki-dashboard-modal {\n    max-width: 850px !important;\n}\n.toki-dashboard-modal-overlay.toki-queue-maximized #toki-progress-queue-list {\n    max-height: 480px !important;\n    height: 480px !important;\n}\n\n/* 탭 본문 영역 세로 스크롤 활성화 (v1.21.8) */\n.toki-modal-body {\n    flex: 1;\n    overflow-y: auto !important;\n    max-height: calc(100vh - 120px);\n    padding-bottom: 40px;\n}\n\n/* Custom Scrollbar for Modal Body */\n.toki-modal-body::-webkit-scrollbar {\n    width: 6px;\n}\n.toki-modal-body::-webkit-scrollbar-track {\n    background: transparent;\n}\n.toki-modal-body::-webkit-scrollbar-thumb {\n    background: rgba(0, 0, 0, 0.12);\n    border-radius: 999px;\n}\n.toki-modal-body::-webkit-scrollbar-thumb:hover {\n    background: rgba(0, 0, 0, 0.25);\n}\n\n/* --- 🧬 DOM Inspector Panel (v2 — DevTools Style) --- */\n.toki-inspector-mount {\n    flex: 1;\n    display: flex;\n    flex-direction: column;\n    overflow: hidden;\n    min-height: 0;\n    border-radius: 12px;\n}\n\n.di-panel {\n    flex: 1;\n    display: flex;\n    flex-direction: column;\n    background: #1e1e2e;\n    overflow: hidden;\n    font-family: 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;\n    font-size: 12px;\n    line-height: 1.6;\n    color: #cdd6f4;\n}\n\n/* ── Toolbar ── */\n.di-toolbar {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    padding: 7px 14px;\n    background: #181825;\n    border-bottom: 1px solid #313244;\n    flex-shrink: 0;\n}\n\n.di-title {\n    font-weight: 700;\n    font-size: 12px;\n    color: #cba6f7;\n    letter-spacing: -0.01em;\n}\n\n.di-toolbar-right {\n    display: flex;\n    align-items: center;\n    gap: 10px;\n}\n\n.di-count {\n    font-size: 10px;\n    color: #585b70;\n}\n\n.di-refresh {\n    background: #313244;\n    border: none;\n    border-radius: 5px;\n    color: #6c7086;\n    cursor: pointer;\n    padding: 1px 7px;\n    font-size: 14px;\n    line-height: 1.5;\n    transition: all 0.15s;\n}\n\n.di-refresh:hover {\n    background: #45475a;\n    color: #cdd6f4;\n}\n\n/* ── Filter ── */\n.di-filter-bar {\n    padding: 5px 14px;\n    background: #181825;\n    border-bottom: 1px solid #313244;\n    flex-shrink: 0;\n}\n\n.di-filter {\n    width: 100%;\n    box-sizing: border-box;\n    background: #313244;\n    border: 1px solid #45475a;\n    border-radius: 5px;\n    padding: 4px 9px;\n    font-size: 11px;\n    color: #cdd6f4;\n    font-family: inherit;\n    outline: none;\n}\n\n.di-filter::placeholder { color: #585b70; }\n.di-filter:focus { border-color: #cba6f7; }\n\n/* ── Tree area ── */\n.di-tree-wrap {\n    flex: 1;\n    overflow-y: auto;\n    overflow-x: auto;\n    min-height: 0;\n    background: #1e1e2e;\n}\n\n.di-tree-wrap::-webkit-scrollbar { width: 4px; height: 4px; }\n.di-tree-wrap::-webkit-scrollbar-track { background: transparent; }\n.di-tree-wrap::-webkit-scrollbar-thumb { background: #45475a; border-radius: 999px; }\n\n.di-tree {\n    padding: 2px 0;\n}\n\n/* ── Tree lines ── */\n.di-line {\n    padding: 0 14px 0 0;\n    cursor: pointer;\n    white-space: nowrap;\n    font-size: 11px;\n    line-height: 22px;\n    user-select: none;\n    border-left: 2px solid transparent;\n}\n\n.di-line:hover {\n    background: rgba(203, 166, 247, 0.06);\n}\n\n.di-line.di-selected {\n    background: rgba(203, 166, 247, 0.12);\n    border-left-color: #cba6f7;\n}\n\n.di-line.di-dimmed { opacity: 0.35; }\n\n.di-arrow {\n    display: inline-block;\n    width: 13px;\n    text-align: center;\n    color: #6c7086;\n    font-size: 8px;\n    cursor: pointer;\n    flex-shrink: 0;\n    user-select: none;\n    margin-right: 1px;\n}\n\n.di-arrow:hover { color: #cdd6f4; }\n\n/* Children */\n.di-children { display: block; }\n.di-children.di-collapsed { display: none; }\n\n/* ── Syntax colors ── */\n.di-tag    { color: #89b4fa; }\n.di-id     { color: #f9e2af; }\n.di-class  { color: #a6e3a1; }\n.di-attr   { color: #fab387; }\n.di-text   { color: #cba6f7; }\n\n/* ── Detail panel ── */\n.di-detail {\n    flex-shrink: 0;\n    border-top: 1px solid #313244;\n    background: #181825;\n    max-height: 220px;\n    overflow-y: auto;\n}\n\n.di-detail-header {\n    padding: 6px 14px;\n    font-size: 10px;\n    font-weight: 700;\n    color: #585b70;\n    text-transform: uppercase;\n    letter-spacing: 0.04em;\n    background: rgba(255,255,255,0.02);\n    border-bottom: 1px solid #313244;\n    position: sticky;\n    top: 0;\n}\n\n.di-detail-body {\n    padding: 8px 14px 10px;\n}\n\n.di-detail-placeholder {\n    color: #585b70;\n    font-size: 11px;\n    font-style: italic;\n}\n\n.di-detail-grid {\n    display: grid;\n    grid-template-columns: 52px 1fr;\n    gap: 2px 8px;\n    font-size: 11px;\n}\n\n.di-detail-label {\n    color: #585b70;\n    font-weight: 600;\n    text-align: right;\n    line-height: 20px;\n}\n\n.di-detail-val {\n    color: #cdd6f4;\n    word-break: break-all;\n    line-height: 20px;\n}\n\n.di-detail-text {\n    max-height: 38px;\n    overflow: hidden;\n    text-overflow: ellipsis;\n}\n\n.di-detail-selector {\n    margin-top: 8px;\n    padding-top: 6px;\n    border-top: 1px solid #313244;\n}\n\n.di-selector-row {\n    display: flex;\n    gap: 5px;\n    align-items: center;\n    margin-top: 4px;\n}\n\n.di-selector-actions {\n    display: flex;\n    gap: 4px;\n    flex-shrink: 0;\n}\n\n.di-selector-code {\n    flex: 1;\n    min-width: 0;\n    background: #11111b;\n    border: 1px solid #313244;\n    border-radius: 5px;\n    padding: 5px 9px;\n    font-size: 11px;\n    color: #f5c2e7;\n    overflow-x: auto;\n    white-space: nowrap;\n}\n\n.di-btn-copy,\n.di-btn-apply {\n    border: none;\n    border-radius: 5px;\n    padding: 5px 10px;\n    font-size: 12px;\n    cursor: pointer;\n    transition: all 0.12s;\n    flex-shrink: 0;\n    font-family: inherit;\n    font-weight: 600;\n}\n\n.di-btn-copy {\n    background: #313244;\n    color: #a6adc8;\n}\n\n.di-btn-copy:hover {\n    background: #45475a;\n    color: #cdd6f4;\n}\n\n.di-btn-apply {\n    background: #cba6f7;\n    color: #1e1e2e;\n}\n\n.di-btn-apply:hover {\n    background: #b4befe;\n    transform: translateY(-1px);\n}\n\n/* ── Inspector toggle button active state ── */\n.toki-btn-inspector.active {\n    background: #cba6f7 !important;\n    color: #1e1e2e !important;\n    border-color: #cba6f7 !important;\n    font-weight: 700 !important;\n}\n\n/* ── 구독 관리 패널 ── */\n.toki-btn-sub.active {\n    background: #f59e0b !important;\n    color: #1e293b !important;\n    border-color: #f59e0b !important;\n    font-weight: 700 !important;\n}\n\n.sub-panel {\n    flex: 1;\n    display: flex;\n    flex-direction: column;\n    gap: 12px;\n    overflow: hidden;\n    min-height: 0;\n}\n\n.sub-header {\n    font-size: 13px;\n    font-weight: 800;\n    color: #f59e0b;\n    padding-bottom: 8px;\n    border-bottom: 1px solid rgba(0,0,0,0.05);\n}\n\n.sub-add-area {\n    display: flex;\n    gap: 6px;\n    flex-wrap: wrap;\n}\n\n.sub-url-input {\n    flex: 3;\n    min-width: 200px;\n    box-sizing: border-box;\n    padding: 8px 12px;\n    background: rgba(255,255,255,0.7);\n    border: 1px solid rgba(0,0,0,0.06);\n    border-radius: 8px;\n    font-size: 12px;\n    font-family: inherit;\n}\n\n.sub-name-input {\n    flex: 1;\n    min-width: 100px;\n    box-sizing: border-box;\n    padding: 8px 12px;\n    background: rgba(255,255,255,0.7);\n    border: 1px solid rgba(0,0,0,0.06);\n    border-radius: 8px;\n    font-size: 12px;\n    font-family: inherit;\n}\n\n.sub-url-input:focus, .sub-name-input:focus {\n    outline: none;\n    border-color: #f59e0b;\n    background: #fff;\n}\n\n.sub-btn-add {\n    padding: 8px 14px;\n    background: #f59e0b;\n    color: #fff;\n    border: none;\n    border-radius: 8px;\n    font-size: 12px;\n    font-weight: 700;\n    cursor: pointer;\n    transition: all 0.15s;\n}\n\n.sub-btn-add:hover {\n    background: #d97706;\n    transform: translateY(-1px);\n}\n\n.sub-list {\n    flex: 1;\n    overflow-y: auto;\n    display: flex;\n    flex-direction: column;\n    gap: 8px;\n    min-height: 0;\n}\n\n.sub-list::-webkit-scrollbar { width: 5px; }\n.sub-list::-webkit-scrollbar-track { background: transparent; }\n.sub-list::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.08); border-radius: 999px; }\n\n.sub-empty {\n    padding: 24px 16px;\n    text-align: center;\n    color: #94a3b8;\n    font-size: 12px;\n    line-height: 1.6;\n    background: rgba(255,255,255,0.3);\n    border-radius: 12px;\n    border: 1px dashed rgba(0,0,0,0.06);\n}\n\n.sub-item {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    gap: 8px;\n    padding: 10px 12px;\n    background: rgba(255,255,255,0.4);\n    border: 1px solid rgba(0,0,0,0.04);\n    border-radius: 10px;\n    transition: all 0.15s;\n}\n\n.sub-item:hover {\n    background: rgba(255,255,255,0.6);\n}\n\n.sub-item-ok { border-left: 3px solid #10b981; }\n.sub-item-pending { border-left: 3px solid #f59e0b; }\n\n.sub-item-info {\n    flex: 1;\n    min-width: 0;\n}\n\n.sub-item-name {\n    font-size: 12px;\n    font-weight: 700;\n    color: #1e293b;\n}\n\n.sub-item-url {\n    font-size: 10px;\n    color: #64748b;\n    word-break: break-all;\n    margin-top: 2px;\n}\n\n.sub-item-meta {\n    font-size: 10px;\n    color: #94a3b8;\n    margin-top: 2px;\n}\n\n.sub-item-actions {\n    display: flex;\n    gap: 4px;\n    flex-shrink: 0;\n}\n\n.sub-btn-refresh-sm, .sub-btn-remove {\n    border: none;\n    border-radius: 6px;\n    padding: 4px 8px;\n    font-size: 13px;\n    cursor: pointer;\n    transition: all 0.15s;\n    background: rgba(0,0,0,0.03);\n}\n\n.sub-btn-refresh-sm:hover { background: #e2e8f0; }\n.sub-btn-remove:hover { background: #fee2e2; }\n\n.sub-actions {\n    display: flex;\n    gap: 8px;\n    align-items: center;\n    padding-top: 4px;\n}\n\n.sub-btn-refresh {\n    padding: 8px 16px;\n    background: #6366f1;\n    color: #fff;\n    border: none;\n    border-radius: 8px;\n    font-size: 12px;\n    font-weight: 700;\n    cursor: pointer;\n    transition: all 0.15s;\n}\n\n.sub-btn-refresh:hover {\n    background: #4f46e5;\n    transform: translateY(-1px);\n}\n\n.sub-status {\n    font-size: 11px;\n    color: #64748b;\n    flex: 1;\n    text-align: right;\n}\n\n/* ── Log Tab Bar ── */\n.toki-log-tabs {\n    display: flex;\n    align-items: center;\n    gap: 4px;\n    margin-bottom: 8px;\n    flex-shrink: 0;\n}\n\n.toki-log-tab-btn {\n    background: rgba(255, 255, 255, 0.04);\n    border: 1px solid transparent;\n    padding: 4px 12px;\n    border-radius: 6px;\n    cursor: pointer;\n    font-size: 11px;\n    font-weight: 600;\n    color: #94a3b8;\n    transition: all 0.15s;\n    font-family: inherit;\n}\n\n.toki-log-tab-btn:hover {\n    background: rgba(255, 255, 255, 0.1);\n    color: #e0e0e0;\n}\n\n.toki-log-tab-btn.active {\n    background: rgba(99, 102, 241, 0.15);\n    border-color: rgba(99, 102, 241, 0.3);\n    color: #a5b4fc;\n}\n\n.toki-log-tabs-right {\n    margin-left: auto;\n}\n\n.toki-log-tabs-right button {\n    background: none;\n    border: none;\n    cursor: pointer;\n    font-size: 12px;\n    color: #e6a23c;\n    padding: 4px 8px;\n    border-radius: 4px;\n    font-family: inherit;\n    transition: color 0.15s;\n}\n\n.toki-log-tabs-right button:hover {\n    color: #f59e0b;\n}\n\n/* ── Log Panels ── */\n.toki-log-panel {\n    display: none !important;\n    flex-direction: column;\n    flex: 1;\n    overflow: hidden;\n}\n\n.toki-log-panel.active {\n    display: flex !important;\n}\n\n/* ── Debug Console ── */\n#toki-debug-console-header {\n    display: flex;\n    align-items: center;\n    gap: 8px;\n    margin-bottom: 6px;\n    flex-shrink: 0;\n}\n\n.toki-console-toggle-btn {\n    background: rgba(255, 255, 255, 0.06);\n    border: 1px solid rgba(255, 255, 255, 0.1);\n    padding: 3px 10px;\n    border-radius: 4px;\n    cursor: pointer;\n    font-size: 11px;\n    color: #94a3b8;\n    font-family: inherit;\n    font-weight: 600;\n    transition: all 0.15s;\n}\n\n.toki-console-toggle-btn:hover {\n    background: rgba(255, 255, 255, 0.12);\n}\n\n.toki-console-toggle-btn.on {\n    color: #4ade80;\n    border-color: rgba(74, 222, 128, 0.3);\n}\n\n.toki-console-status {\n    font-size: 10px;\n    color: #64748b;\n}\n\n#toki-debug-console-content {\n    flex: 1;\n    overflow-y: auto;\n    padding: 8px;\n    margin: 0;\n    list-style: none;\n    background: rgba(0, 0, 0, 0.2);\n    border-radius: 8px;\n    border: 1px solid rgba(255, 255, 255, 0.03);\n    min-height: 280px;\n    font-family: 'Cascadia Code', Consolas, monospace;\n    font-size: 11px;\n}\n\n#toki-debug-console-content::-webkit-scrollbar {\n    width: 4px;\n}\n#toki-debug-console-content::-webkit-scrollbar-track {\n    background: transparent;\n}\n#toki-debug-console-content::-webkit-scrollbar-thumb {\n    background: rgba(255, 255, 255, 0.08);\n    border-radius: 999px;\n}\n\n#toki-debug-console-content li {\n    margin-bottom: 2px;\n    padding: 2px 6px;\n    border-radius: 3px;\n    word-break: break-all;\n    line-height: 1.5;\n}\n\n#toki-debug-console-content li.log,\n#toki-debug-console-content li.info {\n    color: #e0e0e0;\n}\n\n#toki-debug-console-content li.warn {\n    color: #f9e2af;\n}\n\n#toki-debug-console-content li.error,\n#toki-debug-console-content li.critical {\n    color: #f38ba8;\n}\n\n#toki-debug-console-content li.success {\n    color: #a6e3a1;\n}\n";
 ;// ./src/core/ui/LogBox.js
 /**
  * LogBox Module for TokiSync
@@ -8806,8 +9040,10 @@ async function shouldSkipEpisode({
     historyCheckTimeoutFlag,
     historyFolderId,
     logOnSkip = false,
-    episodeTitle = ''
+    episodeTitle = '',
+    forceOverwrite = false
 }) {
+    if (forceOverwrite) return false;
     if (isSingleVolume) return false;
     if (destination !== 'drive' && destination !== 'drive_kavita') return false;
 
@@ -9327,7 +9563,8 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                 isSingleVolume: currentIsSingleVolume,
                 uploadedHistorySet,
                 historyCheckTimeoutFlag,
-                historyFolderId
+                historyFolderId,
+                forceOverwrite
             });
             if (isSkip) continue;
             
@@ -9342,7 +9579,8 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                 novelFormat: configNovelFormat,
                 matchedRule: parser.rule,
                 protocolDomain: parser.protocolDomain || window.location.origin,
-                seriesMetadata: seriesMetadata
+                seriesMetadata: seriesMetadata,
+                forceOverwrite: forceOverwrite || false
             });
         }
 
@@ -9469,7 +9707,8 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                 historyCheckTimeoutFlag,
                 historyFolderId,
                 logOnSkip: true,
-                episodeTitle: item.title
+                episodeTitle: item.title,
+                forceOverwrite
             });
             if (isSkip) continue;
 
@@ -9686,7 +9925,8 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                         logger.logger.log(`[Upload] 일반 업로드(Create/POST) 진행...`);
                         await (0,utils/* saveFile */.OJ)(blob, fullFilename, destination, extension, {
                             folderName: rootFolder,
-                            category: category
+                            category: category,
+                            forceOverwrite: forceOverwrite || false
                         });
                     }
                 }
@@ -9754,7 +9994,8 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                     
                     await (0,utils/* saveFile */.OJ)(finalBlob, finalFilename, destination, extension, {
                         folderName: rootFolder,
-                        category: category
+                        category: category,
+                        forceOverwrite: forceOverwrite || false
                     });
                     
                     logger.logger.success(`✅ 단행본 합본 저장 완료: ${finalFilename}`);
@@ -9885,7 +10126,7 @@ var SubscriptionManager = __webpack_require__(330);
 
 
 async function main() {
-    console.log("🚀 TokiDownloader Loaded (New Core v1.26.4)");
+    console.log("🚀 TokiDownloader Loaded (New Core v1.26.5)");
 
     // -- 0. Bootstrap UI Instances --
     const _logbox = ui/* LogBox */.ej.getInstance();
