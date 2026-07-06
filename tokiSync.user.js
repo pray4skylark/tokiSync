@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.26.6
+// @version      1.26.7
 // @description  Toki series sites -> Google Drive syncing tool (Bundled)
 // @author       pray4skylark
 // @updateURL    https://pray4skylark.github.io/tokiSync/tokiSync.user.js
@@ -517,9 +517,12 @@ const runSchedulerOnce = async () => {
     isSchedulerRunning = false;
     return;
   }
-  if (isSchedulerRunning) return;
+  if (isSchedulerRunning) {
+    console.log(`[Queue Scheduler] 🔄 runSchedulerOnce 중복진입 차단 (activeWorkers=${activeWorkers.size})`);
+    return;
+  }
   isSchedulerRunning = true;
-  console.log(`[Queue Scheduler] 🔍 runSchedulerOnce 진입 (activeWorkers=${activeWorkers.size}, _activeProcessing=${_activeProcessing.size})`);
+  console.log(`[Queue Scheduler] 🔍 runSchedulerOnce 진입 (activeWorkers=${activeWorkers.size}, _activeProcessing=${_activeProcessing.size}, queue_statuses=[${getRawQueue().map(i=>i.status).join(',')}])`);
 
   try {
     const queue = getRawQueue();
@@ -532,8 +535,9 @@ const runSchedulerOnce = async () => {
         closedCounts.set(id, closedCount);
 
         if (closedCount >= 3) {
-          console.warn(`[Queue Scheduler] ⚠️ 자식 팝업 비정상 종료 확정 (연속 3회 감지): ${id}`);
+          console.warn(`[Queue Scheduler] ⚠️ 자식 팝업 비정상 종료 확정 (연속 3회 감지): ${id} → activeWorkers 크기=${activeWorkers.size}`);
           activeWorkers.delete(id);
+          console.log(`[Queue Scheduler] 🧹 activeWorkers 삭제 (close#3): ${id} → size=${activeWorkers.size}`);
           closedCounts.delete(id);
           const item = queue.find(i => i.id === id);
           if (item && item.status === 'processing') {
@@ -614,14 +618,19 @@ const runSchedulerOnce = async () => {
 
     // 6. 팝업 실행 및 상태 갱신
     console.log(`[Queue Scheduler] 🚀 1회성 신규 팝업 기동: ${nextItem.episodeTitle} (${nextItem.episodeUrl}), 현재 activeWorkers=${activeWorkers.size}, _activeProcessing=${_activeProcessing.size}`);
+    
+    // [v1.26.6] activeWorkers를 updateQueueItem보다 먼저 선점하여 GM 리스너와의 레이스 차단
+    console.log(`[Queue Scheduler] 🔒 activeWorkers 선점: ${nextItem.episodeTitle} (ID: ${nextItem.id})`);
+    activeWorkers.set(nextItem.id, null);
     updateQueueItem(nextItem.id, { status: 'processing', startedAt: Date.now() });
     
     const popupRef = openEpisodePopup(nextItem.episodeUrl, nextItem.id);
     if (popupRef) {
         activeWorkers.set(nextItem.id, popupRef);
-        console.log(`[Queue Scheduler] ✅ 팝업 등록 완료: ${nextItem.episodeTitle} (activeWorkers=${activeWorkers.size})`);
+        console.log(`[Queue Scheduler] ✅ 팝업 등록 완료: ${nextItem.episodeTitle} (ID: ${nextItem.id}, activeWorkers.size=${activeWorkers.size})`);
     } else {
-        // 팝업 차단 등으로 창 생성 실패 시 즉시 failed 처리
+        console.log(`[Queue Scheduler] 🧹 activeWorkers 해제 (팝업 실패): ${nextItem.id}`);
+        activeWorkers.delete(nextItem.id);
         updateQueueItem(nextItem.id, { 
             status: 'failed', 
             errorMsg: '브라우저 팝업 차단막에 의해 창 생성에 실패했습니다.' 
@@ -960,7 +969,6 @@ async function fetchToken() {
     const config = (0,_config_js__WEBPACK_IMPORTED_MODULE_0__/* .getConfig */ .zj)();
     
     console.log('[DirectUpload] Fetching token from GAS...');
-    console.log('[DirectUpload] GAS URL:', config.gasUrl);
     
     return new Promise((resolve, reject) => {
         GM_xmlhttpRequest({
@@ -2703,6 +2711,7 @@ ${tocNav}
 /* harmony import */ var _config_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(899);
 
 
+
 /**
  * RuleManager
  * Manages parsing rules from built-in templates and user definitions.
@@ -2710,7 +2719,7 @@ ${tocNav}
 class RuleManager {
     // Built-in sample rules as fallback/templates (Offline Seeding)
     static get _version() {
-        return  true ? "1.26.6" : 0;
+        return  true ? "1.26.7" : 0;
     }
 
     static #builtInRules = [
@@ -3398,6 +3407,7 @@ function initBatchWorkerController() {
                             actualRef.close();
                         }
                     } catch (e) {}
+                    console.log(`[WorkerController] 🧹 activeWorkers 삭제 (타임아웃): ${item.id} → size=${_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.size-1}`);
                     _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.delete(item.id);
                     batchClosedCounts.delete(item.id);
                     // Security: Invalidate timed-out worker nonce
@@ -3432,8 +3442,9 @@ function initBatchWorkerController() {
                 batchClosedCounts.set(id, closedCount);
 
                 if (closedCount >= 5) {
-                    console.warn(`[WorkerController] ⚠️ [배치] 자식 팝업 수동 종료 확정: ${id}`);
+                    console.warn(`[WorkerController] ⚠️ [배치] 자식 팝업 수동 종료 확정: ${id} → activeWorkers.size=${_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.size}`);
                     _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.delete(id);
+                    console.log(`[WorkerController] 🧹 activeWorkers 삭제 (수동종료): ${id} → size=${_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.size}`);
                     batchClosedCounts.delete(id);
                     // Security: Invalidate manually closed worker nonce
                     const manualNonce = batchWorkerNonces.get(id);
@@ -3446,6 +3457,7 @@ function initBatchWorkerController() {
                     if (item && item.status === 'processing') {
                         // [H8] 업로드 중(95%~)이거나 이미 완료된 회차는 팝업 닫힘을 정상 종료로 취급하여 복구 차단
                         if (item.stage === _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.UPLOADING || item.stage === _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.COMPLETED) {
+                            console.log(`[WorkerController] 🛡️ 업로드/완료 단계 팝업 닫힘 무시: ${id}`);
                             _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.delete(id);
                             batchClosedCounts.delete(id);
                             return;
@@ -3497,6 +3509,7 @@ function initBatchWorkerController() {
             }
         }
         _queue_js__WEBPACK_IMPORTED_MODULE_2__/* ._activeProcessing */ .xx.add(matchedId);
+        console.log(`[WorkerController] 🧹 activeWorkers 삭제 (수집완료): ${matchedId} → size=${_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.size-1}`);
         _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.delete(matchedId);
         batchClosedCounts.delete(matchedId);
         // Security: Invalidate batch worker nonce
@@ -3693,6 +3706,7 @@ function initBatchWorkerController() {
                         actualRef.close();
                     }
                 } catch (e) {}
+                console.log(`[WorkerController] 🧹 activeWorkers 삭제 (자가종료): ${matchedId} → size=${_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.size-1}`);
                 _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.delete(matchedId);
             }, 3000);
         }
@@ -3757,6 +3771,7 @@ function initBatchWorkerController() {
                 if (matchedItem && batchWorkerNonces.has(matchedItem.id)) {
                     matchedId = matchedItem.id;
                     _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.set(matchedId, sourceEvent.source);
+                    console.log(`[WorkerController] 🔄 activeWorkers 갱신 (URL 매칭): ${matchedId} → size=${_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.size}`);
                     // Security: Register worker origin and generate session nonce for batch
                     const batchNonce = (0,_ipc_broker_js__WEBPACK_IMPORTED_MODULE_1__/* .registerWorkerOrigin */ .S6)(matchedId, 'null');
                     batchWorkerNonces.set(matchedId, batchNonce);
@@ -3775,7 +3790,7 @@ function initBatchWorkerController() {
                         return;
                     }
                     window[`tokisync_waiting_${matchedId}`] = true;
-                    (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .updateQueueItem */ .Gg)(matchedId, { lastActivity: Date.now() });
+                    (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .updateQueueItem */ .Gg)(matchedId, { status: 'processing', lastActivity: Date.now() });
 
                     const config = (0,_config_js__WEBPACK_IMPORTED_MODULE_4__/* .getConfig */ .zj)();
                     const multiplier = _config_js__WEBPACK_IMPORTED_MODULE_4__/* .SLEEP_MULTIPLIERS */ .dx[config.sleepMode] || _config_js__WEBPACK_IMPORTED_MODULE_4__/* .SLEEP_MULTIPLIERS */ .dx.cautious;
@@ -3978,6 +3993,7 @@ function initBatchWorkerController() {
                             actualRef.close();
                         }
                     } catch (e) {}
+                    console.log(`[WorkerController] 🧹 activeWorkers 삭제 (수집실패): ${matchedId} → size=${_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.size-1}`);
                     _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.delete(matchedId);
                     // Security: Invalidate failed worker nonce
                     const failedNonce = batchWorkerNonces.get(matchedId);
@@ -4947,6 +4963,7 @@ var SubscriptionManager = __webpack_require__(330);
 
 
 
+
 class FormRuleEditor {
     constructor() {
         this.rules = RuleManager/* RuleManager */.u.getParserRules() || [];
@@ -5010,7 +5027,7 @@ class FormRuleEditor {
     }
 
     render() {
-        const scriptVer =  true ? "1.26.6" : 0;
+        const scriptVer =  true ? "1.26.7" : 0;
         this.overlay.innerHTML = `
             <div class="toki-modal toki-form-editor-modal">
                 <div class="toki-modal-header">
@@ -7182,6 +7199,20 @@ class LogBox {
         // 개별 활성 팝업(Worker) 진행 상황 렌더링
         if (listEl) {
             const activeWorkers = queue.filter(item => item.status === 'processing');
+            
+            // [v1.26.6] 새 워커 진행률 카드 생성 감지 진단
+            const currentIds = new Set(activeWorkers.map(w => w.id));
+            if (!this._prevProgressIds) this._prevProgressIds = new Set();
+            const newWorkerIds = activeWorkers.filter(w => !this._prevProgressIds.has(w.id));
+            for (const w of newWorkerIds) {
+                console.log(`[ProgressCard] 🆕 새 진행률 카드 생성: ${w.episodeTitle} (ID: ${w.id}, totalCards=${activeWorkers.length}, queueStatuses=[${queue.map(i=>i.id.substring(0,8)+':'+i.status).join(',')}])`);
+            }
+            const removedIds = [...this._prevProgressIds].filter(id => !currentIds.has(id));
+            for (const id of removedIds) {
+                console.log(`[ProgressCard] 🗑️ 진행률 카드 제거: ${id}`);
+            }
+            this._prevProgressIds = currentIds;
+            
             listEl.innerHTML = activeWorkers.map(item => {
                 let stageName = '다운로드 중';
                 if (item.stage === 'STAGE_INIT') stageName = '초기화';
@@ -7618,7 +7649,7 @@ function getConfig() {
         if (match) {
             gasId = match[1];
             if (typeof GM_setValue !== 'undefined') GM_setValue(CFG_ID_KEY, gasId);
-            console.log("✅ [Config] Auto-migrated GAS URL to ID:", gasId);
+            console.log("✅ [Config] GAS URL 마이그레이션 완료");
         }
     }
 
@@ -9648,8 +9679,8 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                 );
 
                 if (popupRef) {
+                    console.log(`[Pre-open] 🔒 activeWorkers 등록: ${id} → size=${core_queue/* activeWorkers */.mR.size+1}`);
                     core_queue/* activeWorkers */.mR.set(id, popupRef);
-                    (0,core_queue/* updateQueueItem */.Gg)(id, { status: 'processing', stage: core_queue/* WORKER_STAGE */.WB.INIT });
                     freshlyOpened.push(id);
                 } else {
                     logger.logger.error(`❌ [Pre-open #${i + 1}] 브라우저 차단으로 자식 창 확보에 실패하였습니다.`, 'Queue');
@@ -10104,6 +10135,18 @@ async function generateDownloadReport(seriesTitle, seriesId, listCount, failedEp
 
 // EXTERNAL MODULE: ./src/core/parsers/SubscriptionManager.js
 var SubscriptionManager = __webpack_require__(330);
+;// ./src/core/version.js
+/**
+ * Centralized version module
+ * All version strings are injected at build time by Webpack/Vite DefinePlugin.
+ * Fallback values (0.0.0) are never used in production builds.
+ */
+const SCRIPT_VERSION =  true
+  ? "1.26.7" : 0;
+
+const VIEWER_VERSION = (/* unused pure expression or super */ null && ( true
+  ? "1.26.7" : 0));
+
 ;// ./src/core/main.js
 
  
@@ -10122,8 +10165,9 @@ var SubscriptionManager = __webpack_require__(330);
 
 
 
+
 async function main() {
-    console.log("🚀 TokiDownloader Loaded (New Core v1.26.6)");
+    console.log(`🚀 TokiDownloader Loaded (New Core v${SCRIPT_VERSION})`);
 
     // -- 0. Bootstrap UI Instances --
     const _logbox = ui/* LogBox */.ej.getInstance();
