@@ -634,6 +634,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                 );
 
                 if (popupRef) {
+                    console.log(`[Pre-open] 🔒 activeWorkers 등록: ${id} → size=${activeWorkers.size+1}`);
                     activeWorkers.set(id, popupRef);
                     freshlyOpened.push(id);
                 } else {

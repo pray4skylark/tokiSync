@@ -358,9 +358,12 @@ export const runSchedulerOnce = async () => {
     isSchedulerRunning = false;
     return;
   }
-  if (isSchedulerRunning) return;
+  if (isSchedulerRunning) {
+    console.log(`[Queue Scheduler] 🔄 runSchedulerOnce 중복진입 차단 (activeWorkers=${activeWorkers.size})`);
+    return;
+  }
   isSchedulerRunning = true;
-  console.log(`[Queue Scheduler] 🔍 runSchedulerOnce 진입 (activeWorkers=${activeWorkers.size}, _activeProcessing=${_activeProcessing.size})`);
+  console.log(`[Queue Scheduler] 🔍 runSchedulerOnce 진입 (activeWorkers=${activeWorkers.size}, _activeProcessing=${_activeProcessing.size}, queue_statuses=[${getRawQueue().map(i=>i.status).join(',')}])`);
 
   try {
     const queue = getRawQueue();
@@ -373,8 +376,9 @@ export const runSchedulerOnce = async () => {
         closedCounts.set(id, closedCount);
 
         if (closedCount >= 3) {
-          console.warn(`[Queue Scheduler] ⚠️ 자식 팝업 비정상 종료 확정 (연속 3회 감지): ${id}`);
+          console.warn(`[Queue Scheduler] ⚠️ 자식 팝업 비정상 종료 확정 (연속 3회 감지): ${id} → activeWorkers 크기=${activeWorkers.size}`);
           activeWorkers.delete(id);
+          console.log(`[Queue Scheduler] 🧹 activeWorkers 삭제 (close#3): ${id} → size=${activeWorkers.size}`);
           closedCounts.delete(id);
           const item = queue.find(i => i.id === id);
           if (item && item.status === 'processing') {
@@ -457,14 +461,16 @@ export const runSchedulerOnce = async () => {
     console.log(`[Queue Scheduler] 🚀 1회성 신규 팝업 기동: ${nextItem.episodeTitle} (${nextItem.episodeUrl}), 현재 activeWorkers=${activeWorkers.size}, _activeProcessing=${_activeProcessing.size}`);
     
     // [v1.26.6] activeWorkers를 updateQueueItem보다 먼저 선점하여 GM 리스너와의 레이스 차단
+    console.log(`[Queue Scheduler] 🔒 activeWorkers 선점: ${nextItem.episodeTitle} (ID: ${nextItem.id})`);
     activeWorkers.set(nextItem.id, null);
     updateQueueItem(nextItem.id, { status: 'processing', startedAt: Date.now() });
     
     const popupRef = openEpisodePopup(nextItem.episodeUrl, nextItem.id);
     if (popupRef) {
         activeWorkers.set(nextItem.id, popupRef);
-        console.log(`[Queue Scheduler] ✅ 팝업 등록 완료: ${nextItem.episodeTitle} (activeWorkers=${activeWorkers.size})`);
+        console.log(`[Queue Scheduler] ✅ 팝업 등록 완료: ${nextItem.episodeTitle} (ID: ${nextItem.id}, activeWorkers.size=${activeWorkers.size})`);
     } else {
+        console.log(`[Queue Scheduler] 🧹 activeWorkers 해제 (팝업 실패): ${nextItem.id}`);
         activeWorkers.delete(nextItem.id);
         updateQueueItem(nextItem.id, { 
             status: 'failed', 

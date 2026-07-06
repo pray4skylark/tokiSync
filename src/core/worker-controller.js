@@ -405,6 +405,7 @@ export function initBatchWorkerController() {
                             actualRef.close();
                         }
                     } catch (e) {}
+                    console.log(`[WorkerController] 🧹 activeWorkers 삭제 (타임아웃): ${item.id} → size=${activeWorkers.size-1}`);
                     activeWorkers.delete(item.id);
                     batchClosedCounts.delete(item.id);
                     // Security: Invalidate timed-out worker nonce
@@ -439,8 +440,9 @@ export function initBatchWorkerController() {
                 batchClosedCounts.set(id, closedCount);
 
                 if (closedCount >= 5) {
-                    console.warn(`[WorkerController] ⚠️ [배치] 자식 팝업 수동 종료 확정: ${id}`);
+                    console.warn(`[WorkerController] ⚠️ [배치] 자식 팝업 수동 종료 확정: ${id} → activeWorkers.size=${activeWorkers.size}`);
                     activeWorkers.delete(id);
+                    console.log(`[WorkerController] 🧹 activeWorkers 삭제 (수동종료): ${id} → size=${activeWorkers.size}`);
                     batchClosedCounts.delete(id);
                     // Security: Invalidate manually closed worker nonce
                     const manualNonce = batchWorkerNonces.get(id);
@@ -453,6 +455,7 @@ export function initBatchWorkerController() {
                     if (item && item.status === 'processing') {
                         // [H8] 업로드 중(95%~)이거나 이미 완료된 회차는 팝업 닫힘을 정상 종료로 취급하여 복구 차단
                         if (item.stage === WORKER_STAGE.UPLOADING || item.stage === WORKER_STAGE.COMPLETED) {
+                            console.log(`[WorkerController] 🛡️ 업로드/완료 단계 팝업 닫힘 무시: ${id}`);
                             activeWorkers.delete(id);
                             batchClosedCounts.delete(id);
                             return;
@@ -504,6 +507,7 @@ export function initBatchWorkerController() {
             }
         }
         _activeProcessing.add(matchedId);
+        console.log(`[WorkerController] 🧹 activeWorkers 삭제 (수집완료): ${matchedId} → size=${activeWorkers.size-1}`);
         activeWorkers.delete(matchedId);
         batchClosedCounts.delete(matchedId);
         // Security: Invalidate batch worker nonce
@@ -700,6 +704,7 @@ export function initBatchWorkerController() {
                         actualRef.close();
                     }
                 } catch (e) {}
+                console.log(`[WorkerController] 🧹 activeWorkers 삭제 (자가종료): ${matchedId} → size=${activeWorkers.size-1}`);
                 activeWorkers.delete(matchedId);
             }, 3000);
         }
@@ -764,6 +769,7 @@ export function initBatchWorkerController() {
                 if (matchedItem && batchWorkerNonces.has(matchedItem.id)) {
                     matchedId = matchedItem.id;
                     activeWorkers.set(matchedId, sourceEvent.source);
+                    console.log(`[WorkerController] 🔄 activeWorkers 갱신 (URL 매칭): ${matchedId} → size=${activeWorkers.size}`);
                     // Security: Register worker origin and generate session nonce for batch
                     const batchNonce = registerWorkerOrigin(matchedId, 'null');
                     batchWorkerNonces.set(matchedId, batchNonce);
@@ -985,6 +991,7 @@ export function initBatchWorkerController() {
                             actualRef.close();
                         }
                     } catch (e) {}
+                    console.log(`[WorkerController] 🧹 activeWorkers 삭제 (수집실패): ${matchedId} → size=${activeWorkers.size-1}`);
                     activeWorkers.delete(matchedId);
                     // Security: Invalidate failed worker nonce
                     const failedNonce = batchWorkerNonces.get(matchedId);
