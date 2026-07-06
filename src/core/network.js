@@ -36,11 +36,9 @@ async function fetchToken() {
             timeout: 30000,
             onload: (response) => {
                 console.log('[DirectUpload] Token response status:', response.status);
-                console.log('[DirectUpload] Token response text:', response.responseText);
                 
                 try {
                     const result = JSON.parse(response.responseText);
-                    console.log('[DirectUpload] Parsed result:', result);
                     
                     if (result.status === 'success') {
                         console.log('[DirectUpload] Token received successfully');
@@ -53,7 +51,6 @@ async function fetchToken() {
                     }
                 } catch (e) {
                     console.error('[DirectUpload] JSON parse error:', e);
-                    console.error('[DirectUpload] Raw response:', response.responseText);
                     reject(new Error(`Token parse error: ${e.message}`));
                 }
             },

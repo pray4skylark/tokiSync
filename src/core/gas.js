@@ -161,8 +161,8 @@ async function uploadViaGASRelay(blob, folderName, fileName, options = {}) {
                         reject(new Error(json.body || "Init failed"));
                     }
                 } catch (e) { 
-                    logger.critical(`GAS 서버 응답 파싱 실패 (Init): ${res.responseText?.substring(0, 80)}`, 'GAS:Relay');
-                    reject(new Error("GAS 응답 오류(Init): " + res.responseText)); 
+                    logger.critical(`GAS 서버 응답 파싱 실패 (Init) — ${fileName}`, 'GAS:Relay');
+                    reject(new Error("GAS 응답 오류(Init)")); 
                 }
             },
             onerror: (e) => {
@@ -221,7 +221,7 @@ async function uploadViaGASRelay(blob, folderName, fileName, options = {}) {
                         }
                     } catch (e) { 
                         logger.critical(`GAS 청크 응답 파싱 실패 (${start}~${end})`, 'GAS:Relay');
-                        reject(new Error("GAS 응답 오류(Upload): " + res.responseText)); 
+                        reject(new Error("GAS 응답 오류(Upload)")); 
                     }
                 },
                 onerror: (e) => {
