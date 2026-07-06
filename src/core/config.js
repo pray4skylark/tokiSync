@@ -87,7 +87,7 @@ export function getConfig() {
         if (match) {
             gasId = match[1];
             if (typeof GM_setValue !== 'undefined') GM_setValue(CFG_ID_KEY, gasId);
-            console.log("✅ [Config] Auto-migrated GAS URL to ID:", gasId);
+            console.log("✅ [Config] GAS URL 마이그레이션 완료");
         }
     }
 

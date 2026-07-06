@@ -20,7 +20,6 @@ async function fetchToken() {
     const config = getConfig();
     
     console.log('[DirectUpload] Fetching token from GAS...');
-    console.log('[DirectUpload] GAS URL:', config.gasUrl);
     
     return new Promise((resolve, reject) => {
         GM_xmlhttpRequest({
