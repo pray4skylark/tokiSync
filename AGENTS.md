@@ -48,6 +48,12 @@ core/ → parser/ → ui/ → viewer/ (preferred direction)
 - Update `CHANGELOG.md` immediately with every technical change (Atomic Changelog).
 - After a session, ensure checkpoint is synced to HANDOVER/CONTEXT/CHANGELOG.
 
+## Pre-Push Workflow
+Develop 브랜치로 push 전 필수 선행 작업:
+1. **문서화 완료**: `.agent_checkpoint.md` 및 `CHANGELOG.md` 업데이트 확인
+2. **Graphify 갱신**: `/graphify --update` 실행하여 knowledge graph 최신화
+3. **빌드 검증**: `npm run build:core` 성공 확인
+
 ## Release Workflow
 - No auto-commits or auto-releases. Always get human approval.
 - Version bump only at commit phase after approval.

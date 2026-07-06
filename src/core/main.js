@@ -13,10 +13,11 @@ import { SubscriptionManager } from './parsers/SubscriptionManager.js';
 import { getOAuthToken, fetchHistoryDirect } from './network.js';
 
 import { EventBus, EVT } from './EventBus.js';
+import { SCRIPT_VERSION } from './version.js';
 import { getCommonPrefix, blobToArrayBuffer, saveFile } from './utils.js';
 
 export async function main() {
-    console.log("🚀 TokiDownloader Loaded (New Core v1.26.6)");
+    console.log(`🚀 TokiDownloader Loaded (New Core v${SCRIPT_VERSION})`);
 
     // -- 0. Bootstrap UI Instances --
     const _logbox = LogBox.getInstance();

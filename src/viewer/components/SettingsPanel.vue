@@ -299,8 +299,9 @@ const {
   showSettings, config, viewerDefaults, forceCloudSync, saveCloudConfig, reloadApp,
   formatSize, cachedEpisodesList, cachedTotalSize, loadOfflineCacheInfo, deleteEpisodeCache, clearAllEpisodeCaches
 } = useStore();
+import { VIEWER_VERSION } from '../../core/version.js';
 
-const appVersion = typeof __VIEWER_VERSION__ !== 'undefined' ? __VIEWER_VERSION__ : '1.26.6';
+const appVersion = typeof __VIEWER_VERSION__ !== 'undefined' ? __VIEWER_VERSION__ : VIEWER_VERSION;
 
 const activeTab = ref('cloud');
 const tabItems = [

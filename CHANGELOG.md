@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.26.7] - 2026-07-07
+
+### ♻️ 중앙 버전 관리 시스템 구축
+- **`src/core/version.js` 신설**: `SCRIPT_VERSION` / `VIEWER_VERSION` 중앙 모듈. `DefinePlugin` 빌드 주입 + 통합 fallback.
+- **5개 파일 import 전환**: `RuleManager.js`, `FormRuleEditor.js`, `SettingsPanel.vue`, `useStore.js`, `main.js` → `version.js` 사용. 하드코딩 버전 문자열 제거.
+- **GAS 빌드 자동 주입**: `build_bundle.cjs`가 `package.json`의 `components.gas`를 읽어 `Main.gs`의 `__GAS_VERSION__` 마커를 빌드 시 치환.
+- **AGENTS.md Pre-Push 워크플로우 추가**: push 전 문서화 + graphify + 빌드 검증 필수화.
+- **버전 범프**: v1.26.6 → v1.26.7.
+
 ## [v1.26.6] - 2026-07-07
 
 ### 🔒 Security: Debug Log Sanitization

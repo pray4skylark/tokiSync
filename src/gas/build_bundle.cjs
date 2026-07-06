@@ -6,6 +6,9 @@
 const fs = require("fs");
 const path = require("path");
 
+const pkg = require("../../package.json");
+const GAS_VERSION = pkg.components.gas;
+
 const SOURCE_DIR = __dirname;
 const OUTPUT_FILE = path.resolve(__dirname, "../../dist/TokiSync_Server_Bundle.gs");
 
@@ -35,12 +38,12 @@ function build() {
     fs.mkdirSync(destDir, { recursive: true });
   }
 
-  let bundleContent = `/* ⚙️ TokiSync Server Code Bundle v1.0.0 (Generated: ${new Date().toISOString()}) */\n\n`;
+  let bundleContent = `/* ⚙️ TokiSync Server Code Bundle v${GAS_VERSION} (Generated: ${new Date().toISOString()}) */\n\n`;
 
   FILES.forEach((fileName) => {
     const filePath = path.join(SOURCE_DIR, fileName);
     if (fs.existsSync(filePath)) {
-      const content = fs.readFileSync(filePath, "utf8");
+      const content = fs.readFileSync(filePath, "utf8").replace(/__GAS_VERSION__/g, GAS_VERSION);
       bundleContent += `/* ========================================================================== */\n`;
       bundleContent += `/* FILE: ${fileName} */\n`;
       bundleContent += `/* ========================================================================== */\n\n`;

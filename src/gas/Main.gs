@@ -1,4 +1,4 @@
-// ⚙️ TokiSync API Server v1.26.6 (Stateless)
+// ⚙️ TokiSync API Server v__GAS_VERSION__ (Stateless)
 // -----------------------------------------------------
 // 🤝 Compatibility:
 //    - Client v1.8.0+ (User Execution Mode)
@@ -14,7 +14,7 @@
  */
 function doGet(e) {
   return ContentService.createTextOutput(
-    "✅ TokiSync API Server v1.26.6 (Stateless) is Running...",
+    "✅ TokiSync API Server v__GAS_VERSION__ (Stateless) is Running...",
   );
 }
 
@@ -33,7 +33,7 @@ function doGet(e) {
  * @returns {TextOutput} JSON 응답
  */
 // [CONSTANTS]
-var SERVER_VERSION = "v1.26.6";
+var SERVER_VERSION = "v__GAS_VERSION__";
 // API Key stored in Script Properties (Project Settings > Script Properties)
 // Set property: API_KEY = your_secret_key
 

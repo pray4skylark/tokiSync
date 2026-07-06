@@ -6,6 +6,7 @@
 import { RuleManager } from '../parsers/RuleManager.js';
 import { EventBus, EVT } from '../EventBus.js';
 import { DomInspector } from './DomInspector.js';
+import { SCRIPT_VERSION } from '../version.js';
 import { SubscriptionManager } from '../parsers/SubscriptionManager.js';
 
 export class FormRuleEditor {
@@ -71,7 +72,7 @@ export class FormRuleEditor {
     }
 
     render() {
-        const scriptVer = typeof __SCRIPT_VERSION__ !== 'undefined' ? __SCRIPT_VERSION__ : '1.26.6';
+        const scriptVer = typeof __SCRIPT_VERSION__ !== 'undefined' ? __SCRIPT_VERSION__ : SCRIPT_VERSION;
         this.overlay.innerHTML = `
             <div class="toki-modal toki-form-editor-modal">
                 <div class="toki-modal-header">
