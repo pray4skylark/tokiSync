@@ -332,6 +332,20 @@ export class LogBox {
         // 개별 활성 팝업(Worker) 진행 상황 렌더링
         if (listEl) {
             const activeWorkers = queue.filter(item => item.status === 'processing');
+            
+            // [v1.26.6] 새 워커 진행률 카드 생성 감지 진단
+            const currentIds = new Set(activeWorkers.map(w => w.id));
+            if (!this._prevProgressIds) this._prevProgressIds = new Set();
+            const newWorkerIds = activeWorkers.filter(w => !this._prevProgressIds.has(w.id));
+            for (const w of newWorkerIds) {
+                console.log(`[ProgressCard] 🆕 새 진행률 카드 생성: ${w.episodeTitle} (ID: ${w.id}, totalCards=${activeWorkers.length}, queueStatuses=[${queue.map(i=>i.id.substring(0,8)+':'+i.status).join(',')}])`);
+            }
+            const removedIds = [...this._prevProgressIds].filter(id => !currentIds.has(id));
+            for (const id of removedIds) {
+                console.log(`[ProgressCard] 🗑️ 진행률 카드 제거: ${id}`);
+            }
+            this._prevProgressIds = currentIds;
+            
             listEl.innerHTML = activeWorkers.map(item => {
                 let stageName = '다운로드 중';
                 if (item.stage === 'STAGE_INIT') stageName = '초기화';
