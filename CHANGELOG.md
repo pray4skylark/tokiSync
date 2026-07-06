@@ -25,6 +25,20 @@ All notable changes to this project will be documented in this file.
 - **Selector 생성 개선**: `nth-of-type`, `data-*` 속성 선택자 fallback, `CSS.escape()`
 - **성능**: 200노드 이상 rAF chunking 렌더링, filter 디바운스 150ms
 
+### 🚀 Force Overwrite Pipeline 전파
+- **`src/core/downloader.js`**: `shouldSkipEpisode()` / `tokiDownload()` / `processQueueItem()`에 `forceOverwrite` 파라미터 전파. 히스토리 중복 스킵 로직을 우회하여 강제 재업로드 지원.
+- **`src/core/queue.js`**: 큐 아이템 초기화 시 `forceOverwrite` 필드 저장.
+- **`src/core/worker-controller.js`**: batch 워커 페이로드에 `forceOverwrite` 전달.
+- **`src/core/gas.js`**: `uploadViaGASRelay()`에 `forceOverwrite` 옵션 전파.
+- **`src/gas/UploadService.gs`**: `initResumableUpload()`에서 `forceOverwrite=true`일 때만 기존 파일 삭제(trash). 기본값(false)에서는 중복 파일을 유지하여 불필요한 삭제 방지.
+
+### ♻️ Drive 업로드 로깅 및 오류 처리 강화
+- **`src/core/network.js`**:
+  - **청크 업로드 오류 처리 개선**: `onerror`/`ontimeout` 콜백에 `EventBus` 로그 추가, 오류 메시지 한글화.
+  - **console.log → EventBus 마이그레이션**: Drive 업로드 진행률(청크/세션/파일명)을 `console.log` 대신 `EventBus.emit(EVT.LOG)`으로 전달하여 대시보드에 실시간 표시.
+  - **하드코딩 주석 제거**: `CHUNK_SIZE`, `timeout` 등 상수값의 불필요한 인라인 주석 정리.
+  - **기존 파일 검색 실패 시 throw**: `uploadDirect()`에서 Drive 파일 검색 실패 시 `throw`하여 오류 전파 명확화.
+
 ### 🛠️ Local/Drive Download Pipeline Consolidation
 - **`src/core/downloader.js`**:
   - **Unified Queue Delegation**: Simplified the scheduling branch condition (`!currentIsSingleVolume`) to route both local downloads (`local` / `native`) and drive uploads (`drive` / `drive_kavita`) through the centralized batch queue scheduler. This effectively deprecates the buggy, error-prone Sequential iFrame/popup reuse loops for individual local downloads, aligning the entire codebase under a single, robust scheduling engine.
