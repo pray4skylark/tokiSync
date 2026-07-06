@@ -455,6 +455,9 @@ export const runSchedulerOnce = async () => {
 
     // 6. 팝업 실행 및 상태 갱신
     console.log(`[Queue Scheduler] 🚀 1회성 신규 팝업 기동: ${nextItem.episodeTitle} (${nextItem.episodeUrl}), 현재 activeWorkers=${activeWorkers.size}, _activeProcessing=${_activeProcessing.size}`);
+    
+    // [v1.26.6] activeWorkers를 updateQueueItem보다 먼저 선점하여 GM 리스너와의 레이스 차단
+    activeWorkers.set(nextItem.id, null);
     updateQueueItem(nextItem.id, { status: 'processing', startedAt: Date.now() });
     
     const popupRef = openEpisodePopup(nextItem.episodeUrl, nextItem.id);
@@ -462,7 +465,7 @@ export const runSchedulerOnce = async () => {
         activeWorkers.set(nextItem.id, popupRef);
         console.log(`[Queue Scheduler] ✅ 팝업 등록 완료: ${nextItem.episodeTitle} (activeWorkers=${activeWorkers.size})`);
     } else {
-        // 팝업 차단 등으로 창 생성 실패 시 즉시 failed 처리
+        activeWorkers.delete(nextItem.id);
         updateQueueItem(nextItem.id, { 
             status: 'failed', 
             errorMsg: '브라우저 팝업 차단막에 의해 창 생성에 실패했습니다.' 

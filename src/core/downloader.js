@@ -635,7 +635,6 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
 
                 if (popupRef) {
                     activeWorkers.set(id, popupRef);
-                    updateQueueItem(id, { status: 'processing', stage: WORKER_STAGE.INIT });
                     freshlyOpened.push(id);
                 } else {
                     logger.error(`❌ [Pre-open #${i + 1}] 브라우저 차단으로 자식 창 확보에 실패하였습니다.`, 'Queue');

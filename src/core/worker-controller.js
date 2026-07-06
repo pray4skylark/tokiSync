@@ -782,7 +782,7 @@ export function initBatchWorkerController() {
                         return;
                     }
                     window[`tokisync_waiting_${matchedId}`] = true;
-                    updateQueueItem(matchedId, { lastActivity: Date.now() });
+                    updateQueueItem(matchedId, { status: 'processing', lastActivity: Date.now() });
 
                     const config = getConfig();
                     const multiplier = SLEEP_MULTIPLIERS[config.sleepMode] || SLEEP_MULTIPLIERS.cautious;
