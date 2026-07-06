@@ -738,7 +738,7 @@ const openSeries = async (item, bypassCache = false) => {
     await db.episodeCache.bulkPut(
       (books || []).map(b => ({ ...b, seriesId: item.id, cachedAt: now }))
     );
-    episodes.value = (books || []).map(attachMeta);
+    episodes.value = sortEpisodes(books || []).map(attachMeta);
 
     // [v1.8.1] History Garbage Collection (유령 히스토리 청소)
     try {

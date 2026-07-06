@@ -247,10 +247,16 @@ function handleSmartRead() {
 const sortOrder = ref(localStorage.getItem('TOKI_EP_SORT') || 'asc');
 watch(sortOrder, (v) => localStorage.setItem('TOKI_EP_SORT', v));
 
-// 정렬된 에피소드 목록
+// 정렬된 에피소드 목록 (번호 기준 오름/내림차순)
 const sortedEpisodes = computed(() => {
   const arr = [...episodes.value];
-  return sortOrder.value === 'asc' ? arr : arr.reverse();
+  arr.sort((a, b) => {
+    const numA = a.number || 0;
+    const numB = b.number || 0;
+    if (numA === numB) return (a.name || '').localeCompare(b.name || '');
+    return sortOrder.value === 'asc' ? numA - numB : numB - numA;
+  });
+  return arr;
 });
 
 // 다운로드 처리
