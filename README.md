@@ -3,7 +3,9 @@
 **북토끼, 뉴토끼, 마나토끼**의 콘텐츠를 **구글 드라이브로 직접 업로드**하고, **전용 웹 뷰어**를 통해 편리하게 관리/열람할 수 있는 올인원 솔루션입니다.
 
 > **🚀 v1.26.6 업데이트 요약:**
-> - **🔒 보안 강화: 디버그 로그 토큰 유출 차단**: `network.js`에서 OAuth 토큰을 `console.log`로 출력하던 3개 지점 제거. GAS 오류 메시지에서 `responseText` 제거하여 토큰 정보 보호.
+> - **🔒 보안 강화: 디버그 로그 토큰/GAS URL 유출 차단**: OAuth 토큰(`console.log` 3개) 및 GAS 배포 URL 노출 제거. GAS 오류 메시지에서 `responseText` 제거.
+> - **🐛 워커 경합 레이스 조건 수정**: Pre-open과 Scheduler 간 `activeWorkers` 선점 순서 변경으로 이중 팝업 기동 방어. WORKER_READY 시점에 큐 상태 전환.
+> - **♻️ CSS Atomic Utility Layer (~100개 클래스)**: 계층형 유틸리티 시스템 도입, 중복 CSS 제거, `!important` 91→73건 정리, 번들 543KB.
 
 ---
 

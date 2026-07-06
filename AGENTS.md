@@ -54,6 +54,11 @@ core/ → parser/ → ui/ → viewer/ (preferred direction)
 - Release assets: `dist/tokiSync.user.js`, `dist/TokiSync_Server_Bundle.gs`.
 - Tag releases with `vMAJOR.MINOR.PATCH` format.
 
+## Commit Convention
+- 커밋 메시지는 **한글**로 작성한다.
+- Conventional Commits 포맷 사용: `type(scope): subject` (영어). 본문(body)은 한글.
+  - 예시: `fix(core): 다운로드 워커 경합 레이스 조건 수정`
+
 ## Error Handling
 - Error found → Document in `.agent_checkpoint.md` → Re-plan if needed → Fix.
 - Never hotfix without understanding the root cause.
