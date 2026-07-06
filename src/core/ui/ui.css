@@ -12,6 +12,154 @@
     --toki-font: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
+/* ==========================================
+   Layer 1: Atomic Utility Classes
+   ========================================== */
+
+/* Layout */
+.toki-flex { display: flex; }
+.toki-flex-col { display: flex; flex-direction: column; }
+.toki-flex-wrap { flex-wrap: wrap; }
+.toki-flex-center { display: flex; align-items: center; }
+.toki-flex-col-center { display: flex; flex-direction: column; align-items: center; }
+.toki-inline-flex { display: inline-flex; }
+.toki-grid { display: grid; }
+
+/* Gap */
+.toki-gap-2 { gap: 2px; }
+.toki-gap-4 { gap: 4px; }
+.toki-gap-5 { gap: 5px; }
+.toki-gap-6 { gap: 6px; }
+.toki-gap-8 { gap: 8px; }
+.toki-gap-10 { gap: 10px; }
+.toki-gap-12 { gap: 12px; }
+.toki-gap-14 { gap: 14px; }
+.toki-gap-16 { gap: 16px; }
+.toki-gap-20 { gap: 20px; }
+
+/* Padding */
+.toki-p-0 { padding: 0; }
+.toki-p-2 { padding: 2px; }
+.toki-p-4 { padding: 4px; }
+.toki-p-6 { padding: 6px; }
+.toki-p-8 { padding: 8px; }
+.toki-p-10 { padding: 10px; }
+.toki-p-12 { padding: 12px; }
+.toki-p-14 { padding: 14px; }
+.toki-p-16 { padding: 16px; }
+.toki-p-18 { padding: 18px; }
+.toki-p-20 { padding: 20px; }
+.toki-p-24 { padding: 24px; }
+.toki-p-32 { padding: 32px; }
+.toki-px-4 { padding-left: 4px; padding-right: 4px; }
+.toki-px-6 { padding-left: 6px; padding-right: 6px; }
+.toki-px-8 { padding-left: 8px; padding-right: 8px; }
+.toki-px-10 { padding-left: 10px; padding-right: 10px; }
+.toki-px-12 { padding-left: 12px; padding-right: 12px; }
+.toki-px-14 { padding-left: 14px; padding-right: 14px; }
+.toki-px-16 { padding-left: 16px; padding-right: 16px; }
+.toki-px-20 { padding-left: 20px; padding-right: 20px; }
+.toki-px-24 { padding-left: 24px; padding-right: 24px; }
+.toki-px-32 { padding-left: 32px; padding-right: 32px; }
+.toki-py-2 { padding-top: 2px; padding-bottom: 2px; }
+.toki-py-4 { padding-top: 4px; padding-bottom: 4px; }
+.toki-py-6 { padding-top: 6px; padding-bottom: 6px; }
+.toki-py-8 { padding-top: 8px; padding-bottom: 8px; }
+.toki-py-10 { padding-top: 10px; padding-bottom: 10px; }
+.toki-py-12 { padding-top: 12px; padding-bottom: 12px; }
+.toki-py-14 { padding-top: 14px; padding-bottom: 14px; }
+
+/* Margin */
+.toki-m-0 { margin: 0; }
+.toki-mt-2 { margin-top: 2px; }
+.toki-mt-4 { margin-top: 4px; }
+.toki-mt-6 { margin-top: 6px; }
+.toki-mt-8 { margin-top: 8px; }
+.toki-mt-12 { margin-top: 12px; }
+.toki-mt-20 { margin-top: 20px; }
+.toki-mt-24 { margin-top: 24px; }
+.toki-mt-32 { margin-top: 32px; }
+.toki-mt-40 { margin-top: 40px; }
+.toki-mb-2 { margin-bottom: 2px; }
+.toki-mb-4 { margin-bottom: 4px; }
+.toki-mb-5 { margin-bottom: 5px; }
+.toki-mb-6 { margin-bottom: 6px; }
+.toki-mb-8 { margin-bottom: 8px; }
+.toki-mb-10 { margin-bottom: 10px; }
+.toki-mb-12 { margin-bottom: 12px; }
+.toki-mb-20 { margin-bottom: 20px; }
+.toki-mb-24 { margin-bottom: 24px; }
+.toki-ml-4 { margin-left: 4px; }
+.toki-ml-8 { margin-left: 8px; }
+.toki-ml-auto { margin-left: auto; }
+
+/* Typography */
+.toki-text-8 { font-size: 8px; }
+.toki-text-9 { font-size: 9px; }
+.toki-text-10 { font-size: 10px; }
+.toki-text-11 { font-size: 11px; }
+.toki-text-12 { font-size: 12px; }
+.toki-text-13 { font-size: 13px; }
+.toki-text-14 { font-size: 14px; }
+.toki-text-15 { font-size: 15px; }
+.toki-text-16 { font-size: 16px; }
+.toki-text-20 { font-size: 20px; }
+.toki-text-24 { font-size: 24px; }
+.toki-text-muted { color: var(--toki-text-muted); }
+.toki-text-primary { color: var(--toki-primary); }
+.toki-text-danger { color: #ff5555; }
+.toki-text-success { color: #4ade80; }
+.toki-font-medium { font-weight: 500; }
+.toki-font-semibold { font-weight: 600; }
+.toki-font-bold { font-weight: 700; }
+.toki-font-extrabold { font-weight: 800; }
+.toki-leading-1 { line-height: 1; }
+.toki-leading-14 { line-height: 1.4; }
+.toki-leading-15 { line-height: 1.5; }
+.toki-leading-16 { line-height: 1.6; }
+.toki-text-center { text-align: center; }
+
+/* Visual */
+.toki-rounded-3 { border-radius: 3px; }
+.toki-rounded-4 { border-radius: 4px; }
+.toki-rounded-5 { border-radius: 5px; }
+.toki-rounded-6 { border-radius: 6px; }
+.toki-rounded-8 { border-radius: 8px; }
+.toki-rounded-10 { border-radius: 10px; }
+.toki-rounded-12 { border-radius: 12px; }
+.toki-rounded-14 { border-radius: 14px; }
+.toki-rounded-16 { border-radius: 16px; }
+.toki-rounded-18 { border-radius: 18px; }
+.toki-rounded-20 { border-radius: 20px; }
+.toki-rounded-24 { border-radius: 24px; }
+.toki-rounded-28 { border-radius: 28px; }
+.toki-rounded-full { border-radius: 999px; }
+.toki-shadow-sm { box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.toki-shadow { box-shadow: var(--toki-shadow); }
+.toki-surface { background: var(--toki-bg); }
+.toki-border-light { border: 1px solid var(--toki-border); }
+.toki-transition { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+.toki-w-full { width: 100%; }
+.toki-h-full { height: 100%; }
+.toki-cursor-pointer { cursor: pointer; }
+.toki-cursor-help { cursor: help; }
+.toki-relative { position: relative; }
+.toki-overflow-hidden { overflow: hidden; }
+
+/* Composite Utilities (convenience combos) */
+.toki-flex-1 { flex: 1; }
+.toki-flex-between { display: flex; justify-content: space-between; align-items: center; }
+.toki-flex-row { display: flex; gap: 4px; align-items: center; }
+.toki-flex-row-8 { display: flex; gap: 8px; align-items: center; }
+.toki-flex-row-10 { display: flex; gap: 10px; align-items: center; }
+.toki-visible-flex { display: flex !important; }
+.toki-visible-block { display: block !important; }
+.toki-hidden { display: none !important; }
+.toki-text-xs { font-size: 11px; color: #94a3b8; }
+.toki-text-sm { font-size: 12px; }
+.toki-text-lg { font-size: 20px; font-weight: 700; }
+.toki-divider { border: 0; border-top: 1px solid rgba(0,0,0,0.05); margin: 24px 0; }
+
 /* LogBox Styles */
 #toki-logbox {
     position: fixed;
@@ -473,42 +621,15 @@
     gap: 14px;
 }
 
-/* Utility Shortcuts */
-.toki-flex-between { display: flex; justify-content: space-between; align-items: center; }
-.toki-divider { border: 0; border-top: 1px solid rgba(0,0,0,0.05); margin: 24px 0; }
-.toki-mt-0 { margin-top: 0 !important; }
-.toki-mt-8 { margin-top: 8px !important; }
-.toki-mt-32 { margin-top: 32px !important; }
-.toki-ml-4 { margin-left: 4px !important; }
-.toki-mb-5 { margin-bottom: 5px !important; }
-.toki-mb-10 { margin-bottom: 10px !important; }
-.toki-mb-24 { margin-bottom: 24px !important; }
-.toki-flex-1 { flex: 1; }
-.toki-flex-row { display: flex; gap: 4px; align-items: center; }
-.toki-flex-row-8 { display: flex; gap: 8px; align-items: center; }
-.toki-flex-row-10 { display: flex; gap: 10px; align-items: center; }
-
-/* Text Utilities */
-.toki-text-xs { font-size: 11px; color: #94a3b8; }
-.toki-text-sm { font-size: 12px; }
-.toki-text-base { font-size: 14px; }
-.toki-text-lg { font-size: 20px; font-weight: 700; }
-.toki-text-success { color: #4ade80 !important; }
-.toki-text-danger { color: #ff5555 !important; }
-.toki-text-primary { color: var(--toki-primary) !important; }
-.toki-text-center { text-align: center; }
-.toki-line-16 { line-height: 1.6; }
-
-/* Specialized Components */
+/* Composite & Borderline Utilities */
 .toki-modal-main { padding: 32px; width: 520px; max-height: 85vh; overflow-y: auto; }
 .toki-btn-gradient-green { 
-    background: linear-gradient(135deg, #10b981, #059669) !important; 
-    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2) !important;
+    background: linear-gradient(135deg, #10b981, #059669); 
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
 }
 
-.toki-btn-lavender { background: #6a5acd !important; font-weight: bold !important; }
-.toki-btn-slate { background: rgba(0,0,0,0.02) !important; border-style: dashed !important; border-radius: 20px !important; }
-.toki-hidden { display: none !important; }
+.toki-btn-lavender { background: #6a5acd; font-weight: bold; }
+.toki-btn-slate { background: rgba(0,0,0,0.02); border-style: dashed; border-radius: 20px; }
 
 /* Helper Boxes */
 .toki-helper-box-blue {
@@ -534,21 +655,16 @@
 .toki-helper-desc { line-height: 1.5; font-weight: 500; }
 
 /* Component: Small Button (e.g., Test Native) */
-.toki-btn-sm { height: 36px !important; font-size: 12px !important; border-radius: 12px !important; }
+.toki-btn-sm { height: 36px; font-size: 12px; border-radius: 12px; }
 
 /* Component: Sync Button (height 48px) */
-.toki-btn-sync { height: 48px !important; }
+.toki-btn-sync { height: 48px; }
 
 /* Component: Modal Header without border */
-.toki-modal-header-borderless { border: none !important; }
+.toki-modal-header-borderless { border: none; }
 
 /* Component: Code Textarea */
 .toki-textarea-code { min-height: 120px; font-family: monospace; }
-
-/* Visibility Toggles */
-.toki-visible-flex { display: flex !important; }
-.toki-visible-block { display: block !important; }
-.toki-hidden { display: none !important; }
 
 /* Status Badges & Indicators */
 .toki-badge {

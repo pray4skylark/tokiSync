@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.26.5] - 2026-07-06
+
+### ♻️ CSS Atomic Utility Layer Refactor
+- **`src/core/ui/ui.css`**:
+  - **Atomic Utility Classes (~100개 신설)**: Layout(`toki-flex`, `toki-flex-col`, `toki-flex-center`), Gap(`toki-gap-*`), Padding(`toki-p-*`, `toki-px-*`, `toki-py-*`), Margin(`toki-mt-*`, `toki-mb-*`, `toki-ml-*`), Typography(`toki-text-*`, `toki-font-*`, `toki-leading-*`), Visual(`toki-rounded-*`, `toki-shadow-*`, `toki-transition`) 등 계층형 유틸리티 시스템 도입.
+  - **중복 제거**: 기존 "Utility Shortcuts" + "Text Utilities" + "Visibility Toggles" 섹션을 통합 단일 계층으로 병합. `.toki-hidden` 3중 정의 제거. `.toki-text-success/danger/primary/center` 중복 정의 제거.
+  - **`!important` 91→73건**: 컴포넌트 오버라이드 클래스(`.toki-btn-lavender`, `.toki-btn-slate`, `.toki-btn-sm`, `.toki-btn-sync`, `.toki-modal-header-borderless`, `.toki-btn-gradient-green`)에서 cascade-safe한 !important 18건 제거.
+- **`src/core/ui/MenuModal.js` / `src/core/ui/FormRuleEditor.js`**:
+  - **JS inline style 55→39건**: `toki-font-extrabold`, `toki-text-11`, `toki-leading-14`, `toki-mt-4`, `toki-text-muted`, `toki-flex-between` 등 atomic 클래스로 16건 대체. 동적값/JS-toggle 스타일은 그대로 유지.
+- **`src/core/ui/ui.css` 파일**: 1965→2081줄 (atomic 클래스 추가로 증가), 최종 번들 549KB→543KB (6KB 감소).
+
 ## [v1.26.4] - 2026-07-01
 
 ### 🛠️ Local/Drive Download Pipeline Consolidation

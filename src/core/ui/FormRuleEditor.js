@@ -306,7 +306,7 @@ export class FormRuleEditor {
                                 </div>
                             </div>
                             <div class="toki-form-grid">
-                                <div class="toki-form-row" style="grid-column: span 1;">
+                                <div class="toki-form-row" style="grid-column: span 1">
                                     <div class="toki-form-row-header">
                                         <span class="toki-form-row-label">제외 셀렉터 (exclude) (반점 구분)</span>
                                         <div class="toki-flex-row-8">
@@ -327,18 +327,18 @@ export class FormRuleEditor {
                     <!-- Right Column: JSON Preview & Sandbox -->
                     <div class="toki-form-editor-right">
                         <div class="toki-flex-between">
-                            <span class="toki-form-row-label" style="font-weight: 800;">⚙️ 실시간 완성 JSON 규칙</span>
+                            <span class="toki-form-row-label toki-font-extrabold">⚙️ 실시간 완성 JSON 규칙</span>
                             <span id="form-json-status" class="toki-badge-match ok">✓ Valid</span>
                         </div>
-                        <textarea class="toki-tree-json-preview toki-flex-1" id="form-json-editor" spellcheck="false" style="font-size: 11px; line-height:1.4;"></textarea>
+                        <textarea class="toki-tree-json-preview toki-flex-1 toki-text-11 toki-leading-14" id="form-json-editor" spellcheck="false"></textarea>
                         
                         <div class="toki-form-card" style="margin: 0; padding: 12px; background: rgba(0,0,0,0.02);">
-                            <div class="toki-form-row-label" style="font-weight: 800; color: var(--toki-primary);">🧪 로컬 셀렉터 가상 테스트</div>
+                            <div class="toki-form-row-label toki-font-extrabold toki-text-primary">🧪 로컬 셀렉터 가상 테스트</div>
                             <div class="toki-flex-row-8">
                                 <input type="text" id="form-test-url" class="toki-input-compact toki-flex-1" style="height:32px; font-size:12px; padding: 4px 10px;" value="${window.location.href}">
                                 <button class="toki-btn-rule toki-text-success" id="form-btn-test" style="height:32px; padding:0 12px;">테스트</button>
                             </div>
-                            <div id="form-test-result" class="toki-text-xs" style="margin-top: 4px; color: var(--toki-text-muted);">
+                            <div id="form-test-result" class="toki-text-xs toki-mt-4 toki-text-muted">
                                 현재 페이지 또는 지정한 URL 주소의 DOM 파싱 검증을 원클릭으로 가상 작동해보세요.
                             </div>
                         </div>
@@ -813,18 +813,18 @@ export class FormRuleEditor {
         if (!rightPanel) return;
         rightPanel.innerHTML = `
             <div class="toki-flex-between">
-                <span class="toki-form-row-label" style="font-weight: 800;">⚙️ 실시간 완성 JSON 규칙</span>
+                <span class="toki-form-row-label toki-font-extrabold">⚙️ 실시간 완성 JSON 규칙</span>
                 <span id="form-json-status" class="toki-badge-match ok">✓ Valid</span>
             </div>
-            <textarea class="toki-tree-json-preview toki-flex-1" id="form-json-editor" spellcheck="false" style="font-size: 11px; line-height:1.4;"></textarea>
+            <textarea class="toki-tree-json-preview toki-flex-1 toki-text-11 toki-leading-14" id="form-json-editor" spellcheck="false"></textarea>
             
             <div class="toki-form-card" style="margin: 0; padding: 12px; background: rgba(0,0,0,0.02);">
-                <div class="toki-form-row-label" style="font-weight: 800; color: var(--toki-primary);">🧪 로컬 셀렉터 가상 테스트</div>
+                <div class="toki-form-row-label toki-font-extrabold toki-text-primary">🧪 로컬 셀렉터 가상 테스트</div>
                 <div class="toki-flex-row-8">
                     <input type="text" id="form-test-url" class="toki-input-compact toki-flex-1" style="height:32px; font-size:12px; padding: 4px 10px;" value="${window.location.href}">
                     <button class="toki-btn-rule toki-text-success" id="form-btn-test" style="height:32px; padding:0 12px;">테스트</button>
                 </div>
-                <div id="form-test-result" class="toki-text-xs" style="margin-top: 4px; color: var(--toki-text-muted);">
+                <div id="form-test-result" class="toki-text-xs toki-mt-4 toki-text-muted">
                     현재 페이지 또는 지정한 URL 주소의 DOM 파싱 검증을 원클릭으로 가상 작동해보세요.
                 </div>
             </div>

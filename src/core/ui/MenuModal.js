@@ -68,14 +68,14 @@ export class MenuModal {
                     </div>
                     
                     <div id="toki-inline-progress" style="display: none; padding: 12px; background: rgba(0,0,0,0.04); border-radius: 8px; margin-top: 12px; border: 1px solid rgba(0,0,0,0.06);">
-                        <div style="font-weight: 600; margin-bottom: 8px; font-size: 13px; display: flex; justify-content: space-between;" id="toki-inline-header">
+                        <div class="toki-font-semibold toki-mb-8 toki-text-13 toki-flex-between" id="toki-inline-header">
                             <span id="toki-inline-text">수집 준비 중...</span>
-                            <span id="toki-inline-percent" style="color: var(--toki-primary, #6366f1);">0%</span>
+                            <span id="toki-inline-percent" class="toki-text-primary">0%</span>
                         </div>
                         <div class="toki-progress-bar-container" style="background: rgba(0,0,0,0.08); border-radius: 4px; height: 8px; overflow: hidden; margin-bottom: 12px; position: relative;">
                             <div id="toki-inline-bar" class="toki-progress-overall-bar-fill" style="width: 0%; height: 100%; background: var(--toki-primary, #6366f1); transition: width 0.3s ease;"></div>
                         </div>
-                        <div class="toki-btn-group-row" style="gap: 8px;">
+                        <div class="toki-btn-group-row toki-gap-8">
                             <button class="toki-btn-action toki-btn-secondary toki-flex-1" id="toki-inline-pause" style="height: 36px; padding: 0;">
                                 <span>⏸️ 일시 정지</span>
                             </button>
@@ -131,9 +131,9 @@ export class MenuModal {
 
                     <div class="toki-control-group">
                         <label class="toki-label">이미지 스캔 속도
-                            <span id="toki-scan-speed-val" style="font-weight: bold; color: var(--toki-primary, #6366f1);">1000ms</span>
+                            <span id="toki-scan-speed-val" class="toki-font-bold toki-text-primary">1000ms</span>
                         </label>
-                        <input type="range" id="toki-sel-scanspeed" min="100" max="5000" step="100" value="1000" class="toki-range" style="width: 100%;">
+                        <input type="range" id="toki-sel-scanspeed" min="100" max="5000" step="100" value="1000" class="toki-range toki-w-full">
                         <div class="toki-hint" style="font-size: 11px; color: #888; margin-top: 4px;">
                             100ms(빠름/불안정) ─ 1000ms(기본/권장) ─ 3000ms(안정) ─ 5000ms(확실)
                         </div>
@@ -217,7 +217,7 @@ export class MenuModal {
                             <span>🔄 지금 즉시 동기화</span>
                         </button>
                     </div>
-                    <p class="toki-text-xs toki-text-center toki-line-16">
+                    <p class="toki-text-xs toki-text-center toki-leading-16">
                         구글 드라이브와의 연결을 확인하고 동기화 이력을 체크합니다.
                     </p>
                 </div>
@@ -262,7 +262,7 @@ export class MenuModal {
                     <button class="toki-dashboard-modal-close" id="toki-btn-modal-progress-close" title="닫기">&times;</button>
                 </div>
                 <div class="toki-dashboard-modal-content">
-                    <div id="toki-logbox-progress" style="display: block;">
+                    <div id="toki-logbox-progress" class="toki-visible-block">
                         <div id="toki-progress-header">
                             <span id="toki-progress-overall-text">진행률: 0% (0 / 0)</span>
                             <div id="toki-progress-overall-controls">
@@ -299,7 +299,7 @@ export class MenuModal {
                     <button class="toki-dashboard-modal-close" id="toki-btn-modal-logs-close" title="닫기">&times;</button>
                 </div>
                 <div class="toki-dashboard-modal-content">
-                    <div id="toki-dashboard-log-section" style="display: flex;">
+                    <div id="toki-dashboard-log-section" class="toki-visible-flex">
                         <div class="toki-log-tabs">
                             <button class="toki-log-tab-btn active" data-logtab="service">📋 서비스 로그</button>
                             <button class="toki-log-tab-btn" data-logtab="debug">🛠️ 디버그 콘솔</button>
