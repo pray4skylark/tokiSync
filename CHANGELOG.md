@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.26.8] - 2026-07-07
+
+### 🐛 에피소드 정렬 버그 수정
+- **`src/viewer/composables/useStore.js`**: GAS 직접 응답 경로(`episodes.value = (books || []).map(attachMeta)`)에 `sortEpisodes()` 누락 수정. GAS에서 `number` 필드는 정상적으로 채번되나, 뷰어가 정렬 없이 Drive API 순서 그대로 표시하여 순서가 뒤죽박죽이 되던 문제 해결.
+- **`src/viewer/views/EpisodesView.vue`**: `sortedEpisodes` computed가 단순 `reverse()` 대신 `a.number` 기준 오름/내림차순 정렬로 변경. 기존 UI(목록순/최신순 토글)가 실제로 number 기준으로 동작하도록 수정.
+
 ## [v1.26.7] - 2026-07-07
 
 ### ♻️ 중앙 버전 관리 시스템 구축
