@@ -976,11 +976,9 @@ async function fetchToken() {
             timeout: 30000,
             onload: (response) => {
                 console.log('[DirectUpload] Token response status:', response.status);
-                console.log('[DirectUpload] Token response text:', response.responseText);
                 
                 try {
                     const result = JSON.parse(response.responseText);
-                    console.log('[DirectUpload] Parsed result:', result);
                     
                     if (result.status === 'success') {
                         console.log('[DirectUpload] Token received successfully');
@@ -993,7 +991,6 @@ async function fetchToken() {
                     }
                 } catch (e) {
                     console.error('[DirectUpload] JSON parse error:', e);
-                    console.error('[DirectUpload] Raw response:', response.responseText);
                     reject(new Error(`Token parse error: ${e.message}`));
                 }
             },
@@ -2368,8 +2365,8 @@ async function uploadViaGASRelay(blob, folderName, fileName, options = {}) {
                         reject(new Error(json.body || "Init failed"));
                     }
                 } catch (e) { 
-                    _logger_js__WEBPACK_IMPORTED_MODULE_3__.logger.critical(`GAS 서버 응답 파싱 실패 (Init): ${res.responseText?.substring(0, 80)}`, 'GAS:Relay');
-                    reject(new Error("GAS 응답 오류(Init): " + res.responseText)); 
+                    _logger_js__WEBPACK_IMPORTED_MODULE_3__.logger.critical(`GAS 서버 응답 파싱 실패 (Init) — ${fileName}`, 'GAS:Relay');
+                    reject(new Error("GAS 응답 오류(Init)")); 
                 }
             },
             onerror: (e) => {
@@ -2428,7 +2425,7 @@ async function uploadViaGASRelay(blob, folderName, fileName, options = {}) {
                         }
                     } catch (e) { 
                         _logger_js__WEBPACK_IMPORTED_MODULE_3__.logger.critical(`GAS 청크 응답 파싱 실패 (${start}~${end})`, 'GAS:Relay');
-                        reject(new Error("GAS 응답 오류(Upload): " + res.responseText)); 
+                        reject(new Error("GAS 응답 오류(Upload)")); 
                     }
                 },
                 onerror: (e) => {
