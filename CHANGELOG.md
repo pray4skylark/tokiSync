@@ -4,10 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## [v1.26.6] - 2026-07-07
 
-### 🔒 Security: Debug Log Token Leak Fix
-- **`src/core/network.js`**: Removed 3 `console.log` calls in `fetchToken()` that leaked the full OAuth access token (`responseText`, parsed `result`, and error-path raw response) into the console interceptor → LogBox debug panel.
-- **`src/core/gas.js`**: Stripped `responseText` from error messages in `uploadViaGASRelay()` Init/Upload error paths.
-- **Impact**: Debug logs no longer expose Google OAuth tokens. Safe to share debug logs.
+### 🔒 Security: Debug Log Sanitization
+- **OAuth Token Leak Fix**: Removed 3 `console.log` calls in `network.js` `fetchToken()` that leaked the full OAuth token (`responseText`, parsed `result`, error-path raw response) into the console → LogBox debug panel.
+- **GAS Error Sanitization**: Stripped `responseText` from error messages in `gas.js` `uploadViaGASRelay()` Init/Upload error paths to prevent token leakage through Error propagation.
+- **GAS URL Exposure Fix**: Removed `console.log` of `config.gasUrl` and `gasId` from `network.js` and `config.js` to prevent GAS deployment URL exposure in debug output.
+- **Impact**: Debug logs are now safe to share with developers.
+
+### 🐛 Worker Contention Race Fix (Pre-open + Scheduler)
+- **`src/core/queue.js`** — `runSchedulerOnce()`:
+  - **activeWorkers 선점 순서 변경**: `activeWorkers.set(id, null)`을 `updateQueueItem()`보다 먼저 실행하여, GM storage 변경 리스너가 동기적으로 `runSchedulerOnce()`를 재호출해도 `activeWorkers.size >= 1`로 이중 워커 기동을 방어.
+  - **팝업 실패 cleanup**: `openEpisodePopup()` 실패 시 `activeWorkers.delete(id)` 누락 수정.
+- **`src/core/downloader.js`** — Pre-open 단순화:
+  - Pre-open(popup 차단 우회)에서 `updateQueueItem(id, { status: 'processing' })` 제거. Pre-open은 popup만 열고 `activeWorkers`에 등록하는 역할로 축소.
+- **`src/core/worker-controller.js`** — WORKER_READY 상태 전환:
+  - Pre-open으로 열린 popup의 큐 상태를 WORKER_READY 수신 시점에 `status: 'processing'`으로 설정하도록 변경. Pre-open 자체가 상태를 변경하지 않으므로, 실제 워커 연결 시점과 상태가 정확히 동기화됨.
+- **원인**: `runSchedulerOnce()`가 `updateQueueItem()` 호출 시 `GM_setValue` → `GM_addValueChangeListener`가 동기 실행되어, `activeWorkers` 등록 전에 재진입한 스케줄러가 `activeWorkers.size === 0` 상태로 검사를 통과하여 두 번째 워커를 기동. Pre-open의 `updateQueueItem` 호출이 이 체인을 더 복잡하게 만들어 경합 조건을 악화시킴.
+- **진단 로그**: 모든 `activeWorkers` 변이 추적 로그 및 ProgressCard 생성/제거 로그 추가.
 
 ## [v1.26.5] - 2026-07-06
 
