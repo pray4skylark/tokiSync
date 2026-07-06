@@ -218,7 +218,7 @@ async function getOrCreateThumbnailFolder(token, parentId) {
  * Sends data in chunks to a Google Drive Resumable Upload session
  */
 async function sendResumableChunks(uploadUrl, blob, token, fileName) {
-    const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB (Minimum for Drive is 256KB, 5MB is standard)
+    const CHUNK_SIZE = 5 * 1024 * 1024;
     const totalSize = blob.size;
     let start = 0;
 
@@ -226,7 +226,7 @@ async function sendResumableChunks(uploadUrl, blob, token, fileName) {
         const end = Math.min(start + CHUNK_SIZE, totalSize);
         const chunk = blob.slice(start, end);
         const contentRange = `bytes ${start}-${end - 1}/${totalSize}`;
-        
+
         await new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method: 'PUT',
@@ -238,31 +238,27 @@ async function sendResumableChunks(uploadUrl, blob, token, fileName) {
                 },
                 data: chunk,
                 binary: true,
-                timeout: 300000, // 5 minutes per chunk
+                timeout: 300000,
                 onload: (res) => {
-                    if (res.status === 308) {
-                        // Resume Incomplete (Standard Response for chunks)
-                        resolve();
-                    } else if (res.status >= 200 && res.status < 300) {
-                        // Done (Final chunk)
+                    if (res.status === 308 || (res.status >= 200 && res.status < 300)) {
                         resolve();
                     } else {
+                        EventBus.emit(EVT.LOG, { msg: `❌ [${fileName}] 청크 업로드 실패 (${res.status})`, level: 'error', tag: 'Upload' });
                         reject(new Error(`Chunk upload failed: ${res.status} ${res.responseText}`));
                     }
                 },
-                onerror: reject,
-                ontimeout: () => reject(new Error(`Chunk upload timed out: ${contentRange}`))
+                onerror: () => {
+                    EventBus.emit(EVT.LOG, { msg: `❌ [${fileName}] 청크 네트워크 오류`, level: 'error', tag: 'Upload' });
+                    reject(new Error('Chunk upload network error'));
+                },
+                ontimeout: () => {
+                    EventBus.emit(EVT.LOG, { msg: `⏰ [${fileName}] 청크 타임아웃`, level: 'error', tag: 'Upload' });
+                    reject(new Error(`Chunk upload timed out: ${contentRange}`));
+                }
             });
         });
-        
+
         start = end;
-        const progress = Math.min(100, Math.floor((start / totalSize) * 100));
-        console.log(`[DirectUpload] ${fileName} -> ${progress}% (${start}/${totalSize})`);
-        EventBus.emit(EVT.LOG, {
-            msg: `☁️ [${fileName}] Drive 업로드 중... ${progress}% (${Math.floor(start / 1024 / 1024)}MB / ${Math.floor(totalSize / 1024 / 1024)}MB)`,
-            level: 'info',
-            tag: 'Upload'
-        });
     }
 }
 
@@ -271,7 +267,11 @@ async function sendResumableChunks(uploadUrl, blob, token, fileName) {
  */
 export async function uploadDirect(blob, folderName, fileName, metadata = {}) {
     try {
-        console.log(`[DirectUpload] Preparing: ${fileName} (${blob.size} bytes)`);
+        const { forceOverwrite = false } = metadata;
+        if (forceOverwrite) {
+            console.log(`[DirectUpload] Force overwrite mode: ${fileName}`);
+        }
+        EventBus.emit(EVT.LOG, { msg: `☁️ [${fileName}] Drive 직접 업로드 준비 중... (${(blob.size / 1024 / 1024).toFixed(1)}MB)`, level: 'info', tag: 'Upload' });
         
         const config = getConfig();
         const token = await getToken();
@@ -321,10 +321,11 @@ export async function uploadDirect(blob, folderName, fileName, metadata = {}) {
             
             if (searchRes.files && searchRes.files.length > 0) {
                 existingFileId = searchRes.files[0].id;
-                console.log(`[DirectUpload] Existing file found: ${existingFileId} (Mode: UPDATE)`);
+                EventBus.emit(EVT.LOG, { msg: `📎 [${fileName}] 기존 파일 발견 → 업데이트(PATCH) 모드`, level: 'info', tag: 'Upload' });
             }
         } catch (searchErr) {
             console.warn('[DirectUpload] Existing file check failed:', searchErr);
+            throw new Error('기존 파일 검색 실패: ' + searchErr.message);
         }
 
         // 4. Initialize Resumable Session
@@ -364,26 +365,28 @@ export async function uploadDirect(blob, folderName, fileName, metadata = {}) {
                             sessionUri.searchParams.set('upload_id', uploadIdMatch[1].trim());
                             resolve(sessionUri.toString());
                         } else {
-                            console.error('[DirectUpload] Response Headers:', res.responseHeaders);
-                            console.error('[DirectUpload] Response Body:', res.responseText);
+                            EventBus.emit(EVT.LOG, { msg: `❌ [${fileName}] 업로드 세션 URL 추출 실패`, level: 'error', tag: 'Upload' });
                             reject(new Error(`Failed to extract session URL. Headers: ${res.responseHeaders}`));
                         }
                     } else {
+                        EventBus.emit(EVT.LOG, { msg: `❌ [${fileName}] 업로드 세션 초기화 실패 (HTTP ${res.status})`, level: 'error', tag: 'Upload' });
                         reject(new Error(`Session init failed with status: ${res.status}`));
                     }
                 },
-                onerror: reject
+                onerror: () => {
+                    EventBus.emit(EVT.LOG, { msg: `❌ [${fileName}] 업로드 세션 네트워크 오류`, level: 'error', tag: 'Upload' });
+                    reject(new Error('Session init network error'));
+                }
             });
         });
 
         // 5. Send chunks
         await sendResumableChunks(uploadUrl, blob, token, finalFileName);
-        console.log(`[DirectUpload] ✅ Upload successful: ${finalFileName}`);
+        EventBus.emit(EVT.LOG, { msg: `✅ [${finalFileName}] Drive 업로드 완료!`, level: 'success', tag: 'Upload' });
         return;
 
     } catch (error) {
-        console.error(`[DirectUpload] Error:`, error);
-        logger.error(`[DirectUpload] ${error.message}`, 'Network:Upload');
+        EventBus.emit(EVT.LOG, { msg: `❌ [${fileName}] Drive 업로드 실패: ${error.message}`, level: 'error', tag: 'Upload' });
         throw error;
     }
 }

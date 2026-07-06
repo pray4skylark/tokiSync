@@ -646,7 +646,8 @@ export function initBatchWorkerController() {
                     folderId: item.folderId,
                     folderName: targetFolderName,
                     category: category,
-                    destination: destination
+                    destination: destination,
+                    forceOverwrite: item.forceOverwrite || false
                 });
             } finally {
                 clearInterval(keepalive);

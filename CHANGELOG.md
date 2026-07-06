@@ -15,6 +15,16 @@ All notable changes to this project will be documented in this file.
 
 ## [v1.26.4] - 2026-07-01
 
+### DomInspector 전면 리팩터
+- **감지 범위 확장**: skip 리스트 축소 (`script,style` 만), maxDepth 999, zero-layout 필터 제거
+- **CSS 회피 감지**: display-none / visibility-hidden / faded / offscreen / clipped / zero-font / no-pointer 플래그
+- **가상요소 탐지**: `::before`/`::after` content 표시
+- **Shadow DOM 탐색**: open shadowRoot 내부 재귀
+- **속성 수집 강화**: 모든 `data-*`, `aria-*`, `role`, `style`, `loading` 수집
+- **TreeWalker 기반 실시간 텍스트 검색**: filter 시 `document.createTreeWalker`로 DOM 전체 textContent 검색
+- **Selector 생성 개선**: `nth-of-type`, `data-*` 속성 선택자 fallback, `CSS.escape()`
+- **성능**: 200노드 이상 rAF chunking 렌더링, filter 디바운스 150ms
+
 ### 🛠️ Local/Drive Download Pipeline Consolidation
 - **`src/core/downloader.js`**:
   - **Unified Queue Delegation**: Simplified the scheduling branch condition (`!currentIsSingleVolume`) to route both local downloads (`local` / `native`) and drive uploads (`drive` / `drive_kavita`) through the centralized batch queue scheduler. This effectively deprecates the buggy, error-prone Sequential iFrame/popup reuse loops for individual local downloads, aligning the entire codebase under a single, robust scheduling engine.

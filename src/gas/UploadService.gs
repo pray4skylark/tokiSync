@@ -10,15 +10,17 @@ function initResumableUpload(data, rootFolderId) {
     true,
   );
 
-  // [Fix] Prevent Duplicate Files: Delete existing file with the same name before uploading a new one
-  const existingFiles = DriveAccessService.list(folderId, {
-    query: `name = '${data.fileName.replace(/'/g, "\\'")}'`,
-    fields: "files(id)"
-  });
+  // Only trash existing files when forceOverwrite is true
+  if (data.forceOverwrite) {
+    const existingFiles = DriveAccessService.list(folderId, {
+      query: `name = '${data.fileName.replace(/'/g, "\\'")}'`,
+      fields: "files(id)"
+    });
 
-  existingFiles.forEach(file => {
-    DriveAccessService.trash(file.id);
-  });
+    existingFiles.forEach(file => {
+      DriveAccessService.trash(file.id);
+    });
+  }
 
   const url =
     "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable";

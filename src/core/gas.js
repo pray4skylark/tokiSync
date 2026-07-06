@@ -145,7 +145,8 @@ async function uploadViaGASRelay(blob, folderName, fileName, options = {}) {
                 folderName: folderName, 
                 fileName: fileName,
                 category: category,
-                apiKey: config.apiKey
+                apiKey: config.apiKey,
+                forceOverwrite: options.forceOverwrite || false
             }),
             headers: { "Content-Type": "text/plain" },
             timeout: 30000,

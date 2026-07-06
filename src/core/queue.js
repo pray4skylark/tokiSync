@@ -111,6 +111,7 @@ export const addEpisodesToQueue = (episodes, novelTitle) => {
         matchedRule: ep.matchedRule || {},
         protocolDomain: ep.protocolDomain || '',
         seriesMetadata: ep.seriesMetadata || {},
+        forceOverwrite: ep.forceOverwrite || false,
         status: 'pending',
         progressPercent: 0,
         stage: WORKER_STAGE.INIT,

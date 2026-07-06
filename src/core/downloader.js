@@ -23,8 +23,10 @@ async function shouldSkipEpisode({
     historyCheckTimeoutFlag,
     historyFolderId,
     logOnSkip = false,
-    episodeTitle = ''
+    episodeTitle = '',
+    forceOverwrite = false
 }) {
+    if (forceOverwrite) return false;
     if (isSingleVolume) return false;
     if (destination !== 'drive' && destination !== 'drive_kavita') return false;
 
@@ -544,7 +546,8 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                 isSingleVolume: currentIsSingleVolume,
                 uploadedHistorySet,
                 historyCheckTimeoutFlag,
-                historyFolderId
+                historyFolderId,
+                forceOverwrite
             });
             if (isSkip) continue;
             
@@ -559,7 +562,8 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                 novelFormat: configNovelFormat,
                 matchedRule: parser.rule,
                 protocolDomain: parser.protocolDomain || window.location.origin,
-                seriesMetadata: seriesMetadata
+                seriesMetadata: seriesMetadata,
+                forceOverwrite: forceOverwrite || false
             });
         }
 
@@ -686,7 +690,8 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                 historyCheckTimeoutFlag,
                 historyFolderId,
                 logOnSkip: true,
-                episodeTitle: item.title
+                episodeTitle: item.title,
+                forceOverwrite
             });
             if (isSkip) continue;
 
@@ -903,7 +908,8 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                         logger.log(`[Upload] 일반 업로드(Create/POST) 진행...`);
                         await saveFile(blob, fullFilename, destination, extension, {
                             folderName: rootFolder,
-                            category: category
+                            category: category,
+                            forceOverwrite: forceOverwrite || false
                         });
                     }
                 }
@@ -971,7 +977,8 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                     
                     await saveFile(finalBlob, finalFilename, destination, extension, {
                         folderName: rootFolder,
-                        category: category
+                        category: category,
+                        forceOverwrite: forceOverwrite || false
                     });
                     
                     logger.success(`✅ 단행본 합본 저장 완료: ${finalFilename}`);
