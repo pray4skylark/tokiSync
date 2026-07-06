@@ -53,6 +53,10 @@ Develop 브랜치로 push 전 필수 선행 작업:
 1. **문서화 완료**: `.agent_checkpoint.md` 및 `CHANGELOG.md` 업데이트 확인
 2. **Graphify 갱신**: `/graphify --update` 실행하여 knowledge graph 최신화
 3. **빌드 검증**: `npm run build:core` 성공 확인
+4. **문서화 커밋 머지**: 직전 작업 커밋과 문서화 커밋을 하나로 합친 후 태그 지정
+   - `git rebase -i HEAD~2` 또는 `git commit --amend`로 작업 커밋에 문서 포함
+   - 태그는 최종 머지된 커밋에 부여 (`git tag -a vMAJOR.MINOR.PATCH`)
+5. **Push**: `git push origin develop --tags` (사용자 직접 실행)
 
 ## Release Workflow
 - No auto-commits or auto-releases. Always get human approval.
