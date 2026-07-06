@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.26.7
+// @version      1.26.8
 // @description  Toki series sites -> Google Drive syncing tool (Bundled)
 // @author       pray4skylark
 // @updateURL    https://pray4skylark.github.io/tokiSync/tokiSync.user.js
@@ -2719,7 +2719,7 @@ ${tocNav}
 class RuleManager {
     // Built-in sample rules as fallback/templates (Offline Seeding)
     static get _version() {
-        return  true ? "1.26.7" : 0;
+        return  true ? "1.26.8" : 0;
     }
 
     static #builtInRules = [
@@ -5027,7 +5027,7 @@ class FormRuleEditor {
     }
 
     render() {
-        const scriptVer =  true ? "1.26.7" : 0;
+        const scriptVer =  true ? "1.26.8" : 0;
         this.overlay.innerHTML = `
             <div class="toki-modal toki-form-editor-modal">
                 <div class="toki-modal-header">
@@ -10142,10 +10142,10 @@ var SubscriptionManager = __webpack_require__(330);
  * Fallback values (0.0.0) are never used in production builds.
  */
 const SCRIPT_VERSION =  true
-  ? "1.26.7" : 0;
+  ? "1.26.8" : 0;
 
 const VIEWER_VERSION = (/* unused pure expression or super */ null && ( true
-  ? "1.26.7" : 0));
+  ? "1.26.8" : 0));
 
 ;// ./src/core/main.js
 
