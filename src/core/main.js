@@ -16,7 +16,7 @@ import { EventBus, EVT } from './EventBus.js';
 import { getCommonPrefix, blobToArrayBuffer, saveFile } from './utils.js';
 
 export async function main() {
-    console.log("🚀 TokiDownloader Loaded (New Core v1.26.5)");
+    console.log("🚀 TokiDownloader Loaded (New Core v1.26.6)");
 
     // -- 0. Bootstrap UI Instances --
     const _logbox = LogBox.getInstance();

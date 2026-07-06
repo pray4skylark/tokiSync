@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.26.6] - 2026-07-07
+
+### 🔒 Security: Debug Log Token Leak Fix
+- **`src/core/network.js`**: Removed 3 `console.log` calls in `fetchToken()` that leaked the full OAuth access token (`responseText`, parsed `result`, and error-path raw response) into the console interceptor → LogBox debug panel.
+- **`src/core/gas.js`**: Stripped `responseText` from error messages in `uploadViaGASRelay()` Init/Upload error paths.
+- **Impact**: Debug logs no longer expose Google OAuth tokens. Safe to share debug logs.
+
 ## [v1.26.5] - 2026-07-06
 
 ### ♻️ CSS Atomic Utility Layer Refactor

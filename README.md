@@ -1,18 +1,15 @@
-# ⚡️ TokiSync (토끼싱크) v1.26.5
+# ⚡️ TokiSync (토끼싱크) v1.26.6
 
 **북토끼, 뉴토끼, 마나토끼**의 콘텐츠를 **구글 드라이브로 직접 업로드**하고, **전용 웹 뷰어**를 통해 편리하게 관리/열람할 수 있는 올인원 솔루션입니다.
 
-> **🚀 v1.26.5 업데이트 요약:**
-> - **CSS Atomic Utility Layer 도입**: ~100개 계층형 유틸리티 클래스로 스타일 시스템 리팩터, 중복 제거 및 `!important` 91→73건 정리.
-> - **DomInspector 전면 리팩터**: CSS 회피 감지, Shadow DOM 탐색, TreeWalker 텍스트 검색, rAF chunking 성능 최적화.
-> - **Force Overwrite Pipeline 완성**: 다운로드→GAS 전 구간 `forceOverwrite` 파라미터 전파, `false` 기본값으로 기존 파일 보호.
-> - **Drive 업로드 오류 처리 강화**: `console.log`→`EventBus` 마이그레이션, 청크 오류 한글화 및 대시보드 로그 표시.
+> **🚀 v1.26.6 업데이트 요약:**
+> - **🔒 보안 강화: 디버그 로그 토큰 유출 차단**: `network.js`에서 OAuth 토큰을 `console.log`로 출력하던 3개 지점 제거. GAS 오류 메시지에서 `responseText` 제거하여 토큰 정보 보호.
 
 ---
 
 ## ✨ 주요 기능
 
-### 📥 수집기 (UserScript) - v1.26.5
+### 📥 수집기 (UserScript) - v1.26.6
 
 - **🔒 차세대 팝업 IPC 및 보안 우회 수집**: 팝업창을 통한 Controller-Worker 통신 모델로 봇 감지를 회피하고 미디어를 수집합니다.
 - **🛠 토큰 기반 XOR 소설 복호화**: 최신 API 변경에 긴급 대응하여 JWT 토큰 및 동적 Nonce를 자동 분석해 소설을 복호화합니다.
@@ -22,13 +19,13 @@
 - **🔄 Direct Sync Engine**: GAS를 거치지 않는 Direct Drive API v3 활용으로 이력 동기화 속도 3배 향상.
 - **⚙️ 소설 출력 포맷 선택**: EPUB 표준 포맷 및 일반 텍스트(TXT) 지원.
 
-### 📡 서버 (GAS API) - v1.26.5
+### 📡 서버 (GAS API) - v1.26.6
 
 - **📚 읽기 이력 동기화**: `read_history.json`을 통한 기기 간 열람 이력 공유.
 - **🔑 OAuth 토큰 발급**: 클라이언트의 Direct Access를 위한 고속 권한 위임.
 - **📦 대용량 Resumable Upload**: 5GB+ 대용량 파일 지원 및 자가 회복 로직.
 
-### 📊 뷰어 2.0 (Cinematic & Refined) - v1.26.5
+### 📊 뷰어 2.0 (Cinematic & Refined) - v1.26.6
 
 - **📐 스크롤 이미지 정밀 렌더링**: 이미지 로딩 완료 여부에 따른 동적 min-height 스위칭으로 웹툰 비율 찌그러짐을 완벽 해소.
 - **📖 소설 전용 설정**: 테마(Light/Sepia/Dark), 폰트 크기, 줄 간격 조절 기능을 포함한 플로팅 툴바 이식.

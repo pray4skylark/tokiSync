@@ -1,12 +1,12 @@
-# 🏁 TokiSync v1.26.5 Deployment Checklist
+# 🏁 TokiSync v1.26.6 Deployment Checklist
 
-배포 전 최종 안정성을 보장하기 위한 체크리스트입니다. v1.26.5의 전면 개편된 UI와 소설 엔진 픽스 사항들이 모두 반영되었는지 확인하세요.
+배포 전 최종 안정성을 보장하기 위한 체크리스트입니다. v1.26.6의 전면 개편된 UI와 소설 엔진 픽스 사항들이 모두 반영되었는지 확인하세요.
 
 ---
 
 ## 1. 빌드 및 버전 관리 (Build & Versioning)
-- [ ] `package.json` 버전이 `1.26.5`으로 명시되어 있는가?
-- [ ] `webpack.core.config.cjs`의 UserScript 버전이 `1.26.5`으로 갱신되었는가?
+- [ ] `package.json` 버전이 `1.26.6`으로 명시되어 있는가?
+- [ ] `webpack.core.config.cjs`의 UserScript 버전이 `1.26.6`으로 갱신되었는가?
 - [ ] `npm run build` 실행 시 에러 없이 모든 어셋(Viewer, Core, GAS Bundle)이 생성되는가?
 - [ ] `docs/tokiSync.user.js` 파일이 정상적으로 빌드되었는가?
 
@@ -29,7 +29,7 @@
 - [ ] 백그라운드 다운로드 중 안티-슬립(오디오 재생)이 활성화되는가?
 
 ## 5. 최종 배포 및 공지 (Release Procedure)
-- [ ] `CHANGELOG.md` 및 `RELEASE_NOTES_v1.26.5.md`가 최신화되었는가?
+- [ ] `CHANGELOG.md` 및 `RELEASE_NOTES_v1.26.6.md`가 최신화되었는가?
 - [ ] `gh-pages` 브랜치에 최신 빌드 결과물이 푸시되었는가?
 - [ ] 실사용 환경에서 통합 메뉴(`Ctrl+Shift+T`)가 정상 호출되는가?
 
