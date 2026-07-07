@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.27.1] - 2026-07-08
+
+### 🐛 WORKER_READY 중복 사이클 + 레이스 컨디션 수정
+- **근본 원인 1**: `tokisync_waiting_${id}` 플래그가 START_EXTRACTION 주입 직후 삭제되어, 자식 워커가 재전송하는 READY로 인해 동일 ID가 9초 대기를 반복하는 무한 사이클 발생.
+- **근본 원인 2**: 타임아웃/실패 핸들러에서 `destroyWorkerSession` → `runSchedulerOnce` → `updateQueueItem` 순서로 행되어, `processingSlots`가 비어있는 틈에 스케줄러가 `pending` 상태 아이템을 또 팝업으로 개방하는 레이스 컨디션.
+- **`src/core/worker-controller.js`**:
+  - START_EXTRACTION 주입 후 플래그 삭제 제거 → 워커 완료/실패/타임아웃 시점으로 이동
+  - 타임아웃/수동종료/TASK_FAILED 핸들러 순서 재조정: `updateQueueItem` → `destroyWorkerSession` → `runSchedulerOnce`
+  - 변수명 중복 수정 (`failedToken` → `sessionToken`)
+- **검증**: `npm run test` 30/30 Pass, `npm run build:core` 성공
+
 ## [v1.27.0] - 2026-07-08
 
 ### 🔒 B+C 하이브리드: 세션 토큰 기반 워커 라이프사이클 재설계

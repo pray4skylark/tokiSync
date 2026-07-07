@@ -403,19 +403,24 @@ export function initBatchWorkerController() {
                             actualRef.close();
                         }
                     } catch (e) {}
-                    console.log(`[WorkerController] 🧹 activeWorkers 삭제 (타임아웃): ${item.id} → size=${activeWorkers.size-1}`);
-                    const timedOutToken = getSessionToken(item.id);
-                    if (timedOutToken) {
-                        removeWorkerOrigin(item.id, timedOutToken);
-                    }
-                    destroyWorkerSession(item.id, 'timeout');
-
+                    console.log(`[WorkerController]  activeWorkers 삭제 (타임아웃): ${item.id} → size=${activeWorkers.size-1}`);
+                    
+                    // [v1.27.2] 상태 업데이트 먼저 → 세션 정리 → 스케줄러 순서로 레이스 컨디션 차단
                     const nextRetry = (item.retryCount || 0) + 1;
                     updateQueueItem(item.id, {
                         status: nextRetry >= 3 ? 'failed' : 'pending',
                         retryCount: nextRetry,
                         errorMsg: `에피소드 ${isUploading ? '업로드' : '수집'} 처리 시간이 ${limitSec}초를 초과하여 타임아웃되었습니다.`
                     });
+                    
+                    const timedOutToken = getSessionToken(item.id);
+                    if (timedOutToken) {
+                        removeWorkerOrigin(item.id, timedOutToken);
+                    }
+                    destroyWorkerSession(item.id, 'timeout');
+                    
+                    // [v1.27.2] 안전 대기 플래그 정리 — 타임아웃 시점
+                    delete window[`tokisync_waiting_${item.id}`];
 
                     EventBus.emit(EVT.LOG, {
                         msg: `❌ [배치 타임아웃] [${item.episodeTitle}] ${isUploading ? '업로드' : '수집'} 시간 초과(${limitSec}초). 복구를 단행합니다.`,
@@ -437,12 +442,7 @@ export function initBatchWorkerController() {
                 if (closedCount >= 5) {
                     console.warn(`[WorkerController] ⚠️ [배치] 자식 팝업 수동 종료 확정: ${id} → activeWorkers.size=${activeWorkers.size}`);
                     batchClosedCounts.delete(id);
-                    const manualToken = getSessionToken(id);
-                    if (manualToken) {
-                        removeWorkerOrigin(id, manualToken);
-                    }
-                    destroyWorkerSession(id, 'manual_close');
-
+                    
                     const item = queue.find(i => i.id === id);
                     if (item && item.status === 'processing') {
                         if (item.stage === WORKER_STAGE.UPLOADING || item.stage === WORKER_STAGE.COMPLETED) {
@@ -450,12 +450,23 @@ export function initBatchWorkerController() {
                             return;
                         }
 
+                        // [v1.27.2] 상태 업데이트 먼저 → 세션 정리 → 스케줄러 순서
                         const nextRetry = (item.retryCount || 0) + 1;
                         updateQueueItem(id, {
                             status: nextRetry >= 3 ? 'failed' : 'pending',
                             retryCount: nextRetry,
                             errorMsg: '자식 팝업 창이 비정상적으로 강제 종료되었습니다.'
                         });
+                        
+                        const manualToken = getSessionToken(id);
+                        if (manualToken) {
+                            removeWorkerOrigin(id, manualToken);
+                        }
+                        destroyWorkerSession(id, 'manual_close');
+                        
+                        // [v1.27.2] 안전 대기 플래그 정리
+                        delete window[`tokisync_waiting_${id}`];
+                        
                         EventBus.emit(EVT.LOG, {
                             msg: `❌ [배치 수동종료] [${item.episodeTitle}] 자식 팝업이 종료되어 복구를 단행합니다.`,
                             tag: 'Queue',
@@ -502,6 +513,9 @@ export function initBatchWorkerController() {
         }
         destroyWorkerSession(matchedId, 'collection_complete');
         console.log(`[WorkerController] 🧹 세션 정리 (수집완료): ${matchedId} → processingSlots=${processingSlots.size}`);
+        
+        // [v1.27.2] 안전 대기 플래그 정리 — 완료 시점
+        delete window[`tokisync_waiting_${matchedId}`];
 
         // [P0] 수집된 무거운 바이너리/본문 데이터는 영속 스토리지 대신 인메모리 캐시에 보관
         extractedDataCache.set(matchedId, {
@@ -822,7 +836,7 @@ export function initBatchWorkerController() {
                         return;
                     }
 
-                    console.log(`[WorkerController] 📢 [배치] 안전 대기 완료 ️ START_EXTRACTION 주입 (ID: ${matchedId})`);
+                    console.log(`[WorkerController] 📢 [배치] 안전 대기 완료 ➡️ START_EXTRACTION 주입 (ID: ${matchedId})`);
                     
                     const sessionToken = getSessionToken(matchedId);
                     sendToWorker(sourceEvent.source, 'START_EXTRACTION', {
@@ -843,8 +857,8 @@ export function initBatchWorkerController() {
                         sessionNonce: sessionToken
                     }, sessionToken);
                     
-                    // [v1.27.1] START_EXTRACTION 주입 완료 후 플래그 해제 — 다음 READY가 새 사이클 시작 가능
-                    delete window[`tokisync_waiting_${matchedId}`];
+                    // [v1.27.2] 플래그는 START_EXTRACTION 후에도 유지 — 워커 완료/실패 시점에 정리
+                    // 자식이 START_EXTRACTION을 받고도 재전송하는 READY로 인한 중복 사이클 차단
                 }
             } else {
                 console.warn('[WorkerController] [배치] WORKER_READY 수신했으나 매칭되는 활성 세션을 찾지 못했습니다.', targetUrl);
@@ -1029,17 +1043,11 @@ export function initBatchWorkerController() {
             if (matchedId) {
                 console.error(`[WorkerController] ❌ [배치] 수집 실패 (ID: ${matchedId}): ${errorMsg}`);
                 
-                const failedToken = getSessionToken(matchedId);
-                if (failedToken) {
-                    removeWorkerOrigin(matchedId, failedToken);
-                }
-                destroyWorkerSession(matchedId, 'task_failed');
-                console.log(`[WorkerController] 🧹 세션 정리 (수집실패): ${matchedId} → processingSlots=${processingSlots.size}`);
-
                 const queue = getQueue();
                 const item = queue.find(i => i.id === matchedId);
+                
+                // [v1.27.2] 상태 업데이트 먼저 → 세션 정리 → 스케줄러 순서
                 if (item) {
-                    // [v1.21.8] 사용자의 정지 클릭으로 이미 failed로 빠졌는지 확인
                     const isStopped = item.status === 'failed' && item.errorMsg?.includes('중단');
                     const nextRetry = (item.retryCount || 0) + 1;
                     updateQueueItem(matchedId, {
@@ -1049,6 +1057,16 @@ export function initBatchWorkerController() {
                     });
                     EventBus.emit(EVT.UPDATE_PROGRESS);
                 }
+                
+                const sessionToken = getSessionToken(matchedId);
+                if (sessionToken) {
+                    removeWorkerOrigin(matchedId, sessionToken);
+                }
+                destroyWorkerSession(matchedId, 'task_failed');
+                console.log(`[WorkerController] 🧹 세션 정리 (수집패): ${matchedId} → processingSlots=${processingSlots.size}`);
+                
+                // [v1.27.2] 안전 대기 플래그 정리
+                delete window[`tokisync_waiting_${matchedId}`];
 
                 // 배치 최종 실패 마감 시 처리
                 const currentQueue = getQueue();
