@@ -17,10 +17,17 @@ export const WORKER_STAGE = {
 };
 
 const STORAGE_KEY = 'TOKI_DOWNLOAD_QUEUE';
-const MAX_CONCURRENCY = 2; // 최대 동시 다운로드 수
+const MAX_CONCURRENCY = 2; // 최대 동시 다운로드 수 (현재 직렬 처리로 고정)
 
 // 임시 팝업 창 참조 보관용 맵 (Liveness check 및 재활용 루프 대비)
 export const activeWorkers = new Map();
+
+// [v1.27.0] B+C 하이브리드: 처리 락 전담 Set (activeWorkers와 분리)
+export const processingSlots = new Set();
+
+// [v1.27.0] 세션 토큰 레지스트리: workerId -> {sessionToken, popupRef, createdAt, lastActivity}
+export const sessionRegistry = new Map();
+
 const closedCounts = new Map(); // Track closed counts for liveness check independently to avoid polluting activeWorkers window references
 
 // handleBatchSuccess 진행 중인 아이템 추적 (팝업은 닫혔지만 CBZ/업로드 진행 중)
@@ -71,6 +78,77 @@ function tokiHash(str) {
 export const getQueueItemId = (title, episodeNum) => {
   const hashPart = tokiHash(`${title}_${episodeNum}`);
   return `toki_${hashPart}`;
+};
+
+/**
+ * [v1.27.0] 워커 세션 생성: 팝업 열기 직후 호출
+ * - processingSlots에 락 등록
+ * - sessionRegistry에 메타데이터 저장
+ * - activeWorkers에 window 참조 등록 (하위 호환)
+ * @param {string} id Queue item ID
+ * @param {Window|null} popupRef Window reference (null이면 pre-open 단계)
+ * @param {string} sessionToken ipc-broker.registerWorkerOrigin에서 생성한 토큰
+ */
+export const createWorkerSession = (id, popupRef, sessionToken) => {
+  sessionRegistry.set(id, {
+    sessionToken,
+    popupRef: popupRef || null,
+    createdAt: Date.now(),
+    lastActivity: Date.now()
+  });
+  
+  processingSlots.add(id);
+  
+  if (popupRef) {
+    activeWorkers.set(id, popupRef);
+  }
+  
+  console.log(`[Queue] 🔐 세션 생성: ${id} → token=${sessionToken.substring(0, 8)}... (activeWorkers=${activeWorkers.size}, processingSlots=${processingSlots.size})`);
+};
+
+/**
+ * [v1.27.0] 워커 세션 삭제: 팝업 종료/완료/실패 시 호출
+ * @param {string} id Queue item ID
+ * @param {string} [reason] 삭제 사유 (로깅용)
+ */
+export const destroyWorkerSession = (id, reason = 'unknown') => {
+  sessionRegistry.delete(id);
+  processingSlots.delete(id);
+  activeWorkers.delete(id);
+  closedCounts.delete(id);
+  
+  console.log(`[Queue] 🗑️ 세션 삭제: ${id} (reason=${reason}) → activeWorkers=${activeWorkers.size}, processingSlots=${processingSlots.size}`);
+};
+
+/**
+ * [v1.27.0] 세션 토큰 조회
+ */
+export const getSessionToken = (id) => {
+  const session = sessionRegistry.get(id);
+  return session?.sessionToken || null;
+};
+
+/**
+ * [v1.27.0] 세션 활성 시간 갱신
+ */
+export const touchSessionActivity = (id) => {
+  const session = sessionRegistry.get(id);
+  if (session) {
+    session.lastActivity = Date.now();
+  }
+};
+
+/**
+ * [v1.27.0] 세션의 popupRef 갱신 (pre-open → 실제 연결 전이 시)
+ */
+export const updateSessionPopupRef = (id, popupRef) => {
+  const session = sessionRegistry.get(id);
+  if (session) {
+    session.popupRef = popupRef;
+  }
+  if (popupRef) {
+    activeWorkers.set(id, popupRef);
+  }
 };
 
 
@@ -184,7 +262,6 @@ export const removeQueueItem = (id) => {
   const index = queue.findIndex(item => item.id === id);
   if (index !== -1) {
     const item = queue[index];
-    // 진행 중인 워커인 경우 팝업 즉시 강제 폐쇄 및 맵에서 삭제
     if (item.status === 'processing') {
       const popupRef = activeWorkers.get(id);
       try {
@@ -194,8 +271,7 @@ export const removeQueueItem = (id) => {
       } catch (e) {
         console.warn(`[Queue] 개별 삭제 중 자식 팝업 close 실패: ${id}`, e);
       }
-      activeWorkers.delete(id);
-      closedCounts.delete(id);
+      destroyWorkerSession(id, 'item_removed');
     }
     
     const filtered = queue.filter(q => q.id !== id);
@@ -291,7 +367,6 @@ export const setQueuePaused = (paused) => {
 export const stopAllWorkers = (shouldClear = false) => {
   console.log(`[Queue] ⏹️ 모든 활성 자식 팝업 강제 폐쇄 및 수집 중단 집행... (초기화 여부: ${shouldClear})`);
   
-  // 1. 모든 팝업 창 닫기 (EMERGENCY_STOP 전파 후 100ms 대기)
   for (const [id, popupRef] of activeWorkers.entries()) {
     try {
       if (popupRef && !popupRef.closed) {
@@ -311,6 +386,8 @@ export const stopAllWorkers = (shouldClear = false) => {
   }
   activeWorkers.clear();
   closedCounts.clear();
+  processingSlots.clear();
+  sessionRegistry.clear();
 
   // 2. 큐 대기열 전체 청소 및 중단 마킹 (1회성 트랜잭션 병합으로 레이스 컨디션 제거)
   if (shouldClear) {
@@ -359,11 +436,11 @@ export const runSchedulerOnce = async () => {
     return;
   }
   if (isSchedulerRunning) {
-    console.log(`[Queue Scheduler] 🔄 runSchedulerOnce 중복진입 차단 (activeWorkers=${activeWorkers.size})`);
+    console.log(`[Queue Scheduler] 🔄 runSchedulerOnce 중복진입 차단 (processingSlots=${processingSlots.size})`);
     return;
   }
   isSchedulerRunning = true;
-  console.log(`[Queue Scheduler] 🔍 runSchedulerOnce 진입 (activeWorkers=${activeWorkers.size}, _activeProcessing=${_activeProcessing.size}, queue_statuses=[${getRawQueue().map(i=>i.status).join(',')}])`);
+  console.log(`[Queue Scheduler] 🔍 runSchedulerOnce 진입 (processingSlots=${processingSlots.size}, _activeProcessing=${_activeProcessing.size}, queue_statuses=[${getRawQueue().map(i=>i.status).join(',')}])`);
 
   try {
     const queue = getRawQueue();
@@ -371,15 +448,12 @@ export const runSchedulerOnce = async () => {
     // Liveness Check: 실제 열려있는 팝업 중 닫힌 팝업이 있는지 감지하여 failed 전이
     for (const [id, popupRef] of activeWorkers.entries()) {
       if (popupRef && popupRef.closed) {
-        // 일시적인 closed 레이스 컨디션 방지를 위한 유예 카운트 (연속 3회 감지 시 강제 폐쇄 확정)
         const closedCount = (closedCounts.get(id) || 0) + 1;
         closedCounts.set(id, closedCount);
 
         if (closedCount >= 3) {
           console.warn(`[Queue Scheduler] ⚠️ 자식 팝업 비정상 종료 확정 (연속 3회 감지): ${id} → activeWorkers 크기=${activeWorkers.size}`);
-          activeWorkers.delete(id);
-          console.log(`[Queue Scheduler] 🧹 activeWorkers 삭제 (close#3): ${id} → size=${activeWorkers.size}`);
-          closedCounts.delete(id);
+          destroyWorkerSession(id, 'popup_closed_3x');
           const item = queue.find(i => i.id === id);
           if (item && item.status === 'processing') {
             const nextRetry = item.retryCount + 1;
@@ -393,13 +467,12 @@ export const runSchedulerOnce = async () => {
           console.log(`[Queue Scheduler] 🛡️ 자식 팝업 일시적 closed 감지 유예 중 (${closedCount}/3): ${id}`);
         }
       } else {
-        // 정상 기동 확인 시 유예 카운터 즉시 리셋
         closedCounts.set(id, 0);
       }
     }
 
-    // 1. 현재 수집 중인 활성 팝업(activeWorkers) 또는 진행 중인 작업(_activeProcessing) 제약
-    if (activeWorkers.size >= 1 || _activeProcessing.size >= 1) {
+    // 1. 현재 수집 중인 활성 팝업(processingSlots) 또는 진행 중인 작업(_activeProcessing) 제약
+    if (processingSlots.size >= 1 || _activeProcessing.size >= 1) {
       isSchedulerRunning = false;
       return;
     }
@@ -414,7 +487,6 @@ export const runSchedulerOnce = async () => {
     // 3. pending(대기 중) 상태인 첫 번째 에피소드 추출
     const nextItem = queue.find(item => item.status === 'pending');
     if (!nextItem) {
-      // 대기 중인 작업도 없고 현재 진행 중인 활성 작업도 없다면 안티 슬립 오디오를 정지시킵니다.
       if (currentProcessing.length === 0) {
         try {
           stopSilentAudio();
@@ -424,9 +496,9 @@ export const runSchedulerOnce = async () => {
       return;
     }
 
-    // [v1.21.4] 안전 장치: 이미 activeWorkers가 점유하고 있는 아이템이라면 중복 기동 방지 스킵
-    if (activeWorkers.has(nextItem.id)) {
-      console.log(`[Queue Scheduler] 🛡️ 중복 기동 우회: activeWorkers에 이미 점유된 에피소드 스킵: ${nextItem.episodeTitle}`);
+    // [v1.21.4] 안전 장치: 이미 processingSlots이 점유하고 있는 아이템이라면 중복 기동 방지 스킵
+    if (processingSlots.has(nextItem.id)) {
+      console.log(`[Queue Scheduler] 🛡️ 중복 기동 우회: processingSlots에 이미 점유된 에피소드 스킵: ${nextItem.episodeTitle}`);
       isSchedulerRunning = false;
       return;
     }
@@ -434,7 +506,6 @@ export const runSchedulerOnce = async () => {
     // 4. 인간 행동 모사를 위한 2.0초~4.0초 랜덤 지연 완충
     console.log(`[Queue Scheduler] 🛡️ 안전 지연 대기 시작 (Target: ${nextItem.episodeTitle})`);
     
-    // 배치 수집 기동을 위해 안티 슬립 기동
     try {
       startSilentAudio();
     } catch (e) {}
@@ -451,27 +522,35 @@ export const runSchedulerOnce = async () => {
     }
 
     // 5. 최종 가드: 아직 처리 중인 작업이 있거나 활성 팝업이 있으면 기동 취소
-    if (_activeProcessing.size >= 1 || activeWorkers.size >= 1) {
-      console.log(`[Queue Scheduler] 🛡️ 활성 처리/팝업 감지로 기동 취소: ${nextItem.episodeTitle} (activeProcessing=${_activeProcessing.size}, activeWorkers=${activeWorkers.size})`);
+    if (_activeProcessing.size >= 1 || processingSlots.size >= 1) {
+      console.log(`[Queue Scheduler] 🛡️ 활성 처리/팝업 감지로 기동 취소: ${nextItem.episodeTitle} (activeProcessing=${_activeProcessing.size}, processingSlots=${processingSlots.size})`);
       isSchedulerRunning = false;
       return;
     }
 
     // 6. 팝업 실행 및 상태 갱신
-    console.log(`[Queue Scheduler] 🚀 1회성 신규 팝업 기동: ${nextItem.episodeTitle} (${nextItem.episodeUrl}), 현재 activeWorkers=${activeWorkers.size}, _activeProcessing=${_activeProcessing.size}`);
+    console.log(`[Queue Scheduler] 🚀 1회성 신규 팝업 기동: ${nextItem.episodeTitle} (${nextItem.episodeUrl}), 현재 processingSlots=${processingSlots.size}, _activeProcessing=${_activeProcessing.size}`);
     
-    // [v1.26.6] activeWorkers를 updateQueueItem보다 먼저 선점하여 GM 리스너와의 레이스 차단
-    console.log(`[Queue Scheduler] 🔒 activeWorkers 선점: ${nextItem.episodeTitle} (ID: ${nextItem.id})`);
-    activeWorkers.set(nextItem.id, null);
+    // [v1.27.0] processingSlots 선점 → updateQueueItem → 팝업 생성 순서로 레이스 컨디션 차단
+    console.log(`[Queue Scheduler] 🔒 processingSlots 선점: ${nextItem.episodeTitle} (ID: ${nextItem.id})`);
+    processingSlots.add(nextItem.id);
     updateQueueItem(nextItem.id, { status: 'processing', startedAt: Date.now() });
     
     const popupRef = openEpisodePopup(nextItem.episodeUrl, nextItem.id);
     if (popupRef) {
         activeWorkers.set(nextItem.id, popupRef);
+        // 세션 토큰은 worker-controller에서 IPC 연결 시 등록
+        sessionRegistry.set(nextItem.id, {
+          sessionToken: null, // WORKER_READY 매칭 시 ipc-broker에서 생성
+          popupRef,
+          createdAt: Date.now(),
+          lastActivity: Date.now()
+        });
         console.log(`[Queue Scheduler] ✅ 팝업 등록 완료: ${nextItem.episodeTitle} (ID: ${nextItem.id}, activeWorkers.size=${activeWorkers.size})`);
     } else {
         console.log(`[Queue Scheduler] 🧹 activeWorkers 해제 (팝업 실패): ${nextItem.id}`);
-        activeWorkers.delete(nextItem.id);
+        processingSlots.delete(nextItem.id);
+        sessionRegistry.delete(nextItem.id);
         updateQueueItem(nextItem.id, { 
             status: 'failed', 
             errorMsg: '브라우저 팝업 차단막에 의해 창 생성에 실패했습니다.' 
@@ -548,6 +627,8 @@ export const initQueueScheduler = () => {
         }
         activeWorkers.clear();
         closedCounts.clear();
+        processingSlots.clear();
+        sessionRegistry.clear();
       }
     });
     console.log('[TokiSync Queue] 🚦 이벤트 기반(Event-Driven) 고성능 스케줄러가 활성화되었습니다.');
@@ -576,6 +657,8 @@ export const initQueueScheduler = () => {
         }
         activeWorkers.clear();
         closedCounts.clear();
+        processingSlots.clear();
+        sessionRegistry.clear();
       }
     }, 1000);
     console.warn('[TokiSync Queue] ⚠️ GM_addValueChangeListener 미지원 환경. 2초 폴링 스케줄러로 기동합니다.');

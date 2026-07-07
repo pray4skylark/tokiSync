@@ -14,13 +14,16 @@ import { startSilentAudio, stopSilentAudio } from './anti_sleep.js';
 let isWorkerExtractorInitialized = false;
 let workerIpcCleanup = null;
 
+// [v1.27.0] 세션 토큰 저장 (부모로부터 수신)
+let _sessionToken = null;
+
 // Define localized stage reporting helper
 function reportProgress(queueId, percent, stage) {
-    // Send lightweight progress update to parent UI
     sendToParent('WORKER_PROGRESS', {
         queueId,
         percent: Math.min(100, Math.max(0, Math.round(percent))),
-        stage
+        stage,
+        sessionToken: _sessionToken || null
     });
 }
 
@@ -42,7 +45,8 @@ export function initWorkerExtractor() {
         console.log("[TokiSync:Worker] 📢 READY 핸드셰이킹 하트비트 전송 중...");
         sendToParent('WORKER_READY', {
             targetUrl: window.location.href,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            sessionToken: _sessionToken || null
         });
     }, 1000);
 
@@ -71,6 +75,18 @@ export function initWorkerExtractor() {
             cleanupIpc();
             stopSilentAudio();
             window.close();
+            return;
+        }
+
+        // [v1.27.0] 세션 토큰 수신 처리
+        if (msg.type === 'SESSION_TOKEN') {
+            const { sessionToken } = msg.payload || {};
+            if (sessionToken) {
+                _sessionToken = sessionToken;
+                console.log(`[TokiSync:Worker] 🔑 세션 토큰 수신: ${sessionToken.substring(0, 8)}...`);
+                // 부모에게 ACK 전송
+                sendToParent('SESSION_TOKEN_ACK', { sessionToken });
+            }
             return;
         }
 
@@ -508,8 +524,7 @@ export function initWorkerExtractor() {
 
                 } catch (err) {
                     console.error(`[TokiSync:Worker] ❌ 에피소드 수집 중 치명적 오류 발생:`, err);
-                    // Notify parent that task failed
-                    sendToParent('TASK_FAILED', { queueId, errorMsg: err.message });
+                    sendToParent('TASK_FAILED', { queueId, errorMsg: err.message, sessionToken: _sessionToken });
                     closeSelf();
                 }
             }

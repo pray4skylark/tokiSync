@@ -1,5 +1,5 @@
 import { EventBus, EVT } from './EventBus.js';
-import { addEpisodesToQueue, initQueueScheduler, activeWorkers, getQueue, clearQueue, getQueueItemId } from './queue.js';
+import { addEpisodesToQueue, initQueueScheduler, activeWorkers, processingSlots, sessionRegistry, getQueue, clearQueue, getQueueItemId } from './queue.js';
 import { initBatchWorkerController } from './worker-controller.js';
 import { CbzBuilder } from './cbz.js';
 import { getConfig } from './config.js';
@@ -705,6 +705,8 @@ test('멀티큐 자율 배치 스케줄러 시나리오가 Concurrency 한도를
         // 기존 큐 청소
         clearQueue();
         activeWorkers.clear();
+        processingSlots.clear();
+        sessionRegistry.clear();
 
         // 에피소드 3개 등록
         const novelTitle = '테스트소설';
@@ -810,6 +812,8 @@ test('멀티큐 자율 배치 스케줄러 시나리오가 Concurrency 한도를
         globalThis.setTimeout = backupSetTimeout;
         clearQueue();
         activeWorkers.clear();
+        processingSlots.clear();
+        sessionRegistry.clear();
     }
 });
 

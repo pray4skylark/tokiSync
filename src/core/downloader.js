@@ -13,7 +13,8 @@ import { startSilentAudio, stopSilentAudio } from './anti_sleep.js';
 import { fetchHistory, refreshCacheAfterUpload, getBooksByCacheId, initUpdateUploadViaGASRelay, getMergeIndexFragment } from './gas.js';
 import { fetchHistoryDirect, checkSingleHistoryDirect, getOAuthToken, getOrCreateFolder } from './network.js';
 import { fetchNovelText, fetchComicImages, closeActiveWorker, initBatchWorkerController } from './worker-controller.js';
-import { addEpisodesToQueue, initQueueScheduler, activeWorkers, WORKER_STAGE, updateQueueItem, getQueue, removeQueueItem, getQueueItemId, clearQueue, stopAllWorkers } from './queue.js';
+import { addEpisodesToQueue, initQueueScheduler, activeWorkers, WORKER_STAGE, updateQueueItem, getQueue, removeQueueItem, getQueueItemId, clearQueue, stopAllWorkers, processingSlots, sessionRegistry, createWorkerSession, destroyWorkerSession, getSessionToken } from './queue.js';
+import { registerWorkerOrigin } from './ipc-broker.js';
 
 async function shouldSkipEpisode({
     numStr,
@@ -156,8 +157,10 @@ export async function processItem(item, builder, siteInfo, iframe, parser, serie
             }
         }
     } finally {
-        // [H2] activeWorkers 정리 — 단일/배치 무관하게 항상 실행
+        // [H2] 세션 정리 — 단일/배치 무관하게 항상 실행
         activeWorkers.delete(id);
+        processingSlots.delete(id);
+        sessionRegistry.delete(id);
         
         // 단일 합본 및 배치 모드가 아닐 때만 즉시 큐 청소 (UI 지속 노출 보장)
         if (!isSingleVolume && buildingPolicy !== 'zipOfCbzs') {
@@ -634,9 +637,18 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                 );
 
                 if (popupRef) {
-                    console.log(`[Pre-open] 🔒 activeWorkers 등록: ${id} → size=${activeWorkers.size+1}`);
+                    // [v1.27.0] 세션 토큰 사전 발급 → URL fallback 매칭 보장
+                    const sessionToken = registerWorkerOrigin(id, 'null');
+                    processingSlots.add(id);
+                    sessionRegistry.set(id, {
+                        sessionToken,
+                        popupRef,
+                        createdAt: Date.now(),
+                        lastActivity: Date.now()
+                    });
                     activeWorkers.set(id, popupRef);
                     freshlyOpened.push(id);
+                    console.log(`[Pre-open] 🔐 세션 등록: ${id} → token=${sessionToken.substring(0, 8)}...`);
                 } else {
                     logger.error(`❌ [Pre-open #${i + 1}] 브라우저 차단으로 자식 창 확보에 실패하였습니다.`, 'Queue');
                 }

@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.27.0] - 2026-07-08
+
+### 🔒 B+C 하이브리드: 세션 토큰 기반 워커 라이프사이클 재설계
+- **근본 원인**: 직렬 큐 처리 중 4번째 워커가 9초 안전 대기 중 `activeWorkers` 항목 소실로 실패. `activeWorkers` Map이 윈도우 레지스트리 + 처리 락 역할을 동시 수행하며 삭제 경로가 10개 이상 존재.
+- **`src/core/queue.js`**:
+  - `processingSlots` Set 추가: 처리 락 전담 (activeWorkers와 분리)
+  - `sessionRegistry` Map 추가: 워커Id → {sessionToken, popupRef, createdAt, lastActivity}
+  - `createWorkerSession()`, `destroyWorkerSession()`, `getSessionToken()`, `touchSessionActivity()`, `updateSessionPopupRef()` 헬퍼 추가
+  - `runSchedulerOnce()`: `activeWorkers.size >= 1` → `processingSlots.size >= 1`로 락 체크 변경
+  - `stopAllWorkers()`: processingSlots, sessionRegistry 동시 정리
+- **`src/core/worker-controller.js`**:
+  - WORKER_READY 매칭 3단계: (1) 세션 토큰 매칭 → (2) Window 참조 매칭 → (3) URL 매칭
+  - URL fallback에서 `batchWorkerNonces.has()` 요구 제거 (chicken-and-egg 버그 수정)
+  - 모든 IPC 핸들러(WORKER_PROGRESS, WORKER_LOG, CAPTCHA_DETECTED, TASK_FAILED, TASK_COMPLETED_FALLBACK)에 세션 토큰 매칭 추가
+  - `batchWorkerNonces` Map 제거 → `sessionRegistry` 통합
+  - `destroyWorkerSession()` 호출로 모든 삭제 경로 통합 + 원인 로깅
+- **`src/core/ipc-broker.js`**:
+  - `deliverSessionToken()`: 팝업에 세션 토큰 전달 + ACK 대기 (재시도 포함)
+  - `getWorkerIdByNonce()`: nonce → workerId 역조회
+- **`src/core/downloader.js`**:
+  - Pre-open 시 `registerWorkerOrigin()`으로 세션 토큰 사전 발급 → URL fallback 매칭 보장
+  - `processingSlots`, `sessionRegistry` 동시 등록
+- **`src/core/worker-extractor.js`**:
+  - WORKER_READY, WORKER_PROGRESS, TASK_FAILED에 `sessionToken` 필드 추가
+  - `SESSION_TOKEN` 메시지 핸들러 + `SESSION_TOKEN_ACK` 응답
+
+### 🐛 WORKER_READY 중복 처리 버그 수정
+- **근본 원인**: `finally` 블록에서 `tokisync_waiting_${id}` 플래그가 9초 대기 직후 즉시 삭제되어, 다음 WORKER_READY(1초 간격)가 중복 가드를 통과하며 동일 ID로 4개의 안전 대기(36초)가 중첩 실행됨.
+- **`src/core/worker-controller.js`**: 플래그 삭제를 `finally`에서 post-wait 체크 + START_EXTRACTION 주입 완료 후로 이동. 전체 핸들러 종료 시까지 플래그 유지.
+- **검증**: `npm run test` 30/30 Pass, `npm run build:core` 성공
+
 ## [v1.26.8] - 2026-07-07
 
 ### 🐛 에피소드 정렬 버그 수정
