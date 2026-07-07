@@ -640,11 +640,13 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                     // [v1.27.0] 세션 토큰 사전 발급 → URL fallback 매칭 보장
                     const sessionToken = registerWorkerOrigin(id, 'null');
                     processingSlots.add(id);
+                    const qItem = getQueue().find(i => i.id === id);
                     sessionRegistry.set(id, {
                         sessionToken,
                         popupRef,
                         createdAt: Date.now(),
-                        lastActivity: Date.now()
+                        lastActivity: Date.now(),
+                        queueItemRef: qItem || null
                     });
                     activeWorkers.set(id, popupRef);
                     freshlyOpened.push(id);

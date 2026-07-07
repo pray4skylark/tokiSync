@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.27.2] - 2026-07-08
+
+###  touchSessionActivity 버그 수정 + 방어선 강화
+- **근본 원인**: `touchSessionActivity`가 `sessionRegistry`만 갱신하고 큐 아이템의 `lastActivity`는 갱신하지 않아, READY 하트비트(1초)가 들어와도 타임아웃 감시기(60초)가 리셋되지 않음 → 타임아웃 → 세션 정리 → 스케줄러가 중복 팝업 개방.
+- **`src/core/queue.js`**:
+  - `touchSessionActivity()`: 큐 아이템 `lastActivity`도 직접 갱신. 인메모리 캐시(`queueItemRef`) 추가로 `find()` 최적화.
+  - `createWorkerSession()` / `runSchedulerOnce()` / 모든 `sessionRegistry.set` 호출에 `queueItemRef` 추가
+  - 좀비 팝업 가드: `runSchedulerOnce()` 마지막 단계에서 동일 ID 팝업의 `closed` 상태 확인 → 생존 시 중복 기동 차단
+  - `assertConsistent()`: `processingSlots.size`와 `sessionRegistry.size` 불일치 감지 어서션
+- **`src/core/downloader.js`**: Pre-open 세션 등록에 `queueItemRef` 추가
+- **`src/core/worker-controller.js`**: URL 매칭 폴백 세션 등록에 `queueItemRef` 추가
+- **검증**: `npm run test` 30/30 Pass, `npm run build:core` 성공
+
 ## [v1.27.1] - 2026-07-08
 
 ### 🐛 WORKER_READY 중복 사이클 + 레이스 컨디션 수정

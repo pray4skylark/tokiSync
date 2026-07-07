@@ -81,6 +81,15 @@ export const getQueueItemId = (title, episodeNum) => {
 };
 
 /**
+ * [v1.27.2] 디버그 일관성 검증: processingSlots와 sessionRegistry 동기화 확인
+ */
+const assertConsistent = (context = '') => {
+  if (processingSlots.size !== sessionRegistry.size) {
+    console.warn(`[Queue] ⚠️ 상태 불일치 감지 (${context}): processingSlots=${processingSlots.size} != sessionRegistry=${sessionRegistry.size}`);
+  }
+};
+
+/**
  * [v1.27.0] 워커 세션 생성: 팝업 열기 직후 호출
  * - processingSlots에 락 등록
  * - sessionRegistry에 메타데이터 저장
@@ -90,11 +99,16 @@ export const getQueueItemId = (title, episodeNum) => {
  * @param {string} sessionToken ipc-broker.registerWorkerOrigin에서 생성한 토큰
  */
 export const createWorkerSession = (id, popupRef, sessionToken) => {
+  // 큐 아이템 참조 캐시 (touchSessionActivity 최적화)
+  const queue = getRawQueue();
+  const item = queue.find(i => i.id === id);
+  
   sessionRegistry.set(id, {
     sessionToken,
     popupRef: popupRef || null,
     createdAt: Date.now(),
-    lastActivity: Date.now()
+    lastActivity: Date.now(),
+    queueItemRef: item || null
   });
   
   processingSlots.add(id);
@@ -103,7 +117,8 @@ export const createWorkerSession = (id, popupRef, sessionToken) => {
     activeWorkers.set(id, popupRef);
   }
   
-  console.log(`[Queue] 🔐 세션 생성: ${id} → token=${sessionToken.substring(0, 8)}... (activeWorkers=${activeWorkers.size}, processingSlots=${processingSlots.size})`);
+  assertConsistent('createWorkerSession');
+  console.log(`[Queue]  세션 생성: ${id} → token=${sessionToken.substring(0, 8)}... (activeWorkers=${activeWorkers.size}, processingSlots=${processingSlots.size})`);
 };
 
 /**
@@ -117,6 +132,7 @@ export const destroyWorkerSession = (id, reason = 'unknown') => {
   activeWorkers.delete(id);
   closedCounts.delete(id);
   
+  assertConsistent('destroyWorkerSession');
   console.log(`[Queue] 🗑️ 세션 삭제: ${id} (reason=${reason}) → activeWorkers=${activeWorkers.size}, processingSlots=${processingSlots.size}`);
 };
 
@@ -130,11 +146,26 @@ export const getSessionToken = (id) => {
 
 /**
  * [v1.27.0] 세션 활성 시간 갱신
+ * 큐 아이템의 lastActivity도 동기 갱신 (타임아웃 감시 기준값)
  */
 export const touchSessionActivity = (id) => {
   const session = sessionRegistry.get(id);
   if (session) {
     session.lastActivity = Date.now();
+  }
+  // [v1.27.2] 큐 아이템의 lastActivity에 직접 갱신 (GM write 불필요)
+  if (session?.queueItemRef) {
+    session.queueItemRef.lastActivity = Date.now();
+  } else {
+    // 폴백: 큐에서 find하여 갱신
+    const queue = getRawQueue();
+    const item = queue.find(i => i.id === id);
+    if (item) {
+      item.lastActivity = Date.now();
+      if (session) {
+        session.queueItemRef = item; // 캐시: 다음 호출부터 find 없이 직접 갱신
+      }
+    }
   }
 };
 
@@ -441,6 +472,7 @@ export const runSchedulerOnce = async () => {
   }
   isSchedulerRunning = true;
   console.log(`[Queue Scheduler] 🔍 runSchedulerOnce 진입 (processingSlots=${processingSlots.size}, _activeProcessing=${_activeProcessing.size}, queue_statuses=[${getRawQueue().map(i=>i.status).join(',')}])`);
+  assertConsistent('runSchedulerOnce');
 
   try {
     const queue = getRawQueue();
@@ -528,6 +560,19 @@ export const runSchedulerOnce = async () => {
       return;
     }
 
+    // [v1.27.2] 좀비 팝업 가드: 동일 ID의 팝업이 아직 살아있는지 확인
+    const zombiePopup = activeWorkers.get(nextItem.id);
+    if (zombiePopup) {
+      const actualRef = zombiePopup.ref || zombiePopup;
+      if (actualRef && !actualRef.closed) {
+        console.warn(`[Queue Scheduler] ⚠️ 기존 팝업 생존 확인 → 중복 기동 차단: ${nextItem.id}`);
+        isSchedulerRunning = false;
+        return;
+      }
+      console.log(`[Queue Scheduler] 🧹 좀비 팝업 참조 정리 (closed): ${nextItem.id}`);
+      activeWorkers.delete(nextItem.id);
+    }
+
     // 6. 팝업 실행 및 상태 갱신
     console.log(`[Queue Scheduler] 🚀 1회성 신규 팝업 기동: ${nextItem.episodeTitle} (${nextItem.episodeUrl}), 현재 processingSlots=${processingSlots.size}, _activeProcessing=${_activeProcessing.size}`);
     
@@ -537,14 +582,15 @@ export const runSchedulerOnce = async () => {
     updateQueueItem(nextItem.id, { status: 'processing', startedAt: Date.now() });
     
     const popupRef = openEpisodePopup(nextItem.episodeUrl, nextItem.id);
-    if (popupRef) {
+        if (popupRef) {
         activeWorkers.set(nextItem.id, popupRef);
         // 세션 토큰은 worker-controller에서 IPC 연결 시 등록
         sessionRegistry.set(nextItem.id, {
           sessionToken: null, // WORKER_READY 매칭 시 ipc-broker에서 생성
           popupRef,
           createdAt: Date.now(),
-          lastActivity: Date.now()
+          lastActivity: Date.now(),
+          queueItemRef: nextItem // 큐 배열 참조 (touchSessionActivity 최적화)
         });
         console.log(`[Queue Scheduler] ✅ 팝업 등록 완료: ${nextItem.episodeTitle} (ID: ${nextItem.id}, activeWorkers.size=${activeWorkers.size})`);
     } else {

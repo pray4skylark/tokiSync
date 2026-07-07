@@ -788,7 +788,8 @@ export function initBatchWorkerController() {
                             sessionToken: token,
                             popupRef: sourceEvent.source,
                             createdAt: Date.now(),
-                            lastActivity: Date.now()
+                            lastActivity: Date.now(),
+                            queueItemRef: matchedItem
                         });
                         console.log(`[WorkerController] 🔐 [배치] URL 매칭으로 세션 토큰 신규 생성: ${matchedItem.id}`);
                     }
