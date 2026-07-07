@@ -4,7 +4,7 @@
  */
 
 import { fetchNovelTextViaApi } from './novel-decryptor.js';
-import { registerIpcListener, sendToWorker, registerWorkerOrigin, removeWorkerOrigin, validateNonce, getWorkerIdByNonce, deliverSessionToken } from './ipc-broker.js';
+import { registerIpcListener, sendToWorker, registerWorkerOrigin, removeWorkerOrigin, validateNonce, getWorkerIdByNonce } from './ipc-broker.js';
 import { updateQueueItem, WORKER_STAGE, activeWorkers, getQueue, runSchedulerOnce, getQueuePaused, _activeProcessing, processingSlots, sessionRegistry, destroyWorkerSession, getSessionToken, touchSessionActivity, updateSessionPopupRef } from './queue.js';
 import { EventBus, EVT } from './EventBus.js';
 import { getConfig, SLEEP_MULTIPLIERS } from './config.js';
@@ -388,7 +388,10 @@ export function initBatchWorkerController() {
 
         // 1. 60초(업로드 중인 경우 5분) 이상 무반응인 워커 강제 타임아웃 회수
         queue.forEach(item => {
-            const lastActive = item.lastActivity || item.startedAt;
+            // [v1.27.3] sessionRegistry.lastActivity를 우선 참조 (touchSessionActivity로 갱신되는 최신값)
+            const sessionEntry = sessionRegistry.get(item.id);
+            const sessionLastActive = sessionEntry?.lastActivity;
+            const lastActive = sessionLastActive || item.lastActivity || item.startedAt;
             if (item.status === 'processing' && lastActive) {
                 const isUploading = (item.stage === WORKER_STAGE.UPLOADING);
                 const limit = isUploading ? 300000 : 60000;
@@ -828,7 +831,7 @@ export function initBatchWorkerController() {
                     
                     await new Promise(r => setTimeout(r, initialDelay));
                     
-                    // [v1.27.1] 대기 완료 후 중단 여부 재체크 — 플래그는 전체 핸들러 종료 시점에 삭제
+                    // [v1.27.1] 대기 완료 후 중단 여부 재체크
                     const freshQueue = getQueue();
                     const freshItem = freshQueue.find(i => i.id === matchedId);
                     if (!freshItem || freshItem.status !== 'processing' || getQueuePaused()) {
@@ -837,7 +840,7 @@ export function initBatchWorkerController() {
                         return;
                     }
 
-                    console.log(`[WorkerController] 📢 [배치] 안전 대기 완료 ➡️ START_EXTRACTION 주입 (ID: ${matchedId})`);
+                    console.log(`[WorkerController] [배치] 안전 대기 완료 START_EXTRACTION 주입 (ID: ${matchedId})`);
                     
                     const sessionToken = getSessionToken(matchedId);
                     sendToWorker(sourceEvent.source, 'START_EXTRACTION', {
@@ -856,10 +859,12 @@ export function initBatchWorkerController() {
                         speedMultiplier: multiplier,
                         localNameTemplate: config.localNameTemplate || "{number:4} - {title}",
                         sessionNonce: sessionToken
-                    }, sessionToken);
+                    });
+                    // [v1.27.3] sendToWorker에 nonce 미포함: 자식의 _activeNonces는 항상 비어있어
+                    // 메시지가 Blocked 되기 때문. sessionNonce는 payload로만 전달되어
+                    // 자식이 TASK_COMPLETED/TASK_FAILED의 child->parent nonce로 재사용.
                     
                     // [v1.27.2] 플래그는 START_EXTRACTION 후에도 유지 — 워커 완료/실패 시점에 정리
-                    // 자식이 START_EXTRACTION을 받고도 재전송하는 READY로 인한 중복 사이클 차단
                 }
             } else {
                 console.warn('[WorkerController] [배치] WORKER_READY 수신했으나 매칭되는 활성 세션을 찾지 못했습니다.', targetUrl);

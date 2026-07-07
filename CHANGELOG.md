@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.27.3] - 2026-07-08
+
+###  Nonce 차단 버그 수정 (Pre-open 경로 START_EXTRACTION 전달 불가)
+- **근본 원인**: `sendToWorker('START_EXTRACTION', ..., sessionToken)`가 nonce를 메시지에 포함하여 전송했으나, 자식의 `_activeNonces`는 항상 비어있어 `validateNonce()`가 실패 → 메시지 차단. Pre-open 세션(실제 nonce 보유)만 영향받고, 스케줄러 경로(`sessionToken: null`)는 정상 동작.
+- **`src/core/worker-controller.js`**: `sendToWorker`의 nonce 인자 제거 (L859). `sessionNonce`는 payload로만 전달되어 자식이 child→parent IPC에서 재사용.
+- **`src/core/worker-controller.js`**: 타임아웃 핸들러가 `sessionRegistry.lastActivity`를 우선 참조하도록 변경. `touchSessionActivity`로 갱신되는 최신값이 타임아웃 오발 방지.
+- **`src/core/ipc-broker.js`**: `deliverSessionToken()` 데드코드 제거. `sendToWorker` 주석에 nonce 방향성 명시.
+- **`src/core/worker-extractor.js`**: `_sessionToken`, `SESSION_TOKEN` 핸들러, `token` 필드 in WORKER_READY/WORKER_PROGRESS/TASK_FAILED 제거 (전부 데드코드).
+- **검증**: `npm run test` 30/30 Pass, `npm run build:core` 성공
+
 ## [v1.27.2] - 2026-07-08
 
 ###  touchSessionActivity 버그 수정 + 방어선 강화

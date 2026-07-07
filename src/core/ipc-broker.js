@@ -88,69 +88,12 @@ export function getWorkerIdByNonce(nonce) {
 }
 
 /**
- * Deliver session token to child worker via postMessage with retry.
- * @param {Window} workerRef Reference to the worker popup
- * @param {string} token Session token to deliver
- * @param {number} [maxRetries=10] Maximum retry attempts
- * @param {number} [intervalMs=500] Retry interval in milliseconds
- * @returns {Promise<boolean>} Whether token was acknowledged
- */
-export function deliverSessionToken(workerRef, token, maxRetries = 10, intervalMs = 500) {
-    return new Promise((resolve) => {
-        let attempts = 0;
-        let ackCleanup = null;
-
-        const sendToken = () => {
-            attempts++;
-            if (!workerRef || workerRef.closed) {
-                console.warn(`[IPC:Broker] Session token delivery failed: worker closed (attempt ${attempts})`);
-                if (ackCleanup) ackCleanup();
-                resolve(false);
-                return;
-            }
-            try {
-                workerRef.postMessage({
-                    type: `${MSG_PREFIX}SESSION_TOKEN`,
-                    payload: { sessionToken: token },
-                    timestamp: Date.now()
-                }, '*');
-                console.log(`[IPC:Broker] Session token sent to worker (attempt ${attempts}/${maxRetries})`);
-            } catch (e) {
-                console.warn(`[IPC:Broker] Session token postMessage failed (attempt ${attempts}):`, e.message);
-            }
-            if (attempts >= maxRetries) {
-                console.warn(`[IPC:Broker] Session token delivery timed out after ${maxRetries} attempts`);
-                if (ackCleanup) ackCleanup();
-                resolve(false);
-            }
-        };
-
-        // Listen for SESSION_TOKEN_ACK from child
-        const ackHandler = (event) => {
-            if (!event.data || typeof event.data !== 'object') return;
-            const { type, payload } = event.data;
-            if (type === `${MSG_PREFIX}SESSION_TOKEN_ACK` && payload?.sessionToken === token) {
-                console.log(`[IPC:Broker] Session token acknowledged by worker`);
-                if (ackCleanup) ackCleanup();
-                clearTimeout(sendTimer);
-                resolve(true);
-            }
-        };
-
-        window.addEventListener('message', ackHandler);
-        ackCleanup = () => window.removeEventListener('message', ackHandler);
-
-        sendToken();
-        const sendTimer = setInterval(sendToken, intervalMs);
-    });
-}
-
-/**
  * Send message from Parent to Worker popup
  * @param {Window} workerRef Reference to the worker popup window
  * @param {string} type Message type (without prefix, e.g. 'START_EXTRACTION')
  * @param {Object} payload Metadata and payload
- * @param {string} [nonce] Session nonce for validation
+ * @param {string} [nonce] Session nonce for validation (NOTE: nonce는 부모→자식 방향에서는
+ *   사용되지 않음. 자식의 _activeNonces는 항상 비어있기 때문. payload 안에 sessionNonce로 전달.)
  */
 export function sendToWorker(workerRef, type, payload = {}, nonce) {
     if (!workerRef || workerRef.closed) {
