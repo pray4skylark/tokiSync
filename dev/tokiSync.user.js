@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.27.0
+// @version      1.27.3
 // @description  Toki series sites -> Google Drive syncing tool (Bundled)
 // @author       pray4skylark
 // @updateURL    https://pray4skylark.github.io/tokiSync/tokiSync.user.js
@@ -246,6 +246,15 @@ const getQueueItemId = (title, episodeNum) => {
 };
 
 /**
+ * [v1.27.2] 디버그 일관성 검증: processingSlots와 sessionRegistry 동기화 확인
+ */
+const assertConsistent = (context = '') => {
+  if (processingSlots.size !== sessionRegistry.size) {
+    console.warn(`[Queue] ⚠️ 상태 불일치 감지 (${context}): processingSlots=${processingSlots.size} != sessionRegistry=${sessionRegistry.size}`);
+  }
+};
+
+/**
  * [v1.27.0] 워커 세션 생성: 팝업 열기 직후 호출
  * - processingSlots에 락 등록
  * - sessionRegistry에 메타데이터 저장
@@ -255,11 +264,16 @@ const getQueueItemId = (title, episodeNum) => {
  * @param {string} sessionToken ipc-broker.registerWorkerOrigin에서 생성한 토큰
  */
 const createWorkerSession = (id, popupRef, sessionToken) => {
+  // 큐 아이템 참조 캐시 (touchSessionActivity 최적화)
+  const queue = getRawQueue();
+  const item = queue.find(i => i.id === id);
+  
   sessionRegistry.set(id, {
     sessionToken,
     popupRef: popupRef || null,
     createdAt: Date.now(),
-    lastActivity: Date.now()
+    lastActivity: Date.now(),
+    queueItemRef: item || null
   });
   
   processingSlots.add(id);
@@ -268,7 +282,8 @@ const createWorkerSession = (id, popupRef, sessionToken) => {
     activeWorkers.set(id, popupRef);
   }
   
-  console.log(`[Queue] 🔐 세션 생성: ${id} → token=${sessionToken.substring(0, 8)}... (activeWorkers=${activeWorkers.size}, processingSlots=${processingSlots.size})`);
+  assertConsistent('createWorkerSession');
+  console.log(`[Queue]  세션 생성: ${id} → token=${sessionToken.substring(0, 8)}... (activeWorkers=${activeWorkers.size}, processingSlots=${processingSlots.size})`);
 };
 
 /**
@@ -282,6 +297,7 @@ const destroyWorkerSession = (id, reason = 'unknown') => {
   activeWorkers.delete(id);
   closedCounts.delete(id);
   
+  assertConsistent('destroyWorkerSession');
   console.log(`[Queue] 🗑️ 세션 삭제: ${id} (reason=${reason}) → activeWorkers=${activeWorkers.size}, processingSlots=${processingSlots.size}`);
 };
 
@@ -295,11 +311,26 @@ const getSessionToken = (id) => {
 
 /**
  * [v1.27.0] 세션 활성 시간 갱신
+ * 큐 아이템의 lastActivity도 동기 갱신 (타임아웃 감시 기준값)
  */
 const touchSessionActivity = (id) => {
   const session = sessionRegistry.get(id);
   if (session) {
     session.lastActivity = Date.now();
+  }
+  // [v1.27.2] 큐 아이템의 lastActivity에 직접 갱신 (GM write 불필요)
+  if (session?.queueItemRef) {
+    session.queueItemRef.lastActivity = Date.now();
+  } else {
+    // 폴백: 큐에서 find하여 갱신
+    const queue = getRawQueue();
+    const item = queue.find(i => i.id === id);
+    if (item) {
+      item.lastActivity = Date.now();
+      if (session) {
+        session.queueItemRef = item; // 캐시: 다음 호출부터 find 없이 직접 갱신
+      }
+    }
   }
 };
 
@@ -606,6 +637,7 @@ const runSchedulerOnce = async () => {
   }
   isSchedulerRunning = true;
   console.log(`[Queue Scheduler] 🔍 runSchedulerOnce 진입 (processingSlots=${processingSlots.size}, _activeProcessing=${_activeProcessing.size}, queue_statuses=[${getRawQueue().map(i=>i.status).join(',')}])`);
+  assertConsistent('runSchedulerOnce');
 
   try {
     const queue = getRawQueue();
@@ -693,6 +725,19 @@ const runSchedulerOnce = async () => {
       return;
     }
 
+    // [v1.27.2] 좀비 팝업 가드: 동일 ID의 팝업이 아직 살아있는지 확인
+    const zombiePopup = activeWorkers.get(nextItem.id);
+    if (zombiePopup) {
+      const actualRef = zombiePopup.ref || zombiePopup;
+      if (actualRef && !actualRef.closed) {
+        console.warn(`[Queue Scheduler] ⚠️ 기존 팝업 생존 확인 → 중복 기동 차단: ${nextItem.id}`);
+        isSchedulerRunning = false;
+        return;
+      }
+      console.log(`[Queue Scheduler] 🧹 좀비 팝업 참조 정리 (closed): ${nextItem.id}`);
+      activeWorkers.delete(nextItem.id);
+    }
+
     // 6. 팝업 실행 및 상태 갱신
     console.log(`[Queue Scheduler] 🚀 1회성 신규 팝업 기동: ${nextItem.episodeTitle} (${nextItem.episodeUrl}), 현재 processingSlots=${processingSlots.size}, _activeProcessing=${_activeProcessing.size}`);
     
@@ -702,14 +747,15 @@ const runSchedulerOnce = async () => {
     updateQueueItem(nextItem.id, { status: 'processing', startedAt: Date.now() });
     
     const popupRef = openEpisodePopup(nextItem.episodeUrl, nextItem.id);
-    if (popupRef) {
+        if (popupRef) {
         activeWorkers.set(nextItem.id, popupRef);
         // 세션 토큰은 worker-controller에서 IPC 연결 시 등록
         sessionRegistry.set(nextItem.id, {
           sessionToken: null, // WORKER_READY 매칭 시 ipc-broker에서 생성
           popupRef,
           createdAt: Date.now(),
-          lastActivity: Date.now()
+          lastActivity: Date.now(),
+          queueItemRef: nextItem // 큐 배열 참조 (touchSessionActivity 최적화)
         });
         console.log(`[Queue Scheduler] ✅ 팝업 등록 완료: ${nextItem.episodeTitle} (ID: ${nextItem.id}, activeWorkers.size=${activeWorkers.size})`);
     } else {
@@ -2808,7 +2854,7 @@ ${tocNav}
 class RuleManager {
     // Built-in sample rules as fallback/templates (Offline Seeding)
     static get _version() {
-        return  true ? "1.27.0" : 0;
+        return  true ? "1.27.3" : 0;
     }
 
     static #builtInRules = [
@@ -3479,7 +3525,10 @@ function initBatchWorkerController() {
 
         // 1. 60초(업로드 중인 경우 5분) 이상 무반응인 워커 강제 타임아웃 회수
         queue.forEach(item => {
-            const lastActive = item.lastActivity || item.startedAt;
+            // [v1.27.3] sessionRegistry.lastActivity를 우선 참조 (touchSessionActivity로 갱신되는 최신값)
+            const sessionEntry = _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .sessionRegistry */ .a.get(item.id);
+            const sessionLastActive = sessionEntry?.lastActivity;
+            const lastActive = sessionLastActive || item.lastActivity || item.startedAt;
             if (item.status === 'processing' && lastActive) {
                 const isUploading = (item.stage === _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.UPLOADING);
                 const limit = isUploading ? 300000 : 60000;
@@ -3494,19 +3543,24 @@ function initBatchWorkerController() {
                             actualRef.close();
                         }
                     } catch (e) {}
-                    console.log(`[WorkerController] 🧹 activeWorkers 삭제 (타임아웃): ${item.id} → size=${_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.size-1}`);
-                    const timedOutToken = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getSessionToken */ .mj)(item.id);
-                    if (timedOutToken) {
-                        (0,_ipc_broker_js__WEBPACK_IMPORTED_MODULE_1__/* .removeWorkerOrigin */ .Re)(item.id, timedOutToken);
-                    }
-                    (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .destroyWorkerSession */ .NQ)(item.id, 'timeout');
-
+                    console.log(`[WorkerController]  activeWorkers 삭제 (타임아웃): ${item.id} → size=${_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.size-1}`);
+                    
+                    // [v1.27.2] 상태 업데이트 먼저 → 세션 정리 → 스케줄러 순서로 레이스 컨디션 차단
                     const nextRetry = (item.retryCount || 0) + 1;
                     (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .updateQueueItem */ .Gg)(item.id, {
                         status: nextRetry >= 3 ? 'failed' : 'pending',
                         retryCount: nextRetry,
                         errorMsg: `에피소드 ${isUploading ? '업로드' : '수집'} 처리 시간이 ${limitSec}초를 초과하여 타임아웃되었습니다.`
                     });
+                    
+                    const timedOutToken = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getSessionToken */ .mj)(item.id);
+                    if (timedOutToken) {
+                        (0,_ipc_broker_js__WEBPACK_IMPORTED_MODULE_1__/* .removeWorkerOrigin */ .Re)(item.id, timedOutToken);
+                    }
+                    (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .destroyWorkerSession */ .NQ)(item.id, 'timeout');
+                    
+                    // [v1.27.2] 안전 대기 플래그 정리 — 타임아웃 시점
+                    delete window[`tokisync_waiting_${item.id}`];
 
                     _EventBus_js__WEBPACK_IMPORTED_MODULE_3__/* .EventBus */ .l.emit(_EventBus_js__WEBPACK_IMPORTED_MODULE_3__/* .EVT */ .c.LOG, {
                         msg: `❌ [배치 타임아웃] [${item.episodeTitle}] ${isUploading ? '업로드' : '수집'} 시간 초과(${limitSec}초). 복구를 단행합니다.`,
@@ -3528,12 +3582,7 @@ function initBatchWorkerController() {
                 if (closedCount >= 5) {
                     console.warn(`[WorkerController] ⚠️ [배치] 자식 팝업 수동 종료 확정: ${id} → activeWorkers.size=${_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .activeWorkers */ .mR.size}`);
                     batchClosedCounts.delete(id);
-                    const manualToken = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getSessionToken */ .mj)(id);
-                    if (manualToken) {
-                        (0,_ipc_broker_js__WEBPACK_IMPORTED_MODULE_1__/* .removeWorkerOrigin */ .Re)(id, manualToken);
-                    }
-                    (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .destroyWorkerSession */ .NQ)(id, 'manual_close');
-
+                    
                     const item = queue.find(i => i.id === id);
                     if (item && item.status === 'processing') {
                         if (item.stage === _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.UPLOADING || item.stage === _queue_js__WEBPACK_IMPORTED_MODULE_2__/* .WORKER_STAGE */ .WB.COMPLETED) {
@@ -3541,12 +3590,23 @@ function initBatchWorkerController() {
                             return;
                         }
 
+                        // [v1.27.2] 상태 업데이트 먼저 → 세션 정리 → 스케줄러 순서
                         const nextRetry = (item.retryCount || 0) + 1;
                         (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .updateQueueItem */ .Gg)(id, {
                             status: nextRetry >= 3 ? 'failed' : 'pending',
                             retryCount: nextRetry,
                             errorMsg: '자식 팝업 창이 비정상적으로 강제 종료되었습니다.'
                         });
+                        
+                        const manualToken = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getSessionToken */ .mj)(id);
+                        if (manualToken) {
+                            (0,_ipc_broker_js__WEBPACK_IMPORTED_MODULE_1__/* .removeWorkerOrigin */ .Re)(id, manualToken);
+                        }
+                        (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .destroyWorkerSession */ .NQ)(id, 'manual_close');
+                        
+                        // [v1.27.2] 안전 대기 플래그 정리
+                        delete window[`tokisync_waiting_${id}`];
+                        
                         _EventBus_js__WEBPACK_IMPORTED_MODULE_3__/* .EventBus */ .l.emit(_EventBus_js__WEBPACK_IMPORTED_MODULE_3__/* .EVT */ .c.LOG, {
                             msg: `❌ [배치 수동종료] [${item.episodeTitle}] 자식 팝업이 종료되어 복구를 단행합니다.`,
                             tag: 'Queue',
@@ -3593,6 +3653,9 @@ function initBatchWorkerController() {
         }
         (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .destroyWorkerSession */ .NQ)(matchedId, 'collection_complete');
         console.log(`[WorkerController] 🧹 세션 정리 (수집완료): ${matchedId} → processingSlots=${_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .processingSlots */ .PG.size}`);
+        
+        // [v1.27.2] 안전 대기 플래그 정리 — 완료 시점
+        delete window[`tokisync_waiting_${matchedId}`];
 
         // [P0] 수집된 무거운 바이너리/본문 데이터는 영속 스토리지 대신 인메모리 캐시에 보관
         extractedDataCache.set(matchedId, {
@@ -3865,7 +3928,8 @@ function initBatchWorkerController() {
                             sessionToken: token,
                             popupRef: sourceEvent.source,
                             createdAt: Date.now(),
-                            lastActivity: Date.now()
+                            lastActivity: Date.now(),
+                            queueItemRef: matchedItem
                         });
                         console.log(`[WorkerController] 🔐 [배치] URL 매칭으로 세션 토큰 신규 생성: ${matchedItem.id}`);
                     }
@@ -3904,7 +3968,7 @@ function initBatchWorkerController() {
                     
                     await new Promise(r => setTimeout(r, initialDelay));
                     
-                    // [v1.27.1] 대기 완료 후 중단 여부 재체크 — 플래그는 전체 핸들러 종료 시점에 삭제
+                    // [v1.27.1] 대기 완료 후 중단 여부 재체크
                     const freshQueue = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getQueue */ .IS)();
                     const freshItem = freshQueue.find(i => i.id === matchedId);
                     if (!freshItem || freshItem.status !== 'processing' || (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getQueuePaused */ .kZ)()) {
@@ -3913,7 +3977,7 @@ function initBatchWorkerController() {
                         return;
                     }
 
-                    console.log(`[WorkerController] 📢 [배치] 안전 대기 완료 ️ START_EXTRACTION 주입 (ID: ${matchedId})`);
+                    console.log(`[WorkerController] [배치] 안전 대기 완료 START_EXTRACTION 주입 (ID: ${matchedId})`);
                     
                     const sessionToken = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getSessionToken */ .mj)(matchedId);
                     (0,_ipc_broker_js__WEBPACK_IMPORTED_MODULE_1__/* .sendToWorker */ .eu)(sourceEvent.source, 'START_EXTRACTION', {
@@ -3932,10 +3996,12 @@ function initBatchWorkerController() {
                         speedMultiplier: multiplier,
                         localNameTemplate: config.localNameTemplate || "{number:4} - {title}",
                         sessionNonce: sessionToken
-                    }, sessionToken);
+                    });
+                    // [v1.27.3] sendToWorker에 nonce 미포함: 자식의 _activeNonces는 항상 비어있어
+                    // 메시지가 Blocked 되기 때문. sessionNonce는 payload로만 전달되어
+                    // 자식이 TASK_COMPLETED/TASK_FAILED의 child->parent nonce로 재사용.
                     
-                    // [v1.27.1] START_EXTRACTION 주입 완료 후 플래그 해제 — 다음 READY가 새 사이클 시작 가능
-                    delete window[`tokisync_waiting_${matchedId}`];
+                    // [v1.27.2] 플래그는 START_EXTRACTION 후에도 유지 — 워커 완료/실패 시점에 정리
                 }
             } else {
                 console.warn('[WorkerController] [배치] WORKER_READY 수신했으나 매칭되는 활성 세션을 찾지 못했습니다.', targetUrl);
@@ -4120,17 +4186,11 @@ function initBatchWorkerController() {
             if (matchedId) {
                 console.error(`[WorkerController] ❌ [배치] 수집 실패 (ID: ${matchedId}): ${errorMsg}`);
                 
-                const failedToken = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getSessionToken */ .mj)(matchedId);
-                if (failedToken) {
-                    (0,_ipc_broker_js__WEBPACK_IMPORTED_MODULE_1__/* .removeWorkerOrigin */ .Re)(matchedId, failedToken);
-                }
-                (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .destroyWorkerSession */ .NQ)(matchedId, 'task_failed');
-                console.log(`[WorkerController] 🧹 세션 정리 (수집실패): ${matchedId} → processingSlots=${_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .processingSlots */ .PG.size}`);
-
                 const queue = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getQueue */ .IS)();
                 const item = queue.find(i => i.id === matchedId);
+                
+                // [v1.27.2] 상태 업데이트 먼저 → 세션 정리 → 스케줄러 순서
                 if (item) {
-                    // [v1.21.8] 사용자의 정지 클릭으로 이미 failed로 빠졌는지 확인
                     const isStopped = item.status === 'failed' && item.errorMsg?.includes('중단');
                     const nextRetry = (item.retryCount || 0) + 1;
                     (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .updateQueueItem */ .Gg)(matchedId, {
@@ -4140,6 +4200,16 @@ function initBatchWorkerController() {
                     });
                     _EventBus_js__WEBPACK_IMPORTED_MODULE_3__/* .EventBus */ .l.emit(_EventBus_js__WEBPACK_IMPORTED_MODULE_3__/* .EVT */ .c.UPDATE_PROGRESS);
                 }
+                
+                const sessionToken = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getSessionToken */ .mj)(matchedId);
+                if (sessionToken) {
+                    (0,_ipc_broker_js__WEBPACK_IMPORTED_MODULE_1__/* .removeWorkerOrigin */ .Re)(matchedId, sessionToken);
+                }
+                (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .destroyWorkerSession */ .NQ)(matchedId, 'task_failed');
+                console.log(`[WorkerController] 🧹 세션 정리 (수집패): ${matchedId} → processingSlots=${_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .processingSlots */ .PG.size}`);
+                
+                // [v1.27.2] 안전 대기 플래그 정리
+                delete window[`tokisync_waiting_${matchedId}`];
 
                 // 배치 최종 실패 마감 시 처리
                 const currentQueue = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getQueue */ .IS)();
@@ -5151,7 +5221,7 @@ class FormRuleEditor {
     }
 
     render() {
-        const scriptVer =  true ? "1.27.0" : 0;
+        const scriptVer =  true ? "1.27.3" : 0;
         this.overlay.innerHTML = `
             <div class="toki-modal toki-form-editor-modal">
                 <div class="toki-modal-header">
@@ -8664,7 +8734,7 @@ async function extractEpisodeData(targetDoc, parser, siteInfo, isStaticDoc = fal
 /* harmony export */   Yv: function() { return /* binding */ getWorkerIdByNonce; },
 /* harmony export */   eu: function() { return /* binding */ sendToWorker; }
 /* harmony export */ });
-/* unused harmony exports validateNonce, getWorkerOrigin, deliverSessionToken */
+/* unused harmony exports validateNonce, getWorkerOrigin */
 /**
  * tokiSync - Unified IPC Broker
  * Handles clean postMessage communication between Parent (Controller) and Child (Worker).
@@ -8755,69 +8825,12 @@ function getWorkerIdByNonce(nonce) {
 }
 
 /**
- * Deliver session token to child worker via postMessage with retry.
- * @param {Window} workerRef Reference to the worker popup
- * @param {string} token Session token to deliver
- * @param {number} [maxRetries=10] Maximum retry attempts
- * @param {number} [intervalMs=500] Retry interval in milliseconds
- * @returns {Promise<boolean>} Whether token was acknowledged
- */
-function deliverSessionToken(workerRef, token, maxRetries = 10, intervalMs = 500) {
-    return new Promise((resolve) => {
-        let attempts = 0;
-        let ackCleanup = null;
-
-        const sendToken = () => {
-            attempts++;
-            if (!workerRef || workerRef.closed) {
-                console.warn(`[IPC:Broker] Session token delivery failed: worker closed (attempt ${attempts})`);
-                if (ackCleanup) ackCleanup();
-                resolve(false);
-                return;
-            }
-            try {
-                workerRef.postMessage({
-                    type: `${MSG_PREFIX}SESSION_TOKEN`,
-                    payload: { sessionToken: token },
-                    timestamp: Date.now()
-                }, '*');
-                console.log(`[IPC:Broker] Session token sent to worker (attempt ${attempts}/${maxRetries})`);
-            } catch (e) {
-                console.warn(`[IPC:Broker] Session token postMessage failed (attempt ${attempts}):`, e.message);
-            }
-            if (attempts >= maxRetries) {
-                console.warn(`[IPC:Broker] Session token delivery timed out after ${maxRetries} attempts`);
-                if (ackCleanup) ackCleanup();
-                resolve(false);
-            }
-        };
-
-        // Listen for SESSION_TOKEN_ACK from child
-        const ackHandler = (event) => {
-            if (!event.data || typeof event.data !== 'object') return;
-            const { type, payload } = event.data;
-            if (type === `${MSG_PREFIX}SESSION_TOKEN_ACK` && payload?.sessionToken === token) {
-                console.log(`[IPC:Broker] Session token acknowledged by worker`);
-                if (ackCleanup) ackCleanup();
-                clearTimeout(sendTimer);
-                resolve(true);
-            }
-        };
-
-        window.addEventListener('message', ackHandler);
-        ackCleanup = () => window.removeEventListener('message', ackHandler);
-
-        sendToken();
-        const sendTimer = setInterval(sendToken, intervalMs);
-    });
-}
-
-/**
  * Send message from Parent to Worker popup
  * @param {Window} workerRef Reference to the worker popup window
  * @param {string} type Message type (without prefix, e.g. 'START_EXTRACTION')
  * @param {Object} payload Metadata and payload
- * @param {string} [nonce] Session nonce for validation
+ * @param {string} [nonce] Session nonce for validation (NOTE: nonce는 부모→자식 방향에서는
+ *   사용되지 않음. 자식의 _activeNonces는 항상 비어있기 때문. payload 안에 sessionNonce로 전달.)
  */
 function sendToWorker(workerRef, type, payload = {}, nonce) {
     if (!workerRef || workerRef.closed) {
@@ -9875,11 +9888,13 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                     // [v1.27.0] 세션 토큰 사전 발급 → URL fallback 매칭 보장
                     const sessionToken = (0,ipc_broker/* registerWorkerOrigin */.S6)(id, 'null');
                     core_queue/* processingSlots */.PG.add(id);
+                    const qItem = (0,core_queue/* getQueue */.IS)().find(i => i.id === id);
                     core_queue/* sessionRegistry */.a.set(id, {
                         sessionToken,
                         popupRef,
                         createdAt: Date.now(),
-                        lastActivity: Date.now()
+                        lastActivity: Date.now(),
+                        queueItemRef: qItem || null
                     });
                     core_queue/* activeWorkers */.mR.set(id, popupRef);
                     freshlyOpened.push(id);
@@ -10344,10 +10359,10 @@ var SubscriptionManager = __webpack_require__(330);
  * Fallback values (0.0.0) are never used in production builds.
  */
 const SCRIPT_VERSION =  true
-  ? "1.27.0" : 0;
+  ? "1.27.3" : 0;
 
 const VIEWER_VERSION = (/* unused pure expression or super */ null && ( true
-  ? "1.27.0" : 0));
+  ? "1.27.3" : 0));
 
 ;// ./src/core/main.js
 
@@ -10868,16 +10883,12 @@ var novel_decryptor = __webpack_require__(602);
 let isWorkerExtractorInitialized = false;
 let workerIpcCleanup = null;
 
-// [v1.27.0] 세션 토큰 저장 (부모로부터 수신)
-let _sessionToken = null;
-
 // Define localized stage reporting helper
 function reportProgress(queueId, percent, stage) {
     (0,ipc_broker/* sendToParent */.Ac)('WORKER_PROGRESS', {
         queueId,
         percent: Math.min(100, Math.max(0, Math.round(percent))),
-        stage,
-        sessionToken: _sessionToken || null
+        stage
     });
 }
 
@@ -10899,8 +10910,7 @@ function initWorkerExtractor() {
         console.log("[TokiSync:Worker] 📢 READY 핸드셰이킹 하트비트 전송 중...");
         (0,ipc_broker/* sendToParent */.Ac)('WORKER_READY', {
             targetUrl: window.location.href,
-            timestamp: Date.now(),
-            sessionToken: _sessionToken || null
+            timestamp: Date.now()
         });
     }, 1000);
 
@@ -10929,18 +10939,6 @@ function initWorkerExtractor() {
             cleanupIpc();
             core_stopSilentAudio();
             window.close();
-            return;
-        }
-
-        // [v1.27.0] 세션 토큰 수신 처리
-        if (msg.type === 'SESSION_TOKEN') {
-            const { sessionToken } = msg.payload || {};
-            if (sessionToken) {
-                _sessionToken = sessionToken;
-                console.log(`[TokiSync:Worker] 🔑 세션 토큰 수신: ${sessionToken.substring(0, 8)}...`);
-                // 부모에게 ACK 전송
-                (0,ipc_broker/* sendToParent */.Ac)('SESSION_TOKEN_ACK', { sessionToken });
-            }
             return;
         }
 
@@ -11378,7 +11376,7 @@ function initWorkerExtractor() {
 
                 } catch (err) {
                     console.error(`[TokiSync:Worker] ❌ 에피소드 수집 중 치명적 오류 발생:`, err);
-                    (0,ipc_broker/* sendToParent */.Ac)('TASK_FAILED', { queueId, errorMsg: err.message, sessionToken: _sessionToken });
+                    (0,ipc_broker/* sendToParent */.Ac)('TASK_FAILED', { queueId, errorMsg: err.message });
                     closeSelf();
                 }
             }
