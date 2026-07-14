@@ -22,7 +22,7 @@ npm run build:core      # Webpack → dist/tokiSync.user.js
 npm run build:viewer    # Vite → dist-viewer/
 npm run build:gas       # Bundle → TokiSync_Server_Bundle.gs
 npm run build           # All three
-npm run test            # Unit tests (14 tests)
+npm run test            # Unit tests (30 tests)
 npm run dev:viewer      # Vite dev server
 ```
 
@@ -73,6 +73,56 @@ Develop 브랜치로 push 전 필수 선행 작업:
 - Error found → Document in `.agent_checkpoint.md` → Re-plan if needed → Fix.
 - Never hotfix without understanding the root cause.
 - Check `sem impact <entity>` before changes, `sem diff` after.
+
+## Multi-Agent Cross-Validation Workflow
+
+동일 문제를 서로 다른 모델 2개가 병렬 분석 → cross-validator가 비교/중재 → 합일.
+
+### Agent 구성 (`opencode.json`)
+
+| Agent | Model | Edit | Task Permission | 역할 |
+|-------|-------|------|----------------|------|
+| `solver-a` | deepseek-v4-pro | allow | - | 1차 해결안 |
+| `solver-b` | mimo-v2.5-pro | allow | - | 2차 해결안 (다른 모델) |
+| `cross-validator` | qwen3.6-plus | deny | solver-a, solver-b, mediator | 오케스트레이터 |
+| `mediator` | deepseek-v4-pro | deny | - | 3R 실패 시 최종 중재 |
+
+### 사용법
+
+```bash
+# ⭐ 한 줄로 전체 실행 (권장)
+@cross-validator <문제>
+
+# 또는 역할을 지정해서 토론/분석
+@cross-validator <문제> A는 부먹파 B는 찍먹파로 토론
+
+# 개별 호출
+@solver-a <질문>
+@solver-b <질문>
+@mediator <두 해결안>
+```
+
+### 내부 워크플로우
+
+```
+@cross-validator "문제"
+  ↓
+Round 1:
+  Task solver-a (신규 session) "문제" → solution_A
+  Task solver-b (신규 session) "문제" → solution_B
+  ↓
+Cross-Check:
+  비교 → CONVERGED? → FINAL_SOLUTION
+  ↓ (DIVERGED, round < 3)
+Round N:
+  Task solver-a (task_id 재사용) "Peer: <B_CRITIQUE>. Revise."
+  Task solver-b (task_id 재사용) "Peer: <A_CRITIQUE>. Revise."
+  ↓ (3R 초과)
+Mediator:
+  Task mediator "3 rounds history" → unified solution
+  ↓
+사용자에게 결과 반환
+```
 
 ## Session Handover
 When handing off to another model:

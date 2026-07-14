@@ -14,6 +14,16 @@ const gasConfig = reactive({
 
 let _configLoaded = false;
 
+// --- Bridge Transport ---
+let _bridgeFetch = null;
+
+// --- Dedup (in-flight request tracking) ---
+const _inFlight = new Map();
+
+// --- Timeout & Retry ---
+const REQUEST_TIMEOUT = 30000;
+const MAX_RETRIES = 2;
+
 /**
  * Load config from localStorage (fallback for standalone mode)
  */
@@ -41,6 +51,13 @@ function loadFromLocalStorage() {
   if (gasConfig.gasId) {
     console.log('📦 GAS Config loaded from localStorage');
   }
+}
+
+/**
+ * Set bridge fetch function (UserScript transport, preferred when available)
+ */
+function setBridgeFetch(fn) {
+  _bridgeFetch = fn;
 }
 
 /**
@@ -82,10 +99,46 @@ function getBaseUrl() {
   return `https://script.google.com/macros/s/${gasConfig.gasId}/exec`;
 }
 
+// --- Helpers ---
+
+function _isRetryable(error) {
+  if (error.name === 'AbortError' || error.name === 'TimeoutError') return false;
+  if (error.message?.startsWith('HTTP Error: 5')) return true;
+  if (error.name === 'TypeError') return true;
+  return false;
+}
+
+function _delay(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
+function _composeSignal(timeoutMs, externalSignal) {
+  if (!externalSignal) {
+    try { return AbortSignal.timeout(timeoutMs); } catch (e) {
+      const c = new AbortController();
+      setTimeout(() => c.abort(new DOMException('Timeout', 'TimeoutError')), timeoutMs);
+      return c.signal;
+    }
+  }
+  if (externalSignal.aborted) {
+    const c = new AbortController();
+    c.abort(externalSignal.reason);
+    return c.signal;
+  }
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(new DOMException('Timeout', 'TimeoutError')), timeoutMs);
+  externalSignal.addEventListener('abort', () => {
+    clearTimeout(timeoutId);
+    controller.abort(externalSignal.reason);
+  }, { once: true });
+  return controller.signal;
+}
+
 /**
  * Core API request function
  * @param {string} type - Request type (e.g. 'view_get_library')
  * @param {object} payload - Additional data
+ * @param {AbortSignal|null} signal - External cancellation signal
  * @returns {Promise<any>} Response body
  */
 async function request(type, payload = {}, signal = null) {
@@ -94,40 +147,92 @@ async function request(type, payload = {}, signal = null) {
 
   const bodyData = {
     ...payload,
-    type: type,
+    type,
     folderId: gasConfig.folderId,
     apiKey: gasConfig.apiKey,
     protocolVersion: 3,
   };
 
-  try {
-    const fetchOptions = {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'text/plain;charset=utf-8',
-      },
-      body: JSON.stringify(bodyData),
-    };
+  const bodyStr = JSON.stringify(bodyData);
 
-    if (signal) fetchOptions.signal = signal;
-
-    const response = await fetch(baseUrl, fetchOptions);
-
-    if (!response.ok) {
-      throw new Error(`HTTP Error: ${response.status}`);
+  // Dedup: coalesce identical in-flight non-chunk requests
+  if (type !== 'view_get_chunk') {
+    const dedupKey = `${type}:${bodyStr}`;
+    const existing = _inFlight.get(dedupKey);
+    if (existing) {
+      console.log(`[GAS] Dedup hit for ${type}`);
+      return existing;
     }
-
-    const json = await response.json();
-
-    if (json.status === 'error') {
-      throw new Error(json.body || 'Unknown Server Error');
-    }
-
-    return json.body;
-  } catch (e) {
-    console.error(`[GAS] Request Failed (${type}):`, e);
-    throw e;
+    const promise = _executeRequest(type, baseUrl, bodyStr, signal);
+    _inFlight.set(dedupKey, promise);
+    promise.finally(() => {
+      if (_inFlight.get(dedupKey) === promise) _inFlight.delete(dedupKey);
+    });
+    return promise;
   }
+
+  return _executeRequest(type, baseUrl, bodyStr, signal);
+}
+
+async function _executeRequest(type, baseUrl, bodyStr, signal) {
+  if (_bridgeFetch && type !== 'view_get_chunk') {
+    return _bridgeRequest(type, baseUrl, bodyStr);
+  }
+  return _nativeRequest(type, baseUrl, bodyStr, signal);
+}
+
+async function _bridgeRequest(type, baseUrl, bodyStr) {
+  const payload = await _bridgeFetch(baseUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    data: bodyStr,
+  });
+  if (!payload) throw new Error('Bridge transport returned no data');
+
+  let json;
+  try {
+    json = typeof payload === 'string' ? JSON.parse(payload) : payload;
+  } catch (e) {
+    throw new Error(`Bridge response parse failed: ${e.message}`);
+  }
+  if (json.status === 'error') {
+    throw new Error(json.body || 'Unknown Server Error');
+  }
+  return json.body;
+}
+
+async function _nativeRequest(type, baseUrl, bodyStr, signal) {
+  let lastError;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const fetchSignal = _composeSignal(REQUEST_TIMEOUT, signal);
+    try {
+      const response = await fetch(baseUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: bodyStr,
+        signal: fetchSignal,
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP Error: ${response.status}`);
+      }
+      const json = await response.json();
+      if (json.status === 'error') {
+        throw new Error(json.body || 'Unknown Server Error');
+      }
+      return json.body;
+    } catch (e) {
+      lastError = e;
+      if (e.name === 'AbortError' || e.name === 'TimeoutError') throw e;
+      if (attempt < MAX_RETRIES && _isRetryable(e)) {
+        const delayMs = 1000 * (attempt + 1);
+        console.warn(`[GAS] Retry ${attempt + 1}/${MAX_RETRIES} for ${type} in ${delayMs}ms: ${e.message}`);
+        await _delay(delayMs);
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastError;
 }
 
 // --- Convenience API Methods ---
@@ -250,6 +355,7 @@ export function useGAS() {
   return {
     gasConfig,
     setConfig,
+    setBridgeFetch,
     isConfigured,
     request,
     getLibrary,

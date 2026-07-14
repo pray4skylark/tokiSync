@@ -180,11 +180,12 @@ async function uploadViaGASRelay(blob, folderName, fileName, options = {}) {
 
     // 2. Chunk Upload Loop
     let start = 0;
-    const buffer = await blob.arrayBuffer();
     
     while (start < totalSize) {
         const end = Math.min(start + CHUNK_SIZE, totalSize);
-        const chunkBuffer = buffer.slice(start, end);
+        // [v1.27.3] blob.arrayBuffer() 대신 blob.slice()로 직접 청크 변환 (메모리 최적화)
+        const chunkBlob = blob.slice(start, end);
+        const chunkBuffer = await chunkBlob.arrayBuffer();
         const chunkBase64 = arrayBufferToBase64(chunkBuffer);
         const percentage = Math.floor((end / totalSize) * 100);
         
@@ -195,45 +196,68 @@ async function uploadViaGASRelay(blob, folderName, fileName, options = {}) {
             tag: 'Upload'
         });
 
-        await new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-                method: "POST", 
-                url: config.gasUrl,
-                data: JSON.stringify({ 
-                    folderId: config.folderId, 
-                    type: "upload", 
-                    protocolVersion: 3,
-                    clientVersion: CLIENT_VERSION, 
-                    uploadUrl: uploadUrl, 
-                    chunkData: chunkBase64, 
-                    start: start, end: end, total: totalSize,
-                    apiKey: config.apiKey
-                }),
-                headers: { "Content-Type": "text/plain" },
-                timeout: 300000,
-                onload: (res) => {
-                    try { 
-                        const json = JSON.parse(res.responseText); 
-                        if (json.status === 'success') resolve(); 
-                        else {
-                            logger.critical(`GAS 청크 업로드 실패: ${json.body || 'Upload failed'} (${start}~${end})`, 'GAS:Relay');
-                            reject(new Error(json.body || "Upload failed")); 
+        // [v1.27.3] GAS 청크 재시도 루프 (최대 3회)
+        let chunkSuccess = false;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            if (attempt > 1) {
+                const delay = Math.min(2000 * Math.pow(2, attempt - 2), 10000);
+                logger.log(`[GAS] 청크 재시도 ${attempt}/3 (${(delay/1000).toFixed(1)}초 후): ${start}~${end}`, 'GAS:Relay');
+                await new Promise(r => setTimeout(r, delay));
+            }
+            
+            try {
+                await new Promise((resolve, reject) => {
+                    GM_xmlhttpRequest({
+                        method: "POST", 
+                        url: config.gasUrl,
+                        data: JSON.stringify({ 
+                            folderId: config.folderId, 
+                            type: "upload", 
+                            protocolVersion: 3,
+                            clientVersion: CLIENT_VERSION, 
+                            uploadUrl: uploadUrl, 
+                            chunkData: chunkBase64, 
+                            start: start, end: end, total: totalSize,
+                            apiKey: config.apiKey
+                        }),
+                        headers: { "Content-Type": "text/plain" },
+                        timeout: 300000,
+                        onload: (res) => {
+                            try { 
+                                const json = JSON.parse(res.responseText); 
+                                if (json.status === 'success') resolve(); 
+                                else {
+                                    logger.critical(`GAS 청크 업로드 실패: ${json.body || 'Upload failed'} (${start}~${end})`, 'GAS:Relay');
+                                    reject(new Error(json.body || "Upload failed")); 
+                                }
+                            } catch (e) { 
+                                logger.critical(`GAS 청크 응답 파싱 실패 (${start}~${end})`, 'GAS:Relay');
+                                reject(new Error("GAS 응답 오류(Upload)")); 
+                            }
+                        },
+                        onerror: (e) => {
+                            logger.critical(`GAS 청크 네트워크 오류 (${start}~${end} / ${totalSize})`, 'GAS:Relay');
+                            reject(new Error("네트워크 오류(Upload)"));
+                        },
+                        ontimeout: () => {
+                            logger.critical(`GAS 청크 타임아웃 5분 (${start}~${end} / ${totalSize})`, 'GAS:Relay');
+                            reject(new Error(`[GAS] 청크 업로드 타임아웃 (5분): ${start}~${end}`));
                         }
-                    } catch (e) { 
-                        logger.critical(`GAS 청크 응답 파싱 실패 (${start}~${end})`, 'GAS:Relay');
-                        reject(new Error("GAS 응답 오류(Upload)")); 
-                    }
-                },
-                onerror: (e) => {
-                    logger.critical(`GAS 청크 네트워크 오류 (${start}~${end} / ${totalSize})`, 'GAS:Relay');
-                    reject(new Error("네트워크 오류(Upload)"));
-                },
-                ontimeout: () => {
-                    logger.critical(`GAS 청크 타임아웃 5분 (${start}~${end} / ${totalSize})`, 'GAS:Relay');
-                    reject(new Error(`[GAS] 청크 업로드 타임아웃 (5분): ${start}~${end}`));
+                    });
+                });
+                chunkSuccess = true;
+                break; // 성공 → 재시도 루프 탈출
+            } catch (err) {
+                if (attempt >= 3) {
+                    logger.critical(`GAS 청크 3회 실패 (${start}~${end}): ${err.message}`, 'GAS:Relay');
+                    throw err;
                 }
-            });
-        });
+            }
+        }
+        if (!chunkSuccess) {
+            logger.critical(`GAS 청크 업로드 최종 실패 (${start}~${end})`, 'GAS:Relay');
+            throw new Error(`GAS upload failed at ${start}~${end}`);
+        }
         
         start = end;
     }

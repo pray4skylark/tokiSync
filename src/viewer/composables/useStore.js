@@ -18,9 +18,50 @@ function isStale(cachedAt, ttl) {
   return !cachedAt || Date.now() - cachedAt > ttl;
 }
 
+// --- URL Deep Link Helpers (Hash Route) ---
+// 포맷: #/FOLDER_ID  |  #/FOLDER_ID/EP_NUMBER
+
+function syncUrlToState() {
+  const url = new URL(window.location);
+  url.searchParams.delete('series');
+  url.searchParams.delete('episode');
+  const s = selectedItem.value?.id || '';
+  const n = currentEpisode.value?.number || '';
+  url.hash = s ? `#/${s}${n ? '/' + n : ''}` : '';
+  window.history.replaceState({}, '', url);
+}
+
+function pushUrlState() {
+  const url = new URL(window.location);
+  url.searchParams.delete('series');
+  url.searchParams.delete('episode');
+  const s = selectedItem.value?.id || '';
+  const n = currentEpisode.value?.number || '';
+  url.hash = s ? `#/${s}${n ? '/' + n : ''}` : '';
+  window.history.pushState({}, '', url);
+}
+
+function clearUrlParams() {
+  const url = new URL(window.location);
+  url.searchParams.delete('series');
+  url.searchParams.delete('episode');
+  url.hash = '';
+  window.history.pushState({}, '', url);
+}
+
+function getUrlSeriesId() {
+  return window.location.hash.replace(/^#\//, '').split('/')[0] || '';
+}
+
+function getUrlEpisodeNumber() {
+  return window.location.hash.replace(/^#\//, '').split('/')[1] || '';
+}
+
+let _popstateHandler = null;
+
 // --- Sub-Composables ---
 const { isConnected, initBridge, bridgeFetch } = useBridge();
-const { gasConfig, setConfig, isConfigured, getLibrary, getBooks, getReadHistory, saveReadHistory, updateMetadata, uploadThumbnail, request } = useGAS();
+const { gasConfig, setConfig, setBridgeFetch, isConfigured, getLibrary, getBooks, getReadHistory, saveReadHistory, updateMetadata, uploadThumbnail, request } = useGAS();
 const { 
   downloadProgress, isDownloading, isPreloading, 
   fetchAndUnzip, preloadEpisode, cleanupBlobUrls, formatSize, cancelViewerDownload 
@@ -159,6 +200,8 @@ const currentPage = ref(1);
 const scrollProgress = ref(0);
 const isScrollSyncing = ref(false);
 const isPreloadTriggered = ref(false); // [v1.7.5-fix] 프리로드 제어용
+const episodeLoadError = ref(false); // [v2.9.4] 콘텐츠 로드 실패 시 재시도 UI용
+const downloadSelection = reactive(new Set()); // [v2.9.4] 다중 선택 다운로드
 
 // Episode list (fetched from GAS)
 const episodes = ref([]);
@@ -218,13 +261,21 @@ watch(episodes, () => refreshLastReadEpisode(), { immediate: true });
  */
 async function cleanupEpisodeData() {
   try {
+    let usage = 0, quota = 1;
+    try {
+      const est = await navigator.storage.estimate();
+      usage = est.usage || 0;
+      quota = est.quota || 1;
+    } catch (_) { return; }
+    if (usage / quota < 0.9) return;
+
     const all = await db.episodeData.orderBy('cachedAt').reverse().toArray();
-    if (all.length > 5) {
-      const toDelete = all.slice(5);
-      const ids = toDelete.map(item => item.fileId);
-      await db.episodeData.bulkDelete(ids);
-      console.log(`[Cache:GC] Removed ${ids.length} old episodes from persistent storage.`);
-    }
+    if (all.length <= 5) return;
+    const keepCount = Math.ceil(all.length * 0.7);
+    const toDelete = all.slice(keepCount);
+    const ids = toDelete.map(item => item.fileId);
+    await db.episodeData.bulkDelete(ids);
+    console.log(`[Cache:GC] Storage at ${(usage/quota*100).toFixed(0)}%. Removed ${ids.length} old episodes.`);
   } catch (err) {
     console.warn('[Cache:GC] Failed to cleanup episode data:', err);
   }
@@ -595,7 +646,6 @@ const initApp = async () => {
 
   // 1. Setup Bridge (Zero-Config listener)
   initBridge((url, folderId, apiKey) => {
-    // Sync config reactive so SettingsPanel reflects the injected values
     config.deploymentId = url;
     config.folderId = folderId;
     config.apiKey = apiKey;
@@ -604,11 +654,49 @@ const initApp = async () => {
     refreshLibrary();
   });
 
+  // Bridge transport 우선 설정 (UserScript 경유 GM_xmlhttpRequest, CORS 우회 + 30s timeout)
+  if (isConnected.value && bridgeFetch) {
+    setBridgeFetch(bridgeFetch);
+    console.log('🔗 Bridge transport activated for GAS requests');
+  }
+
   // 2. Check if already configured
   if (isConfigured()) {
     notify('🚀 저장된 설정으로 연결합니다...');
     await refreshLibrary();
-    
+
+    // [v2.9.4] URL Deep Link 복원
+    const urlSeriesId = getUrlSeriesId();
+    if (urlSeriesId) {
+      const seriesItem = libraryItems.value.find(s => s.id === urlSeriesId);
+      if (seriesItem) {
+        await openSeries(seriesItem);
+        const urlEpNum = getUrlEpisodeNumber();
+        if (urlEpNum) {
+          const ep = episodes.value.find(e => String(e.number) === urlEpNum);
+          if (ep) await startReading(ep);
+        }
+      }
+    }
+
+    // [v2.9.4] popstate: 뒤로가기/앞으로가기 시 hash 기반 복원
+    if (_popstateHandler) window.removeEventListener('popstate', _popstateHandler);
+    _popstateHandler = async () => {
+      const sId = getUrlSeriesId();
+      if (!sId) { goBackToLibrary(); return; }
+      const item = libraryItems.value.find(x => x.id === sId);
+      if (!item) return;
+      if (selectedItem.value?.id !== sId) await openSeries(item);
+      const epNum = getUrlEpisodeNumber();
+      if (epNum) {
+        const ep = episodes.value.find(e => String(e.number) === epNum);
+        if (ep && currentEpisode.value?.id !== ep.id) await startReading(ep);
+      } else if (currentView.value !== 'episodes') {
+        exitViewer();
+      }
+    };
+    window.addEventListener('popstate', _popstateHandler);
+
     // [v1.8.0] 구형 GAS 서버 감지 및 안내 (백그라운드 체크)
     (async () => {
       try {
@@ -660,30 +748,35 @@ const initApp = async () => {
 const refreshLibrary = async (bypassCache = false) => {
   isSyncing.value = true;
   try {
-    // 1. Dexie 캐시 확인
+    // 1. Dexie 캐시 확인 (SWR: 만료돼도 일단 표시)
+    let hasStale = false;
     if (!bypassCache) {
       const cached = await db.libraryCache.get('default');
-      if (cached && !isStale(cached.cachedAt, LIBRARY_TTL)) {
+      if (cached) {
         libraryItems.value = cached.data;
-        console.log(`[Cache] 라이브러리 캐시 히트 (${cached.data.length}개)`);
-        isSyncing.value = false;
-        return;
+        hasStale = true;
+        if (!isStale(cached.cachedAt, LIBRARY_TTL)) {
+          console.log(`[Cache] 라이브러리 캐시 히트 (${cached.data.length}개)`);
+          isSyncing.value = false;
+          return;
+        }
       }
     }
-    // 2. GAS에서 불러오기 + Dexie에 저장
+    // 2. GAS에서 배경 갱신
     const seriesList = await getLibrary({ bypassCache });
     libraryItems.value = seriesList;
     await db.libraryCache.put({ id: 'default', data: seriesList, cachedAt: Date.now() });
-    notify('📚 라이브러리 업데이트 완료');
+    if (!hasStale) notify('📚 라이브러리 업데이트 완료');
   } catch (e) {
     console.error('Library Fetch Error:', e);
-    // GAS 실패 시 만료된 캐시라도 사용
-    const staleCache = await db.libraryCache.get('default').catch(() => null);
-    if (staleCache?.data?.length) {
-      libraryItems.value = staleCache.data;
-      notify('⚠️ 오프라인: 캐시된 라이브러리 표시 중');
-    } else {
-      notify(`❌ 로드 실패: ${e.message}`);
+    if (!libraryItems.value.length) {
+      const staleCache = await db.libraryCache.get('default').catch(() => null);
+      if (staleCache?.data?.length) {
+        libraryItems.value = staleCache.data;
+        notify('⚠️ 오프라인: 캐시된 라이브러리 표시 중');
+      } else {
+        notify(`❌ 로드 실패: ${e.message}`);
+      }
     }
   } finally {
     isSyncing.value = false;
@@ -696,6 +789,7 @@ const openSeries = async (item, bypassCache = false) => {
   episodes.value = []; // Clear stale episodes immediately
   cleanupBlobUrls();   // Clear old content cache
   window.scrollTo(0, 0);
+  pushUrlState();
 
   // 에피소드 목록 불러오기 (Dexie 캐시 우선)
   try {
@@ -718,15 +812,17 @@ const openSeries = async (item, bypassCache = false) => {
       return numA - numB;
     });
 
-    // 1. Dexie 캐시 확인
+    // 1. Dexie 캐시 확인 (SWR: 만료돼도 일단 표시)
     const cachedEps = await db.episodeCache.where('seriesId').equals(item.id).toArray();
-    if (!bypassCache && cachedEps.length > 0 && !isStale(cachedEps[0].cachedAt, EPISODE_TTL)) {
-      console.log(`[Cache] 에피소드 캐시 히트 (${cachedEps.length}개)`);
+    if (!bypassCache && cachedEps.length > 0) {
       episodes.value = sortEpisodes(cachedEps).map(attachMeta);
-      return;
+      if (!isStale(cachedEps[0].cachedAt, EPISODE_TTL)) {
+        console.log(`[Cache] 에피소드 캐시 히트 (${cachedEps.length}개)`);
+        return;
+      }
     }
 
-    // 2. GAS에서 불러오기 + Dexie에 저장 (GAS가 이미 정렬해서 줌)
+    // 2. GAS에서 배경 갱신
     const books = await getBooks(item.id, bypassCache);
     const now = Date.now();
     
@@ -765,14 +861,14 @@ const openSeries = async (item, bypassCache = false) => {
     }
   } catch (e) {
     console.error('Episode Fetch Error:', e);
-    // GAS 실패 시 만료 캐시 사용
-    const staleEps = await db.episodeCache.where('seriesId').equals(item.id).toArray().catch(() => []);
-    if (staleEps.length > 0) {
-      episodes.value = staleEps.map(b => ({ ...b, title: b.name, thumbnail: getThumbnailUrl(b) }));
-      notify('⚠️ 오프라인: 캐시된 회차 목록 표시 중');
-    } else {
-      notify(`❌ 회차 로드 실패: ${e.message}`);
-      episodes.value = [];
+    if (!episodes.value.length) {
+      const staleEps = await db.episodeCache.where('seriesId').equals(item.id).toArray().catch(() => []);
+      if (staleEps.length > 0) {
+        episodes.value = staleEps.map(b => ({ ...b, title: b.name, thumbnail: getThumbnailUrl(b) }));
+        notify('⚠️ 오프라인: 캐시된 회차 목록 표시 중');
+      } else {
+        notify(`❌ 회차 로드 실패: ${e.message}`);
+      }
     }
   }
 };
@@ -821,6 +917,7 @@ const startReading = async (ep) => {
   showViewerControls.value = false;
   showEpisodeModal.value = false;
   window.scrollTo(0, 0);
+  pushUrlState();
 
   // 열람 이력 기록 (Dexie)
   try {
@@ -848,6 +945,7 @@ const startReading = async (ep) => {
   }
 
   // Fetch and unzip the file
+  episodeLoadError.value = false;
   try {
     const result = await fetchAndUnzip(
       ep.id, 
@@ -897,9 +995,28 @@ const startReading = async (ep) => {
     isPreloadTriggered.value = false;
   } catch (e) {
     console.error('Fetch Error:', e);
+    episodeLoadError.value = true;
+    isRestoring.value = false;
+    isPreloadTriggered.value = false;
     notify(`❌ 콘텐츠 로드 실패: ${e.message}`);
   }
 };
+
+const retryLoad = () => {
+  if (!currentEpisode.value) return;
+  episodeLoadError.value = false;
+  startReading(currentEpisode.value);
+};
+
+// [v2.9.4] 다중 선택 다운로드 (상태만 관리, 실제 다운로드는 EpisodesView에서)
+function toggleDownloadSelection(epId) {
+  if (downloadSelection.has(epId)) downloadSelection.delete(epId);
+  else downloadSelection.add(epId);
+}
+function clearDownloadSelection() { downloadSelection.clear(); }
+function selectAllDownload() {
+  episodes.value.forEach(ep => downloadSelection.add(ep.id));
+}
 
 const goToNextEpisode = () => {
   if (hasNextEpisode.value) {
@@ -930,6 +1047,8 @@ const exitViewer = async () => {
   cleanupBlobUrls();
   viewerContent.value = null;
   currentView.value = 'episodes';
+  currentEpisode.value = null;
+  pushUrlState();
   forceCloudSync();
   // Drive에 이력 push (비동기, 실패해도 무시)
   pushHistoryToDrive().catch(e => console.warn('[History] Drive push 실패:', e));
@@ -937,6 +1056,7 @@ const exitViewer = async () => {
 
 const goBackToLibrary = () => {
   currentView.value = 'library';
+  clearUrlParams();
   forceCloudSync();
 };
 
@@ -1224,6 +1344,8 @@ export function useStore() {
     cachedEpisodesList, cachedTotalSize, loadOfflineCacheInfo, deleteEpisodeCache, clearAllEpisodeCaches, saveSeriesMetadata,
     openSeries, refreshEpisodes, startReading, exitViewer, goBackToLibrary,
     goToNextEpisode, goToPrevEpisode,
+    retryLoad, episodeLoadError,
+    downloadSelection, toggleDownloadSelection, clearDownloadSelection, selectAllDownload,
     toggleViewerUI, setViewerMode,
     handleWheel, handleNext, handlePrev, next, prev, onScrollUpdate,
     deleteItem, reloadApp, cancelViewerDownload,

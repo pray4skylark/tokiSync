@@ -11,6 +11,22 @@ import { extractEpisodeNum } from './utils.js';
 
 let cachedToken = null;
 let tokenExpiry = 0;
+let tokenFetchPromise = null; // [v1.27.3] 토큰 fetch 뮤텍스: 동시 요청 경합 방지
+
+/**
+ * [v1.28.0] 업로드 직렬화 락: 동일 파일명 동시 업로드 → Drive 중복 파일 생성 방지
+ * Map<fileName, Promise> — 동일 키에 대한 동시 호출은 기존 Promise 재사용
+ */
+const uploadLocks = new Map();
+
+function withUploadLock(fileName, fn) {
+    if (uploadLocks.has(fileName)) {
+        return uploadLocks.get(fileName);
+    }
+    const promise = fn().finally(() => uploadLocks.delete(fileName));
+    uploadLocks.set(fileName, promise);
+    return promise;
+}
 
 /**
  * Fetches OAuth token from GAS server
@@ -74,6 +90,12 @@ async function fetchToken() {
 async function getToken() {
     const now = Date.now();
     
+    // [v1.27.3] 토큰 뮤텍스: 이미 fetch 중인 Promise가 있으면 재사용
+    if (tokenFetchPromise) {
+        console.log('[DirectUpload] Token fetch in progress, waiting...');
+        return tokenFetchPromise;
+    }
+    
     // Return cached token if still valid (with 5min safety margin)
     if (cachedToken && tokenExpiry > now + 300000) {
         console.log('[DirectUpload] Using cached token');
@@ -81,10 +103,30 @@ async function getToken() {
     }
     
     console.log('[DirectUpload] Fetching new token...');
-    cachedToken = await fetchToken();
-    tokenExpiry = now + 3600000; // 1 hour
+    tokenFetchPromise = fetchToken().then(token => {
+        cachedToken = token;
+        tokenExpiry = now + 3600000; // 1 hour
+        tokenFetchPromise = null;
+        return token;
+    }).catch(err => {
+        tokenFetchPromise = null;
+        throw err;
+    });
     
-    return cachedToken;
+    return tokenFetchPromise;
+}
+
+/**
+ * [v1.27.3] 토큰 TTL 확인 및 필요 시 갱신. 청크 업로드 전 호출.
+ * @returns {Promise<string>} Access token (fresh or cached)
+ */
+async function ensureFreshToken() {
+    const now = Date.now();
+    // 남은 TTL이 5분 미만이면 refresh (업로드 도중 만료 방지)
+    if (cachedToken && tokenExpiry > now + 300000) {
+        return cachedToken;
+    }
+    return getToken();
 }
 
 /**
@@ -223,44 +265,70 @@ async function sendResumableChunks(uploadUrl, blob, token, fileName) {
         const chunk = blob.slice(start, end);
         const contentRange = `bytes ${start}-${end - 1}/${totalSize}`;
 
-        await new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-                method: 'PUT',
-                url: uploadUrl,
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Range': contentRange,
-                    'Content-Type': blob.type || 'application/octet-stream'
-                },
-                data: chunk,
-                binary: true,
-                timeout: 300000,
-                onload: (res) => {
-                    if (res.status === 308 || (res.status >= 200 && res.status < 300)) {
-                        resolve();
-                    } else {
-                        EventBus.emit(EVT.LOG, { msg: `❌ [${fileName}] 청크 업로드 실패 (${res.status})`, level: 'error', tag: 'Upload' });
-                        reject(new Error(`Chunk upload failed: ${res.status} ${res.responseText}`));
-                    }
-                },
-                onerror: () => {
-                    EventBus.emit(EVT.LOG, { msg: `❌ [${fileName}] 청크 네트워크 오류`, level: 'error', tag: 'Upload' });
-                    reject(new Error('Chunk upload network error'));
-                },
-                ontimeout: () => {
-                    EventBus.emit(EVT.LOG, { msg: `⏰ [${fileName}] 청크 타임아웃`, level: 'error', tag: 'Upload' });
-                    reject(new Error(`Chunk upload timed out: ${contentRange}`));
-                }
-            });
-        });
+        // [v1.27.3]  각 청크 전 토큰 TTL 확인 → 만료 임박 시 갱신
+        const freshToken = await ensureFreshToken();
 
-        start = end;
+        // [v1.27.3] 청크 재시도 루프 (최대 3회, 지수 백오프)
+        let lastError = null;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            if (attempt > 1) {
+                const delay = Math.min(2000 * Math.pow(2, attempt - 2), 10000);
+                console.log(`[Chunk] 재시도 ${attempt}/3: ${(delay/1000).toFixed(1)}초 대기 후 재전송 (${contentRange})`);
+                await new Promise(r => setTimeout(r, delay));
+            }
+
+            try {
+                await new Promise((resolve, reject) => {
+                    GM_xmlhttpRequest({
+                        method: 'PUT',
+                        url: uploadUrl,
+                        headers: {
+                            'Authorization': `Bearer ${freshToken}`,
+                            'Content-Range': contentRange,
+                            'Content-Type': blob.type || 'application/octet-stream'
+                        },
+                        data: chunk,
+                        binary: true,
+                        timeout: 300000,
+                        onload: (res) => {
+                            if (res.status === 308 || (res.status >= 200 && res.status < 300)) {
+                                // [v1.27.3] 308 응답 시 Range 헤더로 실제 수신 위치 확인
+                                if (res.status === 308 && res.responseHeaders) {
+                                    const rangeMatch = res.responseHeaders.match(/range:\s*bytes=0-(\d+)/i);
+                                    if (rangeMatch) {
+                                        const receivedEnd = parseInt(rangeMatch[1], 10) + 1;
+                                        if (receivedEnd > start) {
+                                            start = receivedEnd;
+                                        }
+                                    }
+                                }
+                                resolve();
+                            } else {
+                                EventBus.emit(EVT.LOG, { msg: `[${fileName}] 청크 업로드 실패 (${res.status})`, level: 'error', tag: 'Upload' });
+                                reject(new Error(`Chunk upload failed: ${res.status}`));
+                            }
+                        },
+                        onerror: () => reject(new Error('Chunk upload network error')),
+                        ontimeout: () => reject(new Error(`Chunk upload timed out: ${contentRange}`))
+                    });
+                });
+
+                start = end;
+                lastError = null;
+                break;
+            } catch (err) {
+                lastError = err;
+                if (attempt < 3) {
+                    console.warn(`[Chunk] 청크 실패 (${attempt}/3), 재시도: ${err.message}`);
+                } else {
+                    console.error(`[Chunk] 청크 실패 (3/3): ${err.message}`);
+                    EventBus.emit(EVT.LOG, { msg: `[${fileName}] 청크 업로드 3회 실패`, level: 'error', tag: 'Upload' });
+                    throw lastError;
+                }
+            }
+        }
     }
 }
-
-/**
- * Uploads file directly to Google Drive using Resumable Upload (5MB Chunks)
- */
 export async function uploadDirect(blob, folderName, fileName, metadata = {}) {
     try {
         const { forceOverwrite = false } = metadata;
@@ -297,83 +365,96 @@ export async function uploadDirect(blob, folderName, fileName, metadata = {}) {
             }
         }
 
-        // 3. Search for existing file to decide POST (New) or PATCH (Update)
-        let existingFileId = null;
-        try {
-            const q = `name='${finalFileName.replace(/'/g, "\\'")}' and '${targetFolderId}' in parents and trashed=false`;
-            const searchUrl = `https://www.googleapis.com/drive/v3/files?` +
-                `q=${encodeURIComponent(q)}` +
-                `&fields=files(id,name)&supportsAllDrives=true&includeItemsFromAllDrives=true`;
-            
-            const searchRes = await new Promise((res, rej) => {
-                GM_xmlhttpRequest({
-                    method: 'GET', url: searchUrl,
-                    headers: { 'Authorization': `Bearer ${token}` },
-                    timeout: 30000,
-                    onload: (r) => res(JSON.parse(r.responseText)),
-                    onerror: rej
+        // 3+4. [v1.28.0] Search + Session Init under per-filename lock (prevents duplicate Drive files)
+        const { existingFileId, uploadUrl } = await withUploadLock(finalFileName, async () => {
+            // 3. Search for existing file to decide POST (New) or PATCH (Update)
+            let existingFileId = null;
+            try {
+                const q = `name='${finalFileName.replace(/'/g, "\\'")}' and '${targetFolderId}' in parents and trashed=false`;
+                const searchUrl = `https://www.googleapis.com/drive/v3/files?` +
+                    `q=${encodeURIComponent(q)}` +
+                    `&fields=files(id,name)&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+
+                const searchRes = await new Promise((res, rej) => {
+                    GM_xmlhttpRequest({
+                        method: 'GET', url: searchUrl,
+                        headers: { 'Authorization': `Bearer ${token}` },
+                        timeout: 30000,
+                        onload: (r) => res(JSON.parse(r.responseText)),
+                        onerror: rej
+                    });
                 });
-            });
-            
-            if (searchRes.files && searchRes.files.length > 0) {
-                existingFileId = searchRes.files[0].id;
-                EventBus.emit(EVT.LOG, { msg: `📎 [${fileName}] 기존 파일 발견 → 업데이트(PATCH) 모드`, level: 'info', tag: 'Upload' });
-            }
-        } catch (searchErr) {
-            console.warn('[DirectUpload] Existing file check failed:', searchErr);
-            throw new Error('기존 파일 검색 실패: ' + searchErr.message);
-        }
 
-        // 4. Initialize Resumable Session
-        let uploadUrl = "";
-        const sessionMetadata = {
-            name: finalFileName,
-            parents: existingFileId ? undefined : [targetFolderId]
-        };
-
-        const sessionUrl = existingFileId 
-            ? `https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=resumable&supportsAllDrives=true`
-            : `https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true`;
-
-        uploadUrl = await new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-                method: existingFileId ? 'PATCH' : 'POST',
-                url: sessionUrl,
-                anonymous: true, // Bypass CORS Origin header to ensure Location header is visible
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json; charset=UTF-8',
-                    'X-Upload-Content-Type': blob.type || 'application/octet-stream',
-                    'X-Upload-Content-Length': blob.size.toString()
-                },
-                data: JSON.stringify(sessionMetadata),
-                timeout: 30000,
-                onload: (res) => {
-                    if (res.status >= 200 && res.status < 300) {
-                        const locationMatch = res.responseHeaders.match(/location:\s*([^\r\n]+)/i);
-                        const uploadIdMatch = res.responseHeaders.match(/x-guploader-uploadid:\s*([^\r\n]+)/i);
-                        
-                        if (locationMatch && locationMatch[1]) {
-                            resolve(locationMatch[1].trim());
-                        } else if (uploadIdMatch && uploadIdMatch[1]) {
-                            // Fallback: Manually build URI if Location is stripped by CORS
-                            const sessionUri = new URL(sessionUrl);
-                            sessionUri.searchParams.set('upload_id', uploadIdMatch[1].trim());
-                            resolve(sessionUri.toString());
-                        } else {
-                            EventBus.emit(EVT.LOG, { msg: `❌ [${fileName}] 업로드 세션 URL 추출 실패`, level: 'error', tag: 'Upload' });
-                            reject(new Error(`Failed to extract session URL. Headers: ${res.responseHeaders}`));
-                        }
-                    } else {
-                        EventBus.emit(EVT.LOG, { msg: `❌ [${fileName}] 업로드 세션 초기화 실패 (HTTP ${res.status})`, level: 'error', tag: 'Upload' });
-                        reject(new Error(`Session init failed with status: ${res.status}`));
-                    }
-                },
-                onerror: () => {
-                    EventBus.emit(EVT.LOG, { msg: `❌ [${fileName}] 업로드 세션 네트워크 오류`, level: 'error', tag: 'Upload' });
-                    reject(new Error('Session init network error'));
+                if (searchRes.files && searchRes.files.length > 0) {
+                    existingFileId = searchRes.files[0].id;
+                    EventBus.emit(EVT.LOG, { msg: `📎 [${fileName}] 기존 파일 발견 → 업데이트(PATCH) 모드`, level: 'info', tag: 'Upload' });
                 }
-            });
+            } catch (searchErr) {
+                console.warn('[DirectUpload] Existing file check failed:', searchErr);
+                throw new Error('기존 파일 검색 실패: ' + searchErr.message);
+            }
+
+            // 4. Initialize Resumable Session
+            let uploadUrl = "";
+            const sessionMetadata = {
+                name: finalFileName,
+                parents: existingFileId ? undefined : [targetFolderId]
+            };
+
+            const sessionUrl = existingFileId
+                ? `https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=resumable&supportsAllDrives=true`
+                : `https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true`;
+
+            // [v1.27.3] 세션 초기화 재시도 (최대 2회, anonymous true → false fallback)
+            uploadUrl = await (async () => {
+                for (let attempt = 1; attempt <= 2; attempt++) {
+                    const useAnonymous = (attempt === 1); // 1회차만 anonymous: true
+
+                    try {
+                        return await new Promise((resolve, reject) => {
+                            GM_xmlhttpRequest({
+                                method: existingFileId ? 'PATCH' : 'POST',
+                                url: sessionUrl,
+                                anonymous: useAnonymous,
+                                headers: {
+                                    'Authorization': `Bearer ${token}`,
+                                    'Content-Type': 'application/json; charset=UTF-8',
+                                    'X-Upload-Content-Type': blob.type || 'application/octet-stream',
+                                    'X-Upload-Content-Length': blob.size.toString()
+                                },
+                                data: JSON.stringify(sessionMetadata),
+                                timeout: 30000,
+                                onload: (res) => {
+                                    if (res.status >= 200 && res.status < 300) {
+                                        const locationMatch = res.responseHeaders.match(/location:\s*([^\r\n]+)/i);
+                                        const uploadIdMatch = res.responseHeaders.match(/x-guploader-uploadid:\s*([^\r\n]+)/i);
+
+                                        if (locationMatch && locationMatch[1]) {
+                                            resolve(locationMatch[1].trim());
+                                        } else if (uploadIdMatch && uploadIdMatch[1]) {
+                                            const sessionUri = new URL(sessionUrl);
+                                            sessionUri.searchParams.set('upload_id', uploadIdMatch[1].trim());
+                                            resolve(sessionUri.toString());
+                                        } else {
+                                            reject(new Error(`Session URL extraction failed`));
+                                        }
+                                    } else {
+                                        reject(new Error(`Session init failed with status: ${res.status}`));
+                                    }
+                                },
+                                onerror: () => reject(new Error('Session init network error'))
+                            });
+                        });
+                    } catch (err) {
+                        if (attempt >= 2) throw err;
+                        console.warn(`[DirectUpload] 세션 초기화 ${attempt}회 실패, 재시도: ${err.message}`);
+                        await new Promise(r => setTimeout(r, 2000));
+                    }
+                }
+                throw new Error('Session init failed after 2 attempts');
+            })();
+
+            return { existingFileId, uploadUrl };
         });
 
         // 5. Send chunks

@@ -74,8 +74,8 @@ export function useDownloadManager() {
   }
 
   /**
-   * [LRU GC] 저장소 용량 관리
-   * - 최대 5개의 에피소드만 유지
+   * [GC] 저장소 용량 관리
+   * - 브라우저 저장소가 90% 이상 찼을 때만 오래된 항목 30% 정리
    * - 현재 시청 중이거나 다운로드 중인 데이터는 보호
    */
   async function runGC(currentViewingId = null) {
@@ -83,29 +83,35 @@ export function useDownloadManager() {
     isGCRunning.value = true;
 
     try {
+      // storage.estimate()로 실제 저장소 압력 확인
+      let usage = 0, quota = 1;
+      try {
+        const est = await navigator.storage.estimate();
+        usage = est.usage || 0;
+        quota = est.quota || 1;
+      } catch (_) { /* fallback: GC 생략 */ }
+
+      if (usage / quota < 0.9) return; // 90% 미만이면 GC 불필요
+
       const all = await db.episodeData.orderBy('cachedAt').reverse().toArray();
+      if (all.length <= 5) return;
 
-      // 기존: all.length <= 5일 때도 early return으로 인해
-      // isGCRunning이 true로 고착되는 버그가 있었음 — finally를 타게 return 전환
-      if (all.length > 5) {
-        // 보호 대상 ID 목록
-        const protectedIds = new Set();
-        if (currentViewingId) protectedIds.add(currentViewingId);
-        downloadQueue.forEach((_, id) => protectedIds.add(id));
+      const protectedIds = new Set();
+      if (currentViewingId) protectedIds.add(currentViewingId);
+      downloadQueue.forEach((_, id) => protectedIds.add(id));
 
-        const candidates = all.slice(5); // 5개 이후 가장 오래된 순서
-        const toDelete = candidates.filter(item => !protectedIds.has(item.fileId));
+      const keepCount = Math.ceil(all.length * 0.7); // 최신 70% 유지
+      const toDelete = all.slice(keepCount).filter(item => !protectedIds.has(item.fileId));
 
-        if (toDelete.length > 0) {
-          const ids = toDelete.map(item => item.fileId);
-          await db.episodeData.bulkDelete(ids);
-          console.log(`[LRU:GC] Removed ${ids.length} episodes. Protected: ${protectedIds.size}`);
-        }
+      if (toDelete.length > 0) {
+        const ids = toDelete.map(item => item.fileId);
+        await db.episodeData.bulkDelete(ids);
+        console.log(`[LRU:GC] Storage at ${(usage/quota*100).toFixed(0)}%. Removed ${ids.length} old episodes.`);
       }
     } catch (err) {
       console.warn('[LRU:GC] Error:', err);
     } finally {
-      isGCRunning.value = false; // 항상 실행됨 (조기 return 없음)
+      isGCRunning.value = false;
     }
   }
 

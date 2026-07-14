@@ -476,11 +476,13 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                         method: "POST", url: config.gasUrl,
                         data: JSON.stringify({ type: "get_library", folderId: config.folderId, apiKey: config.apiKey, protocolVersion: 3 }),
                         headers: { "Content-Type": "text/plain" },
+                        timeout: 30000, // [v1.27.3] 30초 타임아웃 추가 (무한 대기 방지)
                         onload: (r) => {
                             try { resolve(JSON.parse(r.responseText)); } 
                             catch(e) { reject(e); }
                         },
-                        onerror: reject
+                        onerror: reject,
+                        ontimeout: () => reject(new Error('get_library request timed out (30s)'))
                     });
                 });
 
