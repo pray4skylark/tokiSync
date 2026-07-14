@@ -75,4 +75,7 @@ export const EVT = {
     PARSE_VERIFY:       'parse:verify',     // 셀렉터 검증 요청
     PARSE_TEST:         'parse:test',       // 추출 테스트 요청
     RULE_CACHE_CLEAR:   'rule:cache_clear', // 파서 캐시 무효화
+
+    // ── Queue → UI 방향 ─────────────────────────────────
+    STORAGE_FATAL:      'storage:fatal',    // 큐 저장 완전 실패 (재시도 소진)
 };

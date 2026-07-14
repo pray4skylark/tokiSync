@@ -67,6 +67,27 @@ const logicalIndex = ref(0);
 const isInternalSyncing = ref(false);
 const isRestoring = ref(true); // [v2.9-fix] 시작 시 잠금 상태로 출발
 
+// [v2.9.4] Safety timeout: isRestoring 15초 이상 풀리지 않으면 강제 해제
+const RESTORE_TIMEOUT = 15000;
+let _restoreTimer = null;
+
+function _startRestoreTimer() {
+  _clearRestoreTimer();
+  _restoreTimer = setTimeout(() => {
+    if (isRestoring.value) {
+      console.warn('[V2:Restore] FORCED UNLOCK — restore timed out');
+      isRestoring.value = false;
+    }
+  }, RESTORE_TIMEOUT);
+}
+
+function _clearRestoreTimer() {
+  if (_restoreTimer) {
+    clearTimeout(_restoreTimer);
+    _restoreTimer = null;
+  }
+}
+
 export function useProgressMarker() {
   
   const getStrategy = (type) => {
@@ -151,6 +172,7 @@ export function useProgressMarker() {
   const resetLocator = () => {
     logicalIndex.value = 0;
     isInternalSyncing.value = false;
+    _clearRestoreTimer();
     console.log('[V2:Locator] Reset to 0');
   };
 
@@ -161,13 +183,13 @@ export function useProgressMarker() {
     // Handle both Ref and plain object for flexibility
     const ep = store.currentEpisode?.value || store.currentEpisode;
     if (!ep?.id) {
-      // If we don't have an episode, we can't restore, but we MUST unlock
       isRestoring.value = false;
       return;
     }
-    
+
     try {
       isRestoring.value = true;
+      _startRestoreTimer();
       const history = await db.readHistory.get(ep.id);
       if (!history || history.markerIndex === undefined) {
         console.warn(`[V2:Restore] ⚠️ No history found for ep.id=${ep.id}. Resetting to 0.`);
@@ -259,6 +281,7 @@ export function useProgressMarker() {
     } catch (err) {
       console.error('[V2:Restore] Error:', err);
     } finally {
+      _clearRestoreTimer();
       // Release lock after rendering settles
       setTimeout(() => { 
         isInternalSyncing.value = false; 

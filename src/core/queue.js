@@ -1,6 +1,7 @@
 /**
- * tokiSync v1.21.0 - Persistent Multi-Queue Batch Core
+ * tokiSync v1.28.0 - Persistent Multi-Queue Batch Core
  * 영속성 디스크 큐 및 이벤트 기반 세마포어 스케줄러 엔진
+ * [v1.28.0] saveRawQueue 재시도 + localStorage 폴백 체인 추가
  */
 
 import { EventBus, EVT } from './EventBus.js';
@@ -18,6 +19,10 @@ export const WORKER_STAGE = {
 
 const STORAGE_KEY = 'TOKI_DOWNLOAD_QUEUE';
 const MAX_CONCURRENCY = 2; // 최대 동시 다운로드 수 (현재 직렬 처리로 고정)
+
+// [v1.28.0] 저장 재시도 설정 (무한 루프 방지 + 지수 백오프)
+const SAVE_RETRY_MAX = 3;
+const SAVE_RETRY_BASE_DELAY_MS = 100; // 100ms → 200ms → 400ms 지수 백오프
 
 // 임시 팝업 창 참조 보관용 맵 (Liveness check 및 재활용 루프 대비)
 export const activeWorkers = new Map();
@@ -49,17 +54,94 @@ const getRawQueue = () => {
   return [];
 };
 
-const saveRawQueue = (queue) => {
-  try {
-    if (typeof GM_setValue !== 'undefined') {
-      GM_setValue(STORAGE_KEY, queue);
-    } else if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(queue));
+/**
+ * [v1.28.0] 단일 동기 저장 시도 — GM_setValue 1차, localStorage 2차 폴백
+ * MV3 대응: GM_setValue가 Promise를 반환하면 .catch로 비동기 재시도 트리거
+ * @param {Array} queue 저장할 큐 데이터
+ * @returns {boolean} 동기 성공 여부 (MV3 Promise fire-and-forget은 항상 true)
+ */
+const trySaveOnce = (queue) => {
+  // 1차: GM_setValue (Tampermonkey 네이티브)
+  if (typeof GM_setValue !== 'undefined') {
+    try {
+      const result = GM_setValue(STORAGE_KEY, queue);
+      // MV3: Promise 반환 시 실패하면 비동기 재시도 스케줄링
+      if (result && typeof result.catch === 'function') {
+        result.catch(err => {
+          console.warn('[TokiSync Queue] MV3 GM_setValue 비동기 실패:', err.message);
+          scheduleRetry(queue, 1);
+        });
+      }
+      return true;
+    } catch (gmErr) {
+      console.warn('[TokiSync Queue] GM_setValue 실패, localStorage 폴백 시도:', gmErr.message);
     }
-    EventBus.emit(EVT.UPDATE_PROGRESS);
-  } catch (e) {
-    console.error('[TokiSync Queue] Failed to save queue to storage:', e);
   }
+  // 2차: localStorage 폴백 (GM API 불안정 시 영속성 보존)
+  if (typeof localStorage !== 'undefined') {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(queue));
+      return true;
+    } catch (lsErr) {
+      console.error('[TokiSync Queue] localStorage 폴백도 실패:', lsErr.message);
+    }
+  }
+  return false;
+};
+
+/**
+ * [v1.28.0] 비동기 재시도 스케줄러 (메인 스레드 비차단)
+ * setTimeout 기반 지수 백오프. 완전 실패 시 EventBus로 UI에 알림.
+ * @param {Array} queue 저장할 큐 데이터
+ * @param {number} attempt 현재 시도 횟수 (1-based)
+ */
+const scheduleRetry = (queue, attempt) => {
+  if (attempt > SAVE_RETRY_MAX) {
+    console.error(
+      `[TokiSync Queue] ❌ 치명적: 큐 저장 완전 실패 (${SAVE_RETRY_MAX}회 재시도 모두 실패). 데이터 유실 위험!`
+    );
+    EventBus.emit(EVT.STORAGE_FATAL, {
+      key: STORAGE_KEY,
+      dataSize: JSON.stringify(queue).length,
+      retriesExhausted: SAVE_RETRY_MAX
+    });
+    return;
+  }
+
+  const delayMs = SAVE_RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1);
+  console.warn(`[TokiSync Queue] 저장 재시도 ${attempt}/${SAVE_RETRY_MAX} (${delayMs}ms 백오프)...`);
+
+  setTimeout(() => {
+    if (trySaveOnce(queue)) {
+      EventBus.emit(EVT.UPDATE_PROGRESS);
+      console.log(`[TokiSync Queue] ✅ 저장 재시도 성공 (${attempt}회차)`);
+    } else {
+      scheduleRetry(queue, attempt + 1);
+    }
+  }, delayMs);
+};
+
+/**
+ * [v1.28.0] 영속성 큐 저장 — 동기 즉시 시도 + 비동기 재시도 폴백
+ *
+ * 설계 원칙:
+ * - 동기 API 유지 (호출자 변경 불필요: worker-controller 11곳, downloader 4곳, MenuModal 6곳)
+ * - GM_setValue 즉시 성공 → 동기 완료 (기존 동작 동일)
+ * - GM_setValue 실패 → localStorage 동기 폴백 → 성공 시 즉시 반환
+ * - 모두 실패 → setTimeout 기반 비동기 재시도 (메인 스레드 비차단)
+ * - MV3 Promise reject → 비동기 재시도 자동 트리거
+ * - 완전 실패 → EVT.STORAGE_FATAL 이벤트 발행 (UI 경고 표시 가능)
+ *
+ * @param {Array} queue 저장할 큐 데이터
+ */
+const saveRawQueue = (queue) => {
+  // 동기 즉시 시도 (MV2: 완료, MV3: Promise fire-and-forget)
+  if (trySaveOnce(queue)) {
+    EventBus.emit(EVT.UPDATE_PROGRESS);
+    return;
+  }
+  // 동기 경로 실패 → 비동기 재시도 시작 (호출자는 즉시 리턴, 블로킹 없음)
+  scheduleRetry(queue, 1);
 };
 
 // 32비트 FNV-1a 해시를 36진수 아스키 문자열로 변환하여 한글 유실 없는 고유 아스키 ID 보장

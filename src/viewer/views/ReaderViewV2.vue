@@ -19,6 +19,9 @@
         <div class="flex flex-col items-center scale-110">
           <div class="w-10 h-10 border-[3px] border-white/5 border-t-theme-accent rounded-full animate-spin mb-5"></div>
           <p class="text-[9px] font-black tracking-[0.5em] uppercase text-theme-accent animate-pulse">Synchronizing Position</p>
+          <button @click="exitViewer" class="mt-10 px-8 py-3 bg-red-500/20 hover:bg-red-500/40 text-red-500 border border-red-500/50 rounded-2xl text-sm font-black transition-all uppercase tracking-widest">
+            취소하고 나가기
+          </button>
         </div>
       </div>
     </transition>
@@ -67,6 +70,16 @@
                     :settings="novelSettings"
                     @ready="onRendererReady" />
       
+      <div v-else-if="episodeLoadError" class="flex flex-col items-center justify-center h-full text-zinc-400 px-8">
+        <p class="text-sm mb-8 text-center leading-relaxed">
+          콘텐츠를 불러오지 못했습니다.<br>
+          <span class="text-[10px] opacity-50">네트워크 상태를 확인하거나 다시 시도해주세요.</span>
+        </p>
+        <div class="flex gap-4">
+          <button @click="retryLoad" class="px-8 py-3 bg-theme-accent/20 hover:bg-theme-accent/40 text-theme-accent border border-theme-accent/50 rounded-2xl text-sm font-black transition-all uppercase tracking-widest">재시도</button>
+          <button @click="exitViewer" class="px-8 py-3 bg-red-500/20 hover:bg-red-500/40 text-red-500 border border-red-500/50 rounded-2xl text-sm font-black transition-all uppercase tracking-widest">나가기</button>
+        </div>
+      </div>
       <div v-else-if="!viewerContent && !isDownloading" class="text-zinc-600 py-20">콘텐츠 로드 대기 중...</div>
 
       <!-- End of Chapter: 다음 화 안내 인라인 섹션 (Scroll Mode) -->
@@ -214,6 +227,7 @@ const {
   pageSlots, currentSlotIndex,
   novelCurrentPage, novelPageCount,
   exitViewer, goToNextEpisode, goToPrevEpisode,
+  retryLoad, episodeLoadError,
   setViewerMode, handleWheel, handleNext, handlePrev, onScrollUpdate,
   cleanupBlobUrls,
   setNovelTheme, adjustFontSize, setLineHeight, toggleNovelSpread

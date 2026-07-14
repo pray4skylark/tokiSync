@@ -75,11 +75,16 @@
         <!-- 레퍼런스: rounded-[32px] shadow-2xl theme-card border -->
         <div class="flex-1 ep-card rounded-[32px] shadow-2xl overflow-hidden ep-border transition-all">
 
-          <!-- 카드 헤더: 레퍼런스 bg-black/5 dark:bg-white/10 -->
+          <!-- 헤더에 Select All 버튼 추가 -->
           <div class="px-8 py-6 flex justify-between items-center ep-border-b ep-list-header">
-            <span class="text-xs font-black uppercase tracking-widest ep-text">
-              전체 <span class="ep-text-accent">{{ episodes.length }}</span>화
-            </span>
+            <div class="flex items-center gap-4">
+              <span class="text-xs font-black uppercase tracking-widest ep-text">
+                전체 <span class="ep-text-accent">{{ episodes.length }}</span>화
+              </span>
+              <button @click.stop="selectAllDownload"
+                      class="text-[9px] font-black uppercase tracking-wider ep-text-sub hover:ep-text-accent transition-colors"
+                      title="모두 선택">Select All</button>
+            </div>
             <!-- 정렬 버튼: 레퍼런스 underline 스타일 -->
             <div class="flex space-x-5 text-[10px] font-black ep-text-sub uppercase tracking-widest">
               <button
@@ -121,6 +126,17 @@
               @click="startReading(ep)"
               class="ep-episode-row p-6 flex items-center cursor-pointer transition-all group"
             >
+              <!-- 체크박스 (다중 선택) -->
+              <div @click.stop="toggleDownloadSelection(ep.id)"
+                   class="w-10 flex-shrink-0 flex items-center justify-center mr-2">
+                <div :class="downloadSelection.has(ep.id)
+                  ? 'bg-theme-accent border-theme-accent'
+                  : 'border-zinc-600 hover:border-zinc-400'"
+                     class="w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all">
+                  <svg v-if="downloadSelection.has(ep.id)" class="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                </div>
+              </div>
+
               <!-- 썸네일: 레퍼런스의 aspect-[1/1.45] 세로 비율 + hover scale -->
               <div class="w-20 md:w-24 aspect-cover rounded-xl overflow-hidden ep-thumb-bg flex-shrink-0 shadow-md ep-border">
                 <img
@@ -186,6 +202,22 @@
           </div>
         </div>
 
+        <!-- [v2.9.4] 다중 선택 플로팅 바 -->
+        <transition name="fade">
+          <div v-if="downloadSelection.size > 0"
+               class="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 bg-zinc-900/95 backdrop-blur-2xl border border-white/10 rounded-2xl px-6 py-4 flex items-center gap-6 shadow-2xl">
+            <span class="text-sm font-black text-white whitespace-nowrap">{{ downloadSelection.size }}개 선택됨</span>
+            <button @click="handleDownloadSelected"
+                    class="px-6 py-2 bg-theme-accent hover:brightness-110 text-white rounded-xl text-[11px] font-black uppercase tracking-wider transition-all">
+              선택 다운로드
+            </button>
+            <button @click="clearDownloadSelection"
+                    class="px-4 py-2 text-zinc-400 hover:text-white text-[11px] font-black uppercase tracking-wider transition-all">
+              선택 해제
+            </button>
+          </div>
+        </transition>
+
       </div>
     </div>
   </main>
@@ -200,7 +232,8 @@ const {
   selectedItem, episodes, isSyncing,
   startReading, refreshEpisodes,
   getThumbnailUrl, formatSize, NO_IMAGE_SVG,
-  lastReadEpisode, currentEpisode, viewerDefaults
+  lastReadEpisode, currentEpisode, viewerDefaults,
+  downloadSelection, toggleDownloadSelection, clearDownloadSelection, selectAllDownload
 } = useStore();
 
 const { startDownload, getStatus, isCached } = useDownloadManager();
@@ -262,6 +295,17 @@ const sortedEpisodes = computed(() => {
 // 다운로드 처리
 function handleDownload(ep) {
   startDownload(ep, viewerDefaults.downloadThreads);
+}
+
+function handleDownloadSelected() {
+  const ids = [...downloadSelection];
+  ids.forEach(id => {
+    const ep = episodes.value.find(e => e.id === id);
+    if (ep && !cacheMap.value[id]) {
+      startDownload(ep, viewerDefaults.downloadThreads);
+    }
+  });
+  clearDownloadSelection();
 }
 
 function getFileIcon(ep) {
@@ -350,4 +394,8 @@ function formatDate(dateStr) {
 /* no-scrollbar */
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* 플로팅 바 페이드 */
+.fade-enter-active, .fade-leave-active { transition: opacity 0.25s ease, transform 0.25s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; transform: translateY(16px); }
 </style>

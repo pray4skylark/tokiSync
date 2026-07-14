@@ -100,7 +100,7 @@
         <!-- Footer -->
         <div class="p-8 bg-black/20 border-t border-white/5">
           <p class="text-[10px] font-medium text-zinc-500 text-center leading-relaxed">
-            최대 5개의 에피소드가 IndexedDB에 자동 캐시됩니다 (LRU).<br>
+            브라우저 저장소가 허용하는 범위 내에서 캐시가 자동 관리됩니다.<br>
             캐시된 에피소드는 오프라인 상태에서도 시청이 가능합니다.
           </p>
         </div>

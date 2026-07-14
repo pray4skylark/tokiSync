@@ -34,6 +34,10 @@
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
           </svg>
         </button>
+        <button @click="editMode = !editMode"
+                :class="editMode ? 'bg-theme-accent text-white shadow-lg shadow-theme-accent/30' : 'bg-theme-surface text-theme-muted hover:text-theme-text'"
+                class="w-14 h-14 flex-shrink-0 flex items-center justify-center rounded-2xl transition-all text-lg"
+                title="편집 모드">✏️</button>
       </div>
     </div>
     
@@ -57,14 +61,21 @@
     </div>
 
     <div v-else class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-10">
-      <div v-for="item in filteredLibrary" :key="item.id" @click="openSeries(item)" class="group cursor-pointer">
-        <div class="relative aspect-cover rounded-[36px] overflow-hidden card-hover bg-theme-thumb-bg shadow-2xl border border-theme-border transition-all">
+      <div v-for="item in filteredLibrary" :key="item.id"
+           @click="editMode ? openEditModal(item) : openSeries(item)"
+           class="group cursor-pointer">
+        <div :class="editMode ? 'ring-2 ring-theme-accent/60' : ''"
+             class="relative aspect-cover rounded-[36px] overflow-hidden card-hover bg-theme-thumb-bg shadow-2xl border border-theme-border transition-all">
           <img :src="getThumbnailUrl(item)" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
                @error="$event.target.src = NO_IMAGE_SVG">
-          <!-- 편집 버튼 -->
-          <button @click.stop="openEditModal(item)" 
-                  class="absolute top-4 right-4 w-9 h-9 bg-zinc-950/80 backdrop-blur border border-white/10 hover:bg-theme-accent hover:border-theme-accent rounded-xl flex items-center justify-center text-xs text-white opacity-0 group-hover:opacity-100 transition-all duration-300 shadow-xl"
-                  title="정보 수정">
+          <!-- 편집 모드 오버레이 -->
+          <div v-if="editMode"
+               class="absolute inset-0 bg-black/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+            <span class="text-white text-[10px] font-black uppercase tracking-widest bg-black/60 px-4 py-2 rounded-xl backdrop-blur">✏️ 정보 수정</span>
+          </div>
+          <!-- 편집 버튼 (항상 visible in editMode) -->
+          <button v-if="editMode" @click.stop="openEditModal(item)" 
+                  class="absolute top-4 right-4 w-10 h-10 bg-theme-accent border border-white/20 rounded-xl flex items-center justify-center text-sm text-white shadow-xl transition-transform active:scale-90">
             ✏️
           </button>
         </div>
@@ -93,6 +104,7 @@ const { currentTab, tabs, searchQuery, isInitialLoading, isSyncing, filteredLibr
 
 const isEditOpen = ref(false);
 const editingSeries = ref(null);
+const editMode = ref(false);
 
 const openEditModal = (item) => {
   editingSeries.value = item;
