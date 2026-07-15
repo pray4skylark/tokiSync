@@ -667,11 +667,11 @@ const initApp = async () => {
 
     // [v2.9.4] URL Deep Link 복원
     const urlSeriesId = getUrlSeriesId();
+    const urlEpNum = getUrlEpisodeNumber();
     if (urlSeriesId) {
       const seriesItem = libraryItems.value.find(s => s.id === urlSeriesId);
       if (seriesItem) {
         await openSeries(seriesItem);
-        const urlEpNum = getUrlEpisodeNumber();
         if (urlEpNum) {
           const ep = episodes.value.find(e => String(e.number) === urlEpNum);
           if (ep) await startReading(ep);

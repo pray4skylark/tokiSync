@@ -36,12 +36,16 @@ export function initWorkerExtractor() {
 
     console.log("🚀 [TokiSync:Worker] 자립형 워커 엔진 시동 완료 (수집 전담 모드)");
 
+    // [v1.27.5] Extract session token from popup URL (injected by openEpisodePopup)
+    const workerSessionToken = new URLSearchParams(window.location.search).get('ts_token') || '';
+
     // Establish Handshake Heartbeat every second until parent injects instructions
     let handshakeInterval = setInterval(() => {
         console.log("[TokiSync:Worker] 📢 READY 핸드셰이킹 하트비트 전송 중...");
         sendToParent('WORKER_READY', {
             targetUrl: window.location.href,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            sessionToken: workerSessionToken
         });
     }, 1000);
 

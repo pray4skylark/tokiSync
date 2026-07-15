@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.27.5] - 2026-07-15
+
+###  stopAllWorkers 경합 방어 + Pre-work progress + sessionToken 복원
+- **`src/core/downloader.js`**: `tokiDownload()` 진입 시 `processingSlots.size > 0 || activeWorkers.size > 0` 감지 → 진행 중인 batch/단일 워커 세션 보호 가드. Drive pre-work (thumbnail upload + Smart Skip + Fast Path cache)를 queue 가상 PREP 아이템으로 등록하여 progressPercent 0→5→30→50 단계별 갱신.
+- **`src/core/queue.js`**: `runSchedulerOnce()`에서 `sessionToken: null` 대신 `registerWorkerOrigin(nextItem.id, 'null')` 호출하여 정상 nonce 생성. `openEpisodePopup`에 sessionToken 파라미터 추가 → URL `ts_token` query param 주입. `saveRawQueue` export 추가.
+- **`src/core/worker-extractor.js`**: popup URL에서 `ts_token` 파라미터 추출 → WORKER_READY heartbeat payload에 `sessionToken` 필드 포함 전송.
+- **검증**: `npm run build:core` 성공
+
 ## [v1.27.3] - 2026-07-08
 
 ###  Nonce 차단 버그 수정 (Pre-open 경로 START_EXTRACTION 전달 불가)

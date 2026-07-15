@@ -5,6 +5,7 @@
  */
 
 import { EventBus, EVT } from './EventBus.js';
+import { registerWorkerOrigin } from './ipc-broker.js';
 
 export const WORKER_STAGE = {
   INIT: 'STAGE_INIT',             // 초기화 및 Handshake 대기 중
@@ -134,7 +135,7 @@ const scheduleRetry = (queue, attempt) => {
  *
  * @param {Array} queue 저장할 큐 데이터
  */
-const saveRawQueue = (queue) => {
+export const saveRawQueue = (queue) => {
   // 동기 즉시 시도 (MV2: 완료, MV3: Promise fire-and-forget)
   if (trySaveOnce(queue)) {
     EventBus.emit(EVT.UPDATE_PROGRESS);
@@ -552,7 +553,7 @@ export const runSchedulerOnce = async () => {
     console.log(`[Queue Scheduler] 🔄 runSchedulerOnce 중복진입 차단 (processingSlots=${processingSlots.size})`);
     return;
   }
-  isSchedulerRunning = true;
+  isSchedulerRunning = true; console.error('[DEBUG_RUN] scheduler started, queue:', JSON.stringify(getRawQueue().map(i=>({id:i.id.substring(0,12),s:i.status}))));
   console.log(`[Queue Scheduler] 🔍 runSchedulerOnce 진입 (processingSlots=${processingSlots.size}, _activeProcessing=${_activeProcessing.size}, queue_statuses=[${getRawQueue().map(i=>i.status).join(',')}])`);
   assertConsistent('runSchedulerOnce');
 
@@ -663,18 +664,18 @@ export const runSchedulerOnce = async () => {
     processingSlots.add(nextItem.id);
     updateQueueItem(nextItem.id, { status: 'processing', startedAt: Date.now() });
     
-    const popupRef = openEpisodePopup(nextItem.episodeUrl, nextItem.id);
+    const sessionToken = registerWorkerOrigin(nextItem.id, 'null');
+    const popupRef = openEpisodePopup(nextItem.episodeUrl, nextItem.id, sessionToken);
         if (popupRef) {
         activeWorkers.set(nextItem.id, popupRef);
-        // 세션 토큰은 worker-controller에서 IPC 연결 시 등록
         sessionRegistry.set(nextItem.id, {
-          sessionToken: null, // WORKER_READY 매칭 시 ipc-broker에서 생성
+          sessionToken,
           popupRef,
           createdAt: Date.now(),
           lastActivity: Date.now(),
-          queueItemRef: nextItem // 큐 배열 참조 (touchSessionActivity 최적화)
+          queueItemRef: nextItem
         });
-        console.log(`[Queue Scheduler] ✅ 팝업 등록 완료: ${nextItem.episodeTitle} (ID: ${nextItem.id}, activeWorkers.size=${activeWorkers.size})`);
+        console.log(`[Queue Scheduler] ✅ 팝업 등록 완료: ${nextItem.episodeTitle} (ID: ${nextItem.id}, token=${sessionToken.substring(0, 8)}..., activeWorkers.size=${activeWorkers.size})`);
     } else {
         console.log(`[Queue Scheduler] 🧹 activeWorkers 해제 (팝업 실패): ${nextItem.id}`);
         processingSlots.delete(nextItem.id);
@@ -693,22 +694,23 @@ export const runSchedulerOnce = async () => {
 };
 
 // 팝업 기동 가교 (window.open 래퍼)
-const openEpisodePopup = (url, id) => {
+const openEpisodePopup = (url, id, sessionToken = '') => {
   try {
-    // Node.js 테스트 환경 등 윈도우 객체가 실존하지 않는 환경에서의 안전 예외처리
     if (typeof window === 'undefined' || typeof window.open === 'undefined') {
-      // 가상 Mocking 반환
       return { closed: false };
     }
     
-    // 봇 감지 회피 절충안 규격 (400x600, right-aligned)
+    const tokenUrl = sessionToken
+      ? url + (url.includes('?') ? '&' : '?') + 'ts_token=' + encodeURIComponent(sessionToken)
+      : url;
+    
     const width = 400;
     const height = 600;
     const left = window.screen.width - width - 50;
     const top = 100;
     
     const popupRef = window.open(
-      url, 
+      tokenUrl, 
       `tokisync_novel_worker_${id}`.replace(/[^a-zA-Z0-9_]/g, ''), 
       `width=${width},height=${height},left=${left},top=${top},noopener=false,scrollbars=yes,resizable=yes`
     );

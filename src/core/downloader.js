@@ -13,7 +13,7 @@ import { startSilentAudio, stopSilentAudio } from './anti_sleep.js';
 import { fetchHistory, refreshCacheAfterUpload, getBooksByCacheId, initUpdateUploadViaGASRelay, getMergeIndexFragment } from './gas.js';
 import { fetchHistoryDirect, checkSingleHistoryDirect, getOAuthToken, getOrCreateFolder } from './network.js';
 import { fetchNovelText, fetchComicImages, closeActiveWorker, initBatchWorkerController } from './worker-controller.js';
-import { addEpisodesToQueue, initQueueScheduler, activeWorkers, WORKER_STAGE, updateQueueItem, getQueue, removeQueueItem, getQueueItemId, clearQueue, stopAllWorkers, processingSlots, sessionRegistry, createWorkerSession, destroyWorkerSession, getSessionToken } from './queue.js';
+import { addEpisodesToQueue, initQueueScheduler, activeWorkers, WORKER_STAGE, updateQueueItem, getQueue, removeQueueItem, getQueueItemId, clearQueue, stopAllWorkers, saveRawQueue, processingSlots, sessionRegistry, createWorkerSession, destroyWorkerSession, getSessionToken } from './queue.js';
 import { registerWorkerOrigin } from './ipc-broker.js';
 
 async function shouldSkipEpisode({
@@ -196,7 +196,18 @@ export function parseRangeSpec(spec) {
 export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = false) {
     const config = getConfig();
     let isAsyncDelegate = false;
-    
+
+    // [v1.27.5] 🛡️ 활성 batch 세션 보호 가드
+    if (processingSlots.size > 0 || activeWorkers.size > 0) {
+        EventBus.emit(EVT.LOG, {
+            msg: '⚠️ 현재 배치 다운로드가 진행 중입니다. 완료 후 다시 시도해주세요.',
+            tag: 'Downloader',
+            level: 'warn'
+        });
+        console.warn('[TokiSync] 🛡️ 활성 batch 세션 감지 — 다운로드 요청 차단됨');
+        return;
+    }
+
     // --- 🚨 대기열 프리체크 스마트 필터 및 UI 위임 ---
     const currentQueue = getQueue();
     if (currentQueue.length > 0) {
@@ -397,9 +408,47 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
         // GAS Upload uses individual files so no range needed in folder name
         // [v1.6.0 Update] Batch range is handled during saving, not in rootFolder variable
 
+        // [v1.27.5] 🚀 Pre-work queue item for Drive upload progress tracking
+        let prepItemId = null;
+        if (destination === 'drive' || destination === 'drive_kavita') {
+            prepItemId = `toki_prep_${Date.now()}`;
+            const queue = getQueue();
+            queue.push({
+                id: prepItemId,
+                title: seriesTitle,
+                episodeTitle: '⏳ 업로드 준비 중...',
+                episodeNum: '',
+                episodeUrl: '',
+                folderId: '',
+                category: category,
+                viewerCfg: {},
+                rootFolder: rootFolder,
+                destination: destination,
+                novelFormat: 'epub',
+                matchedRule: {},
+                protocolDomain: '',
+                seriesMetadata: {},
+                forceOverwrite: false,
+                status: 'processing',
+                progressPercent: 0,
+                stage: 'preparing',
+                retryCount: 0,
+                addedAt: Date.now()
+            });
+            saveRawQueue(queue);
+            EventBus.emit(EVT.UPDATE_PROGRESS);
+        }
+
+        function updatePrepProgress(pct, label) {
+            if (!prepItemId) return;
+            updateQueueItem(prepItemId, { progressPercent: pct, episodeTitle: label });
+            EventBus.emit(EVT.UPDATE_PROGRESS);
+        }
+
         // [v1.4.0] Upload Series Thumbnail (if uploading to Drive)
         let historyFolderId = null;
         if (destination === 'drive' || destination === 'drive_kavita') {
+            updatePrepProgress(5, '📷 시리즈 썸네일 업로드 중...');
             try {
                 const thumbnailUrl = parser.getThumbnailUrl();
                 if (thumbnailUrl) {
@@ -424,6 +473,11 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
             } catch (thumbError) {
                 logger.warn(`썸네일 업로드 실패 (계속 진행): ${thumbError.message}`, 'Downloader');
             }
+        }
+
+        // [v1.27.5] Smart Skip & Fast Path progress phase
+        if (destination === 'drive' || destination === 'drive_kavita') {
+            updatePrepProgress(30, '📋 Drive 업로드 기록 확인 중 (Smart Skip)...');
         }
 
         // [v1.5.0 Smart Skip] Pre-load history for Drive uploads to skip already-uploaded episodes
@@ -452,7 +506,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                             uploadedHistorySet.add(plain);           // e.g. "1"
                         });
                         if (uploadedHistorySet.size > 0) {
-                            logger.log(`⏭️ 조건 만족(기존 정상 업로드) 에피소드 ${histResult.data.length}개 감지 — 건너뜁니다.`);
+                            logger.log(`⏭️ 조건 만满足(기존 정상 업로드) 에피소드 ${histResult.data.length}개 감지 — 건너뜁니다.`);
                         }
                     } else {
                         historyCheckTimeoutFlag = true;
@@ -464,6 +518,8 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                 // Non-fatal: if history check fails unexpectedly
                 logger.log(`⚠️ 업로드 기록 조회 실패: ${histErr.message}`, 'warn');
             }
+
+            updatePrepProgress(50, '⚡ 고속 업로드(Fast Path) 캐시 조회 중...');
 
             // [v1.6.0] Phase B-2: Load Master Index -> Cache File ID -> Episode List
             try {
@@ -530,6 +586,15 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                 }
             } catch (cacheErr) {
                 logger.log(`⚠️ 고속 업로드 캐시 로드 실패 (일반 분기로 진행방향 전환): ${cacheErr.message}`, 'warn');
+            }
+
+            // [v1.27.5] Pre-work done — clean up prep item
+            if (prepItemId) {
+                const queue = getQueue();
+                const filtered = queue.filter(q => q.id !== prepItemId);
+                saveRawQueue(filtered);
+                prepItemId = null;
+                EventBus.emit(EVT.UPDATE_PROGRESS);
             }
         }
 
