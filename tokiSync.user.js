@@ -150,6 +150,7 @@ const EVT = {
 /* harmony export */   IS: function() { return /* binding */ getQueue; },
 /* harmony export */   NQ: function() { return /* binding */ destroyWorkerSession; },
 /* harmony export */   PG: function() { return /* binding */ processingSlots; },
+/* harmony export */   R4: function() { return /* binding */ saveRawQueue; },
 /* harmony export */   WB: function() { return /* binding */ WORKER_STAGE; },
 /* harmony export */   a: function() { return /* binding */ sessionRegistry; },
 /* harmony export */   d$: function() { return /* binding */ removeQueueItem; },
@@ -166,11 +167,13 @@ const EVT = {
 /* harmony export */ });
 /* unused harmony exports createWorkerSession, updateQueueItemProgress, removeCompletedAndFailedItems */
 /* harmony import */ var _EventBus_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(31);
+/* harmony import */ var _ipc_broker_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(941);
 /**
  * tokiSync v1.28.0 - Persistent Multi-Queue Batch Core
  * 영속성 디스크 큐 및 이벤트 기반 세마포어 스케줄러 엔진
  * [v1.28.0] saveRawQueue 재시도 + localStorage 폴백 체인 추가
  */
+
 
 
 
@@ -720,7 +723,7 @@ const runSchedulerOnce = async () => {
     console.log(`[Queue Scheduler] 🔄 runSchedulerOnce 중복진입 차단 (processingSlots=${processingSlots.size})`);
     return;
   }
-  isSchedulerRunning = true;
+  isSchedulerRunning = true; console.error('[DEBUG_RUN] scheduler started, queue:', JSON.stringify(getRawQueue().map(i=>({id:i.id.substring(0,12),s:i.status}))));
   console.log(`[Queue Scheduler] 🔍 runSchedulerOnce 진입 (processingSlots=${processingSlots.size}, _activeProcessing=${_activeProcessing.size}, queue_statuses=[${getRawQueue().map(i=>i.status).join(',')}])`);
   assertConsistent('runSchedulerOnce');
 
@@ -831,18 +834,18 @@ const runSchedulerOnce = async () => {
     processingSlots.add(nextItem.id);
     updateQueueItem(nextItem.id, { status: 'processing', startedAt: Date.now() });
     
-    const popupRef = openEpisodePopup(nextItem.episodeUrl, nextItem.id);
+    const sessionToken = (0,_ipc_broker_js__WEBPACK_IMPORTED_MODULE_1__/* .registerWorkerOrigin */ .S6)(nextItem.id, 'null');
+    const popupRef = openEpisodePopup(nextItem.episodeUrl, nextItem.id, sessionToken);
         if (popupRef) {
         activeWorkers.set(nextItem.id, popupRef);
-        // 세션 토큰은 worker-controller에서 IPC 연결 시 등록
         sessionRegistry.set(nextItem.id, {
-          sessionToken: null, // WORKER_READY 매칭 시 ipc-broker에서 생성
+          sessionToken,
           popupRef,
           createdAt: Date.now(),
           lastActivity: Date.now(),
-          queueItemRef: nextItem // 큐 배열 참조 (touchSessionActivity 최적화)
+          queueItemRef: nextItem
         });
-        console.log(`[Queue Scheduler] ✅ 팝업 등록 완료: ${nextItem.episodeTitle} (ID: ${nextItem.id}, activeWorkers.size=${activeWorkers.size})`);
+        console.log(`[Queue Scheduler] ✅ 팝업 등록 완료: ${nextItem.episodeTitle} (ID: ${nextItem.id}, token=${sessionToken.substring(0, 8)}..., activeWorkers.size=${activeWorkers.size})`);
     } else {
         console.log(`[Queue Scheduler] 🧹 activeWorkers 해제 (팝업 실패): ${nextItem.id}`);
         processingSlots.delete(nextItem.id);
@@ -861,22 +864,23 @@ const runSchedulerOnce = async () => {
 };
 
 // 팝업 기동 가교 (window.open 래퍼)
-const openEpisodePopup = (url, id) => {
+const openEpisodePopup = (url, id, sessionToken = '') => {
   try {
-    // Node.js 테스트 환경 등 윈도우 객체가 실존하지 않는 환경에서의 안전 예외처리
     if (typeof window === 'undefined' || typeof window.open === 'undefined') {
-      // 가상 Mocking 반환
       return { closed: false };
     }
     
-    // 봇 감지 회피 절충안 규격 (400x600, right-aligned)
+    const tokenUrl = sessionToken
+      ? url + (url.includes('?') ? '&' : '?') + 'ts_token=' + encodeURIComponent(sessionToken)
+      : url;
+    
     const width = 400;
     const height = 600;
     const left = window.screen.width - width - 50;
     const top = 100;
     
     const popupRef = window.open(
-      url, 
+      tokenUrl, 
       `tokisync_novel_worker_${id}`.replace(/[^a-zA-Z0-9_]/g, ''), 
       `width=${width},height=${height},left=${left},top=${top},noopener=false,scrollbars=yes,resizable=yes`
     );
@@ -9634,7 +9638,18 @@ function parseRangeSpec(spec) {
 async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = false) {
     const config = (0,core_config/* getConfig */.zj)();
     let isAsyncDelegate = false;
-    
+
+    // [v1.27.5] 🛡️ 활성 batch 세션 보호 가드
+    if (core_queue/* processingSlots */.PG.size > 0 || core_queue/* activeWorkers */.mR.size > 0) {
+        EventBus/* EventBus */.l.emit(EventBus/* EVT */.c.LOG, {
+            msg: '⚠️ 현재 배치 다운로드가 진행 중입니다. 완료 후 다시 시도해주세요.',
+            tag: 'Downloader',
+            level: 'warn'
+        });
+        console.warn('[TokiSync] 🛡️ 활성 batch 세션 감지 — 다운로드 요청 차단됨');
+        return;
+    }
+
     // --- 🚨 대기열 프리체크 스마트 필터 및 UI 위임 ---
     const currentQueue = (0,core_queue/* getQueue */.IS)();
     if (currentQueue.length > 0) {
@@ -9835,9 +9850,47 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
         // GAS Upload uses individual files so no range needed in folder name
         // [v1.6.0 Update] Batch range is handled during saving, not in rootFolder variable
 
+        // [v1.27.5] 🚀 Pre-work queue item for Drive upload progress tracking
+        let prepItemId = null;
+        if (destination === 'drive' || destination === 'drive_kavita') {
+            prepItemId = `toki_prep_${Date.now()}`;
+            const queue = (0,core_queue/* getQueue */.IS)();
+            queue.push({
+                id: prepItemId,
+                title: seriesTitle,
+                episodeTitle: '⏳ 업로드 준비 중...',
+                episodeNum: '',
+                episodeUrl: '',
+                folderId: '',
+                category: category,
+                viewerCfg: {},
+                rootFolder: rootFolder,
+                destination: destination,
+                novelFormat: 'epub',
+                matchedRule: {},
+                protocolDomain: '',
+                seriesMetadata: {},
+                forceOverwrite: false,
+                status: 'processing',
+                progressPercent: 0,
+                stage: 'preparing',
+                retryCount: 0,
+                addedAt: Date.now()
+            });
+            (0,core_queue/* saveRawQueue */.R4)(queue);
+            EventBus/* EventBus */.l.emit(EventBus/* EVT */.c.UPDATE_PROGRESS);
+        }
+
+        function updatePrepProgress(pct, label) {
+            if (!prepItemId) return;
+            (0,core_queue/* updateQueueItem */.Gg)(prepItemId, { progressPercent: pct, episodeTitle: label });
+            EventBus/* EventBus */.l.emit(EventBus/* EVT */.c.UPDATE_PROGRESS);
+        }
+
         // [v1.4.0] Upload Series Thumbnail (if uploading to Drive)
         let historyFolderId = null;
         if (destination === 'drive' || destination === 'drive_kavita') {
+            updatePrepProgress(5, '📷 시리즈 썸네일 업로드 중...');
             try {
                 const thumbnailUrl = parser.getThumbnailUrl();
                 if (thumbnailUrl) {
@@ -9862,6 +9915,11 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
             } catch (thumbError) {
                 logger.logger.warn(`썸네일 업로드 실패 (계속 진행): ${thumbError.message}`, 'Downloader');
             }
+        }
+
+        // [v1.27.5] Smart Skip & Fast Path progress phase
+        if (destination === 'drive' || destination === 'drive_kavita') {
+            updatePrepProgress(30, '📋 Drive 업로드 기록 확인 중 (Smart Skip)...');
         }
 
         // [v1.5.0 Smart Skip] Pre-load history for Drive uploads to skip already-uploaded episodes
@@ -9890,7 +9948,7 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                             uploadedHistorySet.add(plain);           // e.g. "1"
                         });
                         if (uploadedHistorySet.size > 0) {
-                            logger.logger.log(`⏭️ 조건 만족(기존 정상 업로드) 에피소드 ${histResult.data.length}개 감지 — 건너뜁니다.`);
+                            logger.logger.log(`⏭️ 조건 만满足(기존 정상 업로드) 에피소드 ${histResult.data.length}개 감지 — 건너뜁니다.`);
                         }
                     } else {
                         historyCheckTimeoutFlag = true;
@@ -9902,6 +9960,8 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                 // Non-fatal: if history check fails unexpectedly
                 logger.logger.log(`⚠️ 업로드 기록 조회 실패: ${histErr.message}`, 'warn');
             }
+
+            updatePrepProgress(50, '⚡ 고속 업로드(Fast Path) 캐시 조회 중...');
 
             // [v1.6.0] Phase B-2: Load Master Index -> Cache File ID -> Episode List
             try {
@@ -9968,6 +10028,15 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                 }
             } catch (cacheErr) {
                 logger.logger.log(`⚠️ 고속 업로드 캐시 로드 실패 (일반 분기로 진행방향 전환): ${cacheErr.message}`, 'warn');
+            }
+
+            // [v1.27.5] Pre-work done — clean up prep item
+            if (prepItemId) {
+                const queue = (0,core_queue/* getQueue */.IS)();
+                const filtered = queue.filter(q => q.id !== prepItemId);
+                (0,core_queue/* saveRawQueue */.R4)(filtered);
+                prepItemId = null;
+                EventBus/* EventBus */.l.emit(EventBus/* EVT */.c.UPDATE_PROGRESS);
             }
         }
 
@@ -11097,12 +11166,16 @@ function initWorkerExtractor() {
 
     console.log("🚀 [TokiSync:Worker] 자립형 워커 엔진 시동 완료 (수집 전담 모드)");
 
+    // [v1.27.5] Extract session token from popup URL (injected by openEpisodePopup)
+    const workerSessionToken = new URLSearchParams(window.location.search).get('ts_token') || '';
+
     // Establish Handshake Heartbeat every second until parent injects instructions
     let handshakeInterval = setInterval(() => {
         console.log("[TokiSync:Worker] 📢 READY 핸드셰이킹 하트비트 전송 중...");
         (0,ipc_broker/* sendToParent */.Ac)('WORKER_READY', {
             targetUrl: window.location.href,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            sessionToken: workerSessionToken
         });
     }, 1000);
 
