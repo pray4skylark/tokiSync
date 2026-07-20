@@ -450,23 +450,26 @@ export class MenuModal {
         const testNativeBtn = doc.getElementById('toki-btn-test-native');
         if (testNativeBtn) {
             testNativeBtn.onclick = async () => {
-                if (this.handlers.testNativeDownload) {
-                    testNativeBtn.disabled = true;
-                    testNativeBtn.textContent = '⏳ 테스트 중...';
-                    const success = await this.handlers.testNativeDownload();
-                    if (success) {
+                testNativeBtn.disabled = true;
+                testNativeBtn.textContent = '⏳ 테스트 중...';
+                try {
+                    const result = await EventBus.request(EVT.TEST_NATIVE_DOWNLOAD, {}, 3000);
+                    if (result.ok) {
                         testNativeBtn.textContent = '✅ 테스트 성공 (폴더 확인)';
                         testNativeBtn.style.color = '#67c23a';
                     } else {
                         testNativeBtn.textContent = '❌ 테스트 실패 (설정 확인)';
                         testNativeBtn.style.color = '#f56c6c';
                     }
-                    setTimeout(() => {
-                        testNativeBtn.disabled = false;
-                        testNativeBtn.textContent = '📂 자동 분류 기능 테스트';
-                        testNativeBtn.style.color = '';
-                    }, 3000);
+                } catch (e) {
+                    testNativeBtn.textContent = '❌ 테스트 실패 (응답 없음)';
+                    testNativeBtn.style.color = '#f56c6c';
                 }
+                setTimeout(() => {
+                    testNativeBtn.disabled = false;
+                    testNativeBtn.textContent = '📂 자동 분류 기능 테스트';
+                    testNativeBtn.style.color = '';
+                }, 3000);
             };
         }
 
@@ -633,20 +636,25 @@ export class MenuModal {
                 if (urlMatch) finalGasId = urlMatch[1];
 
                 if (this.handlers.setConfig) {
-                    this.handlers.setConfig('TOKI_GAS_ID', finalGasId);
-                    this.handlers.setConfig('TOKI_FOLDER_ID', newFolder);
-                    this.handlers.setConfig('TOKI_API_KEY', newApiKey);
-                    this.handlers.setConfig('TOKI_DOWNLOAD_POLICY', newPolicy);
-                    this.handlers.setConfig('TOKI_LOCAL_NAME_TEMPLATE', newNameTemplate);
-                    this.handlers.setConfig('TOKI_SLEEP_MODE', newSleepMode);
-                    this.handlers.setConfig('TOKI_SCAN_SPEED', newScanSpeed);
-                    this.handlers.setConfig('TOKI_NOVEL_FORMAT', newNovelFormat);
-                    this.handlers.setConfig('TOKI_NOVEL_MODE', newNovelMode);
-                    this.handlers.setConfig('TOKI_SMART_SKIP_RATIO', newSmartSkip);
-                    this.handlers.setConfig('TOKI_LOG_LEVEL', newLogLevel);
+                    const results = [];
+                    results.push(this.handlers.setConfig('TOKI_GAS_ID', finalGasId));
+                    results.push(this.handlers.setConfig('TOKI_FOLDER_ID', newFolder));
+                    results.push(this.handlers.setConfig('TOKI_API_KEY', newApiKey));
+                    results.push(this.handlers.setConfig('TOKI_DOWNLOAD_POLICY', newPolicy));
+                    results.push(this.handlers.setConfig('TOKI_LOCAL_NAME_TEMPLATE', newNameTemplate));
+                    results.push(this.handlers.setConfig('TOKI_SLEEP_MODE', newSleepMode));
+                    results.push(this.handlers.setConfig('TOKI_SCAN_SPEED', newScanSpeed));
+                    results.push(this.handlers.setConfig('TOKI_NOVEL_FORMAT', newNovelFormat));
+                    results.push(this.handlers.setConfig('TOKI_NOVEL_MODE', newNovelMode));
+                    results.push(this.handlers.setConfig('TOKI_SMART_SKIP_RATIO', newSmartSkip));
+                    results.push(this.handlers.setConfig('TOKI_LOG_LEVEL', newLogLevel));
+                    const allSaved = results.every(Boolean);
+                    popupWindow.alert(allSaved
+                        ? '설정이 저장되었습니다.'
+                        : '일부 설정 저장에 실패했습니다.\nTampermonkey가 활성화되어 있는지 확인하세요.');
+                } else {
+                    popupWindow.alert('설정이 저장되었습니다.');
                 }
-
-                popupWindow.alert('설정이 저장되었습니다.');
             };
         }
 

@@ -1,6 +1,12 @@
 import { uploadToGAS } from './gas.js';
 import { LogBox, Notifier } from './ui/index.js';
 
+let _downloadBackend = null;
+
+export function setDownloadBackend(backend) {
+    _downloadBackend = backend;
+}
+
 export function arrayBufferToBase64(buffer) {
     const bytes = new Uint8Array(buffer);
     let binary = "";
@@ -523,14 +529,16 @@ export async function saveFile(data, filename, type = 'local', extension = 'zip'
         link.remove();
         console.log(`[Local] 완료`);
     } else if (type === 'native') {
-        // [v1.6.0] GM_download with subfolder support
         const folderName = metadata.folderName || "TokiSync";
-        // Final Path: "TokiSync/SeriesTitle/Filename.zip"
-        const finalPath = `TokiSync/${folderName}/${fullFileName}`.replace(/[<>:"|?*]/g, '_'); // Sanitization for safety
+        const finalPath = `TokiSync/${folderName}/${fullFileName}`.replace(/[<>:"|?*]/g, '_');
 
         console.log(`[Native] 자동 분류 다운로드 시도... (${finalPath})`);
-        const logger = LogBox.getInstance();
 
+        if (_downloadBackend) {
+            return _downloadBackend.download(content, finalPath);
+        }
+
+        const logger = LogBox.getInstance();
         return new Promise((resolve, reject) => {
             if (typeof GM_download !== 'function') {
                 const err = "GM_download 권한이 없거나 지원되지 않는 환경입니다.";

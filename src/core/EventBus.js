@@ -78,4 +78,5 @@ export const EVT = {
 
     // ── Queue → UI 방향 ─────────────────────────────────
     STORAGE_FATAL:      'storage:fatal',    // 큐 저장 완전 실패 (재시도 소진)
+    TEST_NATIVE_DOWNLOAD: 'native:test_download', // 자동 분류(Native) 다운로드 테스트
 };

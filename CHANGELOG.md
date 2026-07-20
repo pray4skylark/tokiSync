@@ -2,12 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
-## [v1.27.5] - 2026-07-15
+## [v1.27.8] - 2026-07-20
 
-###  stopAllWorkers 경합 방어 + Pre-work progress + sessionToken 복원
-- **`src/core/downloader.js`**: `tokiDownload()` 진입 시 `processingSlots.size > 0 || activeWorkers.size > 0` 감지 → 진행 중인 batch/단일 워커 세션 보호 가드. Drive pre-work (thumbnail upload + Smart Skip + Fast Path cache)를 queue 가상 PREP 아이템으로 등록하여 progressPercent 0→5→30→50 단계별 갱신.
-- **`src/core/queue.js`**: `runSchedulerOnce()`에서 `sessionToken: null` 대신 `registerWorkerOrigin(nextItem.id, 'null')` 호출하여 정상 nonce 생성. `openEpisodePopup`에 sessionToken 파라미터 추가 → URL `ts_token` query param 주입. `saveRawQueue` export 추가.
-- **`src/core/worker-extractor.js`**: popup URL에서 `ts_token` 파라미터 추출 → WORKER_READY heartbeat payload에 `sessionToken` 필드 포함 전송.
+### 🏗️ 브랜치 전략 2-tier → 3-tier 전환 (main/develop → main/rc/develop)
+- **`README.md`**: 브랜치 운영 가이드 `rc` 티어 추가 + RC 배포판 링크 /rc/ 경로 추가
+- **`AGENTS.md`**: Pre-Push Workflow 3-Tier Promotion 분할 (Beta/RC/Stable), Release Workflow 체크리스트 추가, 태깅 규칙 변경
+- **`AI_AGENT_CONTEXT.md`**: Release 섹션에 3-tier 설명 추가
+- **`vite.config.js`**: Basepath 결정 로직에 `GITHUB_REF_NAME === 'rc'` → `/rc/` 분기 추가
+- **`.github/workflows/build-release.yml`**: trigger branches에 `rc` 추가, Deploy RC step 추가 (destination_dir: rc)
+- **태킹 규칙**: develop → `vM.m.p-beta.N`, rc → `vM.m.p-rc.N`, main → `vM.m.p`
+- **검증**: `npm run build:core` 성공
+
+## [v1.27.7] - 2026-07-20
+
+### 🏗️ DI StorageBackend + EventBus TEST_NATIVE_DOWNLOAD + viewer URL deep link
+- **`src/viewer/composables/useStore.js`**: 에피소드 숫자 파싱을 `openSeries()`보다 먼저 수행하여 viewer URL deep link redirect 버그 수정
+- **`src/core/storage/StorageBackend.js`** (신규): 추상 StorageBackend 인터페이스 — `get()/set()/delete()` 추상 메서드
+- **`src/core/storage/GMStorageBackend.js`** (신규): GM API 구현체 — Tampermonkey GM_getValue/GM_setValue/GM_deleteValue 래핑. 두 폴백 경로 (GM → localStorage → memory)
+- **`src/core/storage/DownloadBackend.js`** (신규): 추상 DownloadBackend 인터페이스 — `download()`/`supportsDownload()` 추상 메서드
+- **`src/core/storage/GMDownloadBackend.js`** (신규): GM_download 구현체
+- **`src/core/config.js`**: `setConfigStorage(backend)` DI 주입. GM_getValue/GM_setValue 직접 호출 → `_storage.get()/set()`. `setConfig()` 병 저장 실패 시 boolean false 반환
+- **`src/core/queue.js`**: `setQueueStorage(backend)` DI 주입. `getRawQueue`/`trySaveOnce`/`stopAllWorkers`/`initQueueScheduler` 내 GM_getValue/GM_setValue → `_storage`. sessionToken 복원 (registerWorkerOrigin 호출)
+- **`src/core/utils.js`**: `setDownloadBackend(backend)` export. `saveFile` native 구간 → `_downloadBackend.download()` 위임
+- **`src/core/EventBus.js`**: `EVT.TEST_NATIVE_DOWNLOAD` 상수 추가
+- **`src/core/main.js`**: 3개 backend 주입 + EventBus `TEST_NATIVE_DOWNLOAD` 리스너 등록
+- **`src/core/ui/MenuModal.js`**: testNativeDownload → EventBus.request(3s timeout) 전환. save 버튼 API key/folderID 미설정 시 alert
+- **테스트**: 신규 8개 케이스(D1-D8) 포함 38/38 Pass, 3/3 real-env, 8/8 static verification
 - **검증**: `npm run build:core` 성공
 
 ## [v1.27.3] - 2026-07-08

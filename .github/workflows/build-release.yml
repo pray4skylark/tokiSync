@@ -2,7 +2,7 @@ name: Build and Deploy (Dev & Prod)
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, rc]
     tags: ['v*']
     paths:
       - "src/**"
@@ -42,7 +42,7 @@ jobs:
           mkdir -p ./deploy_dist
           cp -r dist/* ./deploy_dist/
 
-      - name: Deploy Dev to gh-pages
+      - name: Deploy Dev to gh-pages (develop)
         if: github.ref == 'refs/heads/develop'
         uses: peaceiris/actions-gh-pages@v4
         with:
@@ -51,7 +51,16 @@ jobs:
           destination_dir: dev
           keep_files: true
 
-      - name: Deploy Stable to gh-pages
+      - name: Deploy RC to gh-pages (rc)
+        if: github.ref == 'refs/heads/rc'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./deploy_dist
+          destination_dir: rc
+          keep_files: true
+
+      - name: Deploy Stable to gh-pages (main/tag)
         if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
         uses: peaceiris/actions-gh-pages@v4
         with:

@@ -19,11 +19,16 @@ export default defineConfig(({ mode }) => {
   let basepath = './'; // 로컬 개발 기본값
 
   if (process.env.GITHUB_ACTIONS) {
-    // GitHub Actions 빌드 시: 
-    // Push(Main) 이벤트면 '/레포명/dev/', 그 외(Release 등)면 '/레포명/'
-    basepath = process.env.GITHUB_EVENT_NAME === 'push'
-      ? `/${repoName}/dev/`
-      : `/${repoName}/`;
+    // GitHub Actions 빌드 시: 브랜치에 따라 basepath 결정
+    // develop → /dev/, rc → /rc/, 그 외(main/tag 등) → /
+    const refName = process.env.GITHUB_REF_NAME;
+    if (refName === 'develop') {
+      basepath = `/${repoName}/dev/`;
+    } else if (refName === 'rc') {
+      basepath = `/${repoName}/rc/`;
+    } else {
+      basepath = `/${repoName}/`; // main, tag, release 등
+    }
   }
 
   return {

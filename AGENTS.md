@@ -48,21 +48,43 @@ core/ → parser/ → ui/ → viewer/ (preferred direction)
 - Update `CHANGELOG.md` immediately with every technical change (Atomic Changelog).
 - After a session, ensure checkpoint is synced to HANDOVER/CONTEXT/CHANGELOG.
 
-## Pre-Push Workflow
-Develop 브랜치로 push 전 필수 선행 작업:
+## Pre-Push Workflow (3-Tier Promotion)
+
+### Tier 1: Beta (develop → origin/develop)
 1. **문서화 완료**: `.agent_checkpoint.md` 및 `CHANGELOG.md` 업데이트 확인
 2. **Graphify 갱신**: `/graphify --update` 실행하여 knowledge graph 최신화
 3. **빌드 검증**: `npm run build:core` 성공 확인
-4. **문서화 커밋 머지**: 직전 작업 커밋과 문서화 커밋을 하나로 합친 후 태그 지정
-   - `git rebase -i HEAD~2` 또는 `git commit --amend`로 작업 커밋에 문서 포함
-   - 태그는 최종 머지된 커밋에 부여 (`git tag -a vMAJOR.MINOR.PATCH`)
-5. **Push**: `git push origin develop --tags` (사용자 직접 실행)
+4. **버전 범프**: `package.json` → `components.script/viewer/gas` 모두 `vM.m.p-beta.N` (최초 beta는 `v1.27.7-beta.1`)
+5. **문서화 커밋 머지**: 직전 작업 커밋과 문서화 커밋을 하나로 합친 후 태그 지정
+   - 태그는 최종 머지된 커밋에 부여 (`git tag -a vM.m.p-beta.N`)
+6. **Push**: `git push origin develop --tags` (사용자 직접 실행)
 
-## Release Workflow
+### Tier 2: RC (rc → origin/rc)
+1. 직전 beta 커밋에서 rc 브랜치 생성/갱신: `git branch -f rc HEAD && git checkout rc`
+2. 버전 범프: `vM.m.p-rc.N`
+3. 빌드 검증: `npm run build` (전체 빌드)
+4. 태그: `git tag -a vM.m.p-rc.N`
+5. Push: `git push origin rc:rc --tags` (사용자 직접 실행)
+
+### Tier 3: Stable (rc → main → origin/main)
+1. RC 검증 완료 → PR: `rc` → `main` (human)
+2. main 병합 후 정식 태그: `git tag -a vM.m.p`
+3. GitHub Release 작성, assets 첨부 (human)
+
+## Release Workflow (3-Tier)
 - No auto-commits or auto-releases. Always get human approval.
 - Version bump only at commit phase after approval.
 - Release assets: `dist/tokiSync.user.js`, `dist/TokiSync_Server_Bundle.gs`.
-- Tag releases with `vMAJOR.MINOR.PATCH` format.
+
+| 단계 | 브랜치 | 태그 예시 | gh-pages | 배포 대상 |
+|------|--------|-----------|----------|-----------|
+| Beta | develop | `v1.27.7-beta.1` | `/dev/` | 최신 기능 조기 테스트 |
+| RC | rc | `v1.27.7-rc.1` | `/rc/` | 정식 전 최종 검증 |
+| Stable | main | `v1.27.7` | `/` (root) | 실서비스 정식 배포 |
+
+### Promotion 체크리스트
+- **Beta → RC**: 기능 완료, 모든 테스트 통과, 릴리즈 노트 초안
+- **RC → Stable**: RC 기간 내 P1/P2 없음, 최종 QA 완료, 정식 릴리즈 노트 완료
 
 ## Commit Convention
 - 커밋 메시지는 **한글**로 작성한다.

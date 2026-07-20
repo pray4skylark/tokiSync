@@ -122,7 +122,14 @@ AI Agents MUST apply or be prompted with the appropriate expert skills correspon
 
 ---
 
-## 6. Release & Deployment Protocol
+## 6. Release & Deployment Protocol (3-Tier)
+
+### 6.0. Branch Strategy
+```
+develop (Beta, vM.m.p-beta.N) → rc (RC, vM.m.p-rc.N) → main (Stable, vM.m.p)
+```
+- 자세한 규칙은 `AGENTS.md`의 Pre-Push Workflow 참조.
+- gh-pages 배포 경로: `develop` → `/dev/`, `rc` → `/rc/`, `main`/tag → `/` (root)
 
 ### 6.1. GitHub Release Artifacts
 

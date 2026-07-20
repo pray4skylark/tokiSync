@@ -1,8 +1,9 @@
 import { EventBus, EVT } from './EventBus.js';
-import { addEpisodesToQueue, initQueueScheduler, activeWorkers, processingSlots, sessionRegistry, getQueue, clearQueue, getQueueItemId } from './queue.js';
+import { addEpisodesToQueue, initQueueScheduler, activeWorkers, processingSlots, sessionRegistry, getQueue, clearQueue, getQueueItemId, setQueueStorage } from './queue.js';
 import { initBatchWorkerController } from './worker-controller.js';
 import { CbzBuilder } from './cbz.js';
-import { getConfig } from './config.js';
+import { getConfig, setConfig, setConfigStorage } from './config.js';
+import { GMStorageBackend } from './storage/GMStorageBackend.js';
 import JSZip from 'jszip';
 
 globalThis.JSZip = JSZip;
@@ -1307,6 +1308,194 @@ test('EVT에 NOTIFY_CONFIRM, DOWNLOAD_DONE, VERIFY_RESULT, TEST_RESULT dead cons
 
     if (EVT.NOTIFY_CONFIRM !== undefined) {
         throw new Error('M1 dead constants 제거 실패: NOTIFY_CONFIRM 잔존');
+    }
+});
+
+// ── D1: DI StorageBackend 기본 CRUD ─────────────────────────
+test('GMStorageBackend가 get/set/delete를 정상 수행해야 합니다.', async () => {
+    const backupGMget = globalThis.GM_getValue;
+    const backupGMset = globalThis.GM_setValue;
+    const backupGMdel = globalThis.GM_deleteValue;
+    const mockStore = new Map();
+
+    globalThis.GM_getValue = (k, d) => mockStore.has(k) ? mockStore.get(k) : d;
+    globalThis.GM_setValue = (k, v) => { mockStore.set(k, v); };
+    globalThis.GM_deleteValue = (k) => { mockStore.delete(k); };
+
+    const backend = new GMStorageBackend();
+    const testKey = '__toki_test_d1__';
+
+    backend.set(testKey, { a: 1, b: 'hello' });
+    const result = backend.get(testKey);
+    console.assert(result !== null && result !== undefined && result.b === 'hello',
+        `get() 값: ${JSON.stringify(result)}`);
+
+    backend.delete(testKey);
+    const afterDelete = backend.get(testKey, 'default');
+    console.assert(afterDelete === 'default',
+        `delete() 후 get() 값: ${afterDelete}`);
+
+    globalThis.GM_getValue = backupGMget;
+    globalThis.GM_setValue = backupGMset;
+    globalThis.GM_deleteValue = backupGMdel;
+
+    if (!result || result.b !== 'hello') {
+        throw new Error('D1: GMStorageBackend 기본 CRUD 실패');
+    }
+});
+
+// ── D2: setConfigStorage 주입 후 config 저장 ──────────────────
+test('setConfigStorage 주입 후 setConfig/getConfig가 StorageBackend를 사용해야 합니다.', () => {
+    const backupGMget = globalThis.GM_getValue;
+    const backupGMset = globalThis.GM_setValue;
+    const backupLS = globalThis.localStorage;
+    const mockStore = new Map();
+
+    globalThis.GM_getValue = (k, d) => mockStore.has(k) ? mockStore.get(k) : d;
+    globalThis.GM_setValue = (k, v) => { mockStore.set(k, v); };
+    globalThis.localStorage = { getItem: () => null, setItem: () => {} };
+
+    const backend = new GMStorageBackend();
+    setConfigStorage(backend);
+
+    setConfig('TOKI_GAS_ID', 'test-gas-id-d2');
+    const cfg = getConfig();
+
+    globalThis.GM_getValue = backupGMget;
+    globalThis.GM_setValue = backupGMset;
+    globalThis.localStorage = backupLS;
+    setConfigStorage(null);
+
+    const ok = cfg.gasId === 'test-gas-id-d2';
+    console.assert(ok, `getConfig().gasId: ${cfg.gasId}`);
+    if (!ok) {
+        throw new Error('D2: setConfigStorage 주입 후 getConfig 불일치');
+    }
+});
+
+// ── D3: setConfig()가 실패 시 false 반환 ──────────────────────
+test('setConfig()는 저장 실패 시 boolean false를 반환해야 합니다.', () => {
+    setConfigStorage(null);
+
+    const _stored = {};
+    globalThis.GM_setValue = (k, v) => { _stored[k] = v; return undefined; };
+    globalThis.GM_getValue = (k, d) => _stored[k] ?? d;
+    globalThis.localStorage = { getItem: () => null, setItem: () => {} };
+
+    const ok = setConfig('TOKI_SLEEP_MODE', 'slow');
+
+    delete globalThis.GM_setValue;
+    delete globalThis.GM_getValue;
+    delete globalThis.localStorage;
+
+    console.assert(ok === true, `setConfig() 성공 시 반환값: ${ok}`);
+    if (ok !== true) {
+        throw new Error('D3: setConfig() 반환값이 true가 아님');
+    }
+});
+
+// ── D4: TEST_NATIVE_DOWNLOAD EventBus request/respond ────────
+test('EventBus.request(TEST_NATIVE_DOWNLOAD)가 성공 응답을 수신해야 합니다.', async () => {
+    const unsub = EventBus.on(EVT.TEST_NATIVE_DOWNLOAD, ({ _requestId }) => {
+        EventBus.respond(EVT.TEST_NATIVE_DOWNLOAD, _requestId, { ok: true, data: { result: 'ok' } });
+    });
+
+    const result = await EventBus.request(EVT.TEST_NATIVE_DOWNLOAD, {}, 3000);
+    unsub();
+
+    console.assert(result !== undefined && result.result === 'ok',
+        `응답 data: ${JSON.stringify(result)}`);
+
+    if (!result || result.result !== 'ok') {
+        throw new Error('D4: TEST_NATIVE_DOWNLOAD respond 실패');
+    }
+});
+
+// ── D5: TEST_NATIVE_DOWNLOAD 실패 응답 ────────────────────────
+test('EventBus.request(TEST_NATIVE_DOWNLOAD)가 실패 응답을 수신해야 합니다.', async () => {
+    const unsub = EventBus.on(EVT.TEST_NATIVE_DOWNLOAD, ({ _requestId }) => {
+        EventBus.respond(EVT.TEST_NATIVE_DOWNLOAD, _requestId,
+            { ok: false, data: { error: 'GM_download not available' }, error: 'GM_download not available' });
+    });
+
+    let caughtError = null;
+    try {
+        await EventBus.request(EVT.TEST_NATIVE_DOWNLOAD, {}, 3000);
+    } catch (err) {
+        caughtError = err;
+    }
+    unsub();
+
+    console.assert(caughtError !== null, '에러가 발생하지 않음');
+    console.assert(caughtError.message.includes('GM_download'),
+        `오류 메시지: ${caughtError?.message}`);
+
+    if (!caughtError) {
+        throw new Error('D5: 실패 응답 수신 실패');
+    }
+});
+
+// ── D6: EventBus.request 타임아웃 시 reject ──────────────────
+test('EventBus.request()는 타임아웃(50ms) 시 reject되어야 합니다.', async () => {
+    let timedOut = false;
+    try {
+        await EventBus.request('test:no_listener', {}, 50);
+    } catch (err) {
+        timedOut = err.message.includes('Timeout');
+    }
+
+    console.assert(timedOut === true, '타임아웃이 발생하지 않음');
+    if (!timedOut) {
+        throw new Error('D6: 타임아웃 reject 실패');
+    }
+});
+
+// ── D7: 동시 요청 2건 requestId 충돌 방지 ────────────────────
+test('동시 EventBus.request 2건이 각각 올바른 응답을 수신해야 합니다.', async () => {
+    const EVT_A = 'test:req-a';
+    const EVT_B = 'test:req-b';
+
+    const unsubA = EventBus.on(EVT_A, ({ _requestId }) => {
+        EventBus.respond(EVT_A, _requestId, { ok: true, data: 'result-A' });
+    });
+    const unsubB = EventBus.on(EVT_B, ({ _requestId }) => {
+        EventBus.respond(EVT_B, _requestId, { ok: true, data: 'result-B' });
+    });
+
+    const [resA, resB] = await Promise.all([
+        EventBus.request(EVT_A, {}, 3000),
+        EventBus.request(EVT_B, {}, 3000)
+    ]);
+
+    unsubA();
+    unsubB();
+
+    console.assert(resA === 'result-A', `EVT_A 응답: ${resA}`);
+    console.assert(resB === 'result-B', `EVT_B 응답: ${resB}`);
+
+    if (resA !== 'result-A' || resB !== 'result-B') {
+        throw new Error('D7: 동시 request 응답 불일치');
+    }
+});
+
+// ── D8: respond 후 response channel listener가 제거되어야 합니다 (재호출 시 새 listener로 대체 확인). ───
+test('EventBus.respond 후 response channel listener가 제거되어야 합니다.', async () => {
+    const EVT_R = 'test:respond-cleanup';
+
+    const unsub = EventBus.on(EVT_R, ({ _requestId }) => {
+        EventBus.respond(EVT_R, _requestId, { ok: true, data: {} });
+    });
+
+    const res1 = await EventBus.request(EVT_R, {}, 3000);
+    const res2 = await EventBus.request(EVT_R, {}, 3000);
+
+    unsub();
+
+    console.assert(res1 && typeof res1 === 'object', `1차 응답: ${JSON.stringify(res1)}`);
+    console.assert(res2 && typeof res2 === 'object', `2차 응답: ${JSON.stringify(res2)}`);
+
+    if (!res1 || !res2) {
+        throw new Error('D8: response listener 재사용 실패');
     }
 });
 

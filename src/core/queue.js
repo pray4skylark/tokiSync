@@ -7,6 +7,12 @@
 import { EventBus, EVT } from './EventBus.js';
 import { registerWorkerOrigin } from './ipc-broker.js';
 
+let _storage = null;
+
+export function setQueueStorage(backend) {
+  _storage = backend;
+}
+
 export const WORKER_STAGE = {
   INIT: 'STAGE_INIT',             // 초기화 및 Handshake 대기 중
   DOM_READY: 'STAGE_DOM_READY',   // 콘텐츠 DOM 렌더링 및 안정화 대기 중
@@ -41,6 +47,7 @@ export const _activeProcessing = new Set();
 
 // Tampermonkey 환경 및 Node.js/일반 브라우저 환경 간의 영속성 호환 래퍼
 const getRawQueue = () => {
+  if (_storage) return _storage.get(STORAGE_KEY, []);
   try {
     if (typeof GM_getValue !== 'undefined') {
       return GM_getValue(STORAGE_KEY, []);
@@ -62,7 +69,7 @@ const getRawQueue = () => {
  * @returns {boolean} 동기 성공 여부 (MV3 Promise fire-and-forget은 항상 true)
  */
 const trySaveOnce = (queue) => {
-  // 1차: GM_setValue (Tampermonkey 네이티브)
+  if (_storage) return _storage.set(STORAGE_KEY, queue);
   if (typeof GM_setValue !== 'undefined') {
     try {
       const result = GM_setValue(STORAGE_KEY, queue);
@@ -525,7 +532,8 @@ export const stopAllWorkers = (shouldClear = false) => {
   // 3. 일시 정지 해제 및 크로스 탭 정지 동기화 트리거
   setQueuePaused(false);
   try {
-    if (typeof GM_setValue !== 'undefined') {
+    if (_storage) _storage.set('tokisync_queue_stopped_trigger', Date.now());
+    else if (typeof GM_setValue !== 'undefined') {
       GM_setValue('tokisync_queue_stopped_trigger', Date.now());
     } else if (typeof localStorage !== 'undefined') {
       localStorage.setItem('tokisync_queue_stopped_trigger', String(Date.now()));
@@ -732,8 +740,36 @@ export const initQueueScheduler = () => {
     return;
   }
   isQueueSchedulerInitialized = true;
-  // 1. Tampermonkey 네이티브 비동기 스토리지 리스너 감시 활성화
-  if (typeof GM_addValueChangeListener !== 'undefined') {
+  if (_storage) {
+    _storage.addChangeListener(STORAGE_KEY, (key, oldValue, newValue, remote) => {
+      const pendingCount = (Array.isArray(newValue) ? newValue.filter(i => i.status === 'pending').length : 0);
+      runSchedulerOnce();
+      console.log(`[Queue Scheduler] 📡 Storage_setValue 트리거 → runSchedulerOnce 호출 (pending=${pendingCount}, remote=${remote})`);
+    });
+    console.log('[TokiSync Queue] 🚦 스토리지 백엔드 기반 스케줄러가 활성화되었습니다.');
+    if (typeof GM_addValueChangeListener !== 'undefined') {
+      GM_addValueChangeListener('tokisync_queue_stopped_trigger', (key, oldValue, newValue, remote) => {
+        if (remote) {
+          console.log('[Queue] ⏹️ 타 탭의 중단 신호 감지 -> 현재 탭의 자식 워커 강제 폐쇄 및 클린업');
+          for (const [id, popupRef] of activeWorkers.entries()) {
+            try {
+              if (popupRef && !popupRef.closed) {
+                const actualRef = popupRef.ref || popupRef;
+                if (actualRef && typeof actualRef.postMessage === 'function') {
+                  actualRef.postMessage({ type: 'EMERGENCY_STOP', payload: { queueId: id } }, '*');
+                }
+                popupRef.close();
+              }
+            } catch (e) {}
+          }
+          activeWorkers.clear();
+          closedCounts.clear();
+          processingSlots.clear();
+          sessionRegistry.clear();
+        }
+      });
+    }
+  } else if (typeof GM_addValueChangeListener !== 'undefined') {
     GM_addValueChangeListener(STORAGE_KEY, (key, oldValue, newValue, remote) => {
       // 대기열 변동 이벤트가 오면 1회성 스케줄러 즉시 발동
       const pendingCount = (Array.isArray(newValue) ? newValue.filter(i => i.status === 'pending').length : 0);

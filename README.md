@@ -41,15 +41,26 @@
 
 ## 📢 브랜치 운영 가이드
 
-프로젝트의 안정적인 배포 관리를 위해 브랜치 전략이 표준 **Git Flow** 모델로 운영됩니다.
+프로젝트의 안정적인 배포 관리를 위해 브랜치 전략이 **3-Tier Promotion Pipeline** 모델로 운영됩니다.
 
 * **`main` (Production / Stable)**: 
   - **오직 검증 완료된 정식 안정 버전**만 관리되는 실서비스 배포 브랜치입니다.
-  - 정식 릴리즈 태그는 이 브랜치에 부여됩니다.
+  - 정식 릴리즈 태그(`vM.m.p`)는 이 브랜치에 부여됩니다.
   - 🌟 **정식 배포판 타겟**: [stable 뷰어](https://pray4skylark.github.io/tokiSync/) 및 관련 에셋
+* **`rc` (Release Candidate / Pre-release)**: `main` → `develop` 사이의 프리릴리즈 브랜치입니다.
+  - 정식 배포 전 최종 검증을 위한 RC 후보가 관리됩니다.
+  - 🧪 **RC 배포판 타겟**: [RC 뷰어](https://pray4skylark.github.io/tokiSync/rc/) 및 관련 에셋
 * **`develop` (Integration / Dev)**:
   - **모든 새로운 기능 개발 및 통합**을 진행하는 중심 개발 브랜치입니다.
-  - 🧪 **개발용 배포판 타겟**: [dev 개발 빌드 뷰어](https://pray4skylark.github.io/tokiSync/dev/) 및 관련 에셋
+  - 🔬 **개발용 배포판 타겟**: [dev 개발 빌드 뷰어](https://pray4skylark.github.io/tokiSync/dev/) 및 관련 에셋
+
+### Promotion 흐름
+```
+develop (Beta, vM.m.p-beta.N)
+  ↓ 기능 완료 + 테스트 통과
+rc (RC, vM.m.p-rc.N)
+  ↓ QA 통과 + 최종 검증
+main (Stable, vM.m.p)
 
 ---
 
@@ -60,7 +71,8 @@
 ### 1. 📡 GAS 서버 배포
 
 1. **[TokiSync_Server_Bundle.gs (정식 버전)](https://pray4skylark.github.io/tokiSync/TokiSync_Server_Bundle.gs)** 코드를 복사하여 [Google Apps Script](https://script.google.com/)에 붙여넣습니다.
-   - 🧪 *(선택 사항)* 최신 기능 사전 테스트를 원하시면 **[개발 빌드(Dev)](https://pray4skylark.github.io/tokiSync/dev/TokiSync_Server_Bundle.gs)** 코드를 사용하세요.
+   - 🧪 *(RC 버전)* 최신 RC 사전 테스트: **[RC 빌드](https://pray4skylark.github.io/tokiSync/rc/TokiSync_Server_Bundle.gs)**
+   - 🔬 *(Dev 버전)* 최신 기능 테스트: **[개발 빌드(Dev)](https://pray4skylark.github.io/tokiSync/dev/TokiSync_Server_Bundle.gs)**
 2. **프로젝트 설정** > **스크립트 속성**에서 `API_KEY`를 추가하고 원하는 비밀번호를 입력합니다.
 3. `배포` > `새 배포` > `웹 앱` 선택 후 `Anyone (모든 사용자)` 권한으로 배포합니다.
 
@@ -69,13 +81,15 @@
 1. 브라우저에 [Tampermonkey](https://www.tampermonkey.net/) 확장 프로그램을 설치합니다.
 2. 다음 링크 중 하나를 선택하여 UserScript를 설치합니다:
    - 🌟 **[TokiSync UserScript (Stable 정식 버전)](https://pray4skylark.github.io/tokiSync/tokiSync.user.js)** (권장)
-   - 🧪 **[TokiSync UserScript (Dev 개발 빌드)](https://pray4skylark.github.io/tokiSync/dev/tokiSync.user.js)** (최신 기능 테스트)
+   - 🧪 **[TokiSync UserScript (RC 빌드)](https://pray4skylark.github.io/tokiSync/rc/tokiSync.user.js)** (정식 전 최종 검증)
+   - 🔬 **[TokiSync UserScript (Dev 개발 빌드)](https://pray4skylark.github.io/tokiSync/dev/tokiSync.user.js)** (최신 기능 테스트)
 3. 웹툰 사이트 접속 후 메뉴에서 **설정**을 열고 `GAS URL`, `Folder ID`, `API Key`를 입력합니다.
 
 ### 3. 📊 뷰어 실행
 
 - 🌟 **[TokiSync 웹 뷰어 (Stable 정식 버전)](https://pray4skylark.github.io/tokiSync/)** (권장)
-- 🧪 **[TokiSync 웹 뷰어 (Dev 개발 빌드)](https://pray4skylark.github.io/tokiSync/dev/)** (최신 기능 테스트)
+- 🧪 **[TokiSync 웹 뷰어 (RC 빌드)](https://pray4skylark.github.io/tokiSync/rc/)** (정식 전 최종 검증)
+- 🔬 **[TokiSync 웹 뷰어 (Dev 개발 빌드)](https://pray4skylark.github.io/tokiSync/dev/)** (최신 기능 테스트)
 
 ---
 

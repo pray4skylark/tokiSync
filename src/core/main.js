@@ -1,6 +1,10 @@
 import { tokiDownload, processItem } from './downloader.js';
 import { detectSite } from './detector.js'; 
-import { getConfig, setConfig, isConfigValid } from './config.js';
+import { getConfig, setConfig, isConfigValid, setConfigStorage } from './config.js';
+import { setQueueStorage } from './queue.js';
+import { setDownloadBackend } from './utils.js';
+import { GMStorageBackend } from './storage/GMStorageBackend.js';
+import { GMDownloadBackend } from './storage/GMDownloadBackend.js';
 import { MenuModal, LogBox } from './ui/index.js';
 import { logger } from './logger.js';
 import { extractEpisodeData } from './extractor.js';
@@ -18,6 +22,10 @@ import { getCommonPrefix, blobToArrayBuffer, saveFile } from './utils.js';
 
 export async function main() {
     console.log(`🚀 TokiDownloader Loaded (New Core v${SCRIPT_VERSION})`);
+
+    setConfigStorage(new GMStorageBackend());
+    setQueueStorage(new GMStorageBackend());
+    setDownloadBackend(new GMDownloadBackend());
 
     // -- 0. Bootstrap UI Instances --
     const _logbox = LogBox.getInstance();
@@ -407,6 +415,17 @@ export async function main() {
                 logger.error(`❌ 다운로드 실패: ${e.message}`, 'System');
                 console.error(e);
             }
+        }
+    });
+
+    EventBus.on(EVT.TEST_NATIVE_DOWNLOAD, async ({ _requestId }) => {
+        try {
+            const testBlob = new Blob(["TokiSync Native Mode Test File"], { type: "text/plain" });
+            await saveFile(testBlob, "test", "native", "txt", { folderName: "_Test" });
+            EventBus.respond(EVT.TEST_NATIVE_DOWNLOAD, _requestId, { ok: true, data: {} });
+        } catch (e) {
+            console.error("[Native Test Failed]", e);
+            EventBus.respond(EVT.TEST_NATIVE_DOWNLOAD, _requestId, { ok: false, data: { error: e.message } });
         }
     });
 
