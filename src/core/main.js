@@ -1,8 +1,9 @@
-import { tokiDownload, processItem } from './downloader.js';
+import { tokiDownload, processItem, runDrivePreWork } from './downloader.js';
 import { detectSite } from './detector.js'; 
 import { getConfig, setConfig, isConfigValid, setConfigStorage } from './config.js';
 import { setQueueStorage } from './queue.js';
 import { setDownloadBackend } from './utils.js';
+import { setSeriesStorage } from './series-config.js';
 import { GMStorageBackend } from './storage/GMStorageBackend.js';
 import { GMDownloadBackend } from './storage/GMDownloadBackend.js';
 import { MenuModal, LogBox } from './ui/index.js';
@@ -26,6 +27,7 @@ export async function main() {
     setConfigStorage(new GMStorageBackend());
     setQueueStorage(new GMStorageBackend());
     setDownloadBackend(new GMDownloadBackend());
+    setSeriesStorage(new GMStorageBackend());
 
     // -- 0. Bootstrap UI Instances --
     const _logbox = LogBox.getInstance();
@@ -370,7 +372,21 @@ export async function main() {
                 const title = metadata.episodeTitle || "Current_Episode";
                 const seriesTitle = metadata.seriesTitle || "Unknown_Series";
 
-                // 2. 빌더 생성 (카테고리에 따라)
+                const config = getConfig();
+                const destination = (config.policy === 'native') ? 'native' : (config.policy === 'drive' ? 'drive' : 'local');
+
+                // 2. Drive 사전작업 (썸네일·기록·고속캐시)
+                if (destination === 'drive' || destination === 'drive_kavita') {
+                    const match = document.URL.match(/\/novel\/(\d+)/);
+                    const seriesId = match ? match[1] : seriesTitle.replace(/[^a-z0-9]/gi, '_');
+                    await runDrivePreWork({
+                        parser, seriesTitle, rootFolder: seriesTitle,
+                        category: siteInfo.category, destination, seriesId,
+                        forceOverwrite: false
+                    });
+                }
+
+                // 3. 빌더 생성 (카테고리에 따라)
                 const isNovel = (siteInfo.category === 'Novel' || siteInfo.category === 'novel');
                 let builder;
                 let extension = 'cbz';
@@ -382,7 +398,7 @@ export async function main() {
                     builder = new CbzBuilder(title);
                 }
 
-                // 3. 임시 아이템 객체 생성 (processItem 호환용)
+                // 4. 임시 아이템 객체 생성 (processItem 호환용)
                 const tempItem = {
                     title: title,
                     src: document.URL,   // processItem에서 item.src 참조 (API 복호화 포함)
@@ -390,13 +406,10 @@ export async function main() {
                     num: metadata.episodeNum || "0000"
                 };
 
-                const config = getConfig();
-                const destination = (config.policy === 'native') ? 'native' : (config.policy === 'drive' ? 'drive' : 'local');
-
-                // 4. 단건 다운로드 실행 (현재 페이지의 document를 직접 전달)
+                // 5. 단건 다운로드 실행 (현재 페이지의 document를 직접 전달)
                 await processItem(tempItem, builder, siteInfo, null, parser, seriesTitle, document, "", destination);
 
-                // 5. 파일 생성 및 저장
+                // 6. 파일 생성 및 저장
                 logger.log('💾 파일 생성 및 저장 중...', 'System');
                 
                 const zip = await builder.build({

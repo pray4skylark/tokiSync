@@ -180,6 +180,17 @@ export class RuleManager {
     }
 
     /**
+     * Get a rule by its ID
+     * @param {string} id
+     * @returns {Object|null}
+     */
+    static getRuleById(id) {
+        if (!id) return null;
+        const rules = this.getParserRules();
+        return rules.find(r => r.id === id) || null;
+    }
+
+    /**
      * Find a matching rule for the current URL
      * @param {string} url 
      * @returns {Promise<Object|null>}

@@ -28,6 +28,15 @@ export const EventBus = {
     },
     async request(event, payload = {}, timeoutMs = 8000) {
         const requestId = Math.random().toString(36).substring(2, 11);
+
+        // 리스너 미등록 시 즉시 reject (8초 대기 불필요)
+        const listenerCount = (_listeners[event] || []).length;
+        if (listenerCount === 0) {
+            return Promise.reject(new Error(
+                `[EventBus] "${event}" 리스너가 등록되지 않았습니다. 대시보드를 다시 열거나 페이지를 새로고침하세요.`
+            ));
+        }
+
         return new Promise((resolve, reject) => {
             const timer = setTimeout(() => {
                 cleanup();

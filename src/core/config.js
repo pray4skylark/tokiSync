@@ -30,6 +30,10 @@ export function setConfigStorage(backend) {
 
 function _storageGet(key, defaultValue) {
     if (_storage) return _storage.get(key, defaultValue);
+    if (!_storageGet._warned) {
+        console.debug('[Config] Storage backend not initialized (setConfigStorage not called), using direct GM/localStorage fallback.');
+        _storageGet._warned = true;
+    }
     if (typeof GM_getValue !== 'undefined') return GM_getValue(key, defaultValue);
     if (typeof localStorage !== 'undefined') {
         const val = localStorage.getItem(key);

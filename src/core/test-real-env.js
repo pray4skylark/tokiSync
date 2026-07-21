@@ -22,6 +22,8 @@ const originalGM = {
 function setupMockBrowser() {
     globalThis.window = {
         screen: { width: 1920, height: 1080 },
+        addEventListener: () => {},
+        removeEventListener: () => {},
         open() {
             return createMockPopup();
         }

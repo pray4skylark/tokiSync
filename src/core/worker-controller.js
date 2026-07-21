@@ -5,7 +5,7 @@
 
 import { fetchNovelTextViaApi } from './novel-decryptor.js';
 import { registerIpcListener, sendToWorker, registerWorkerOrigin, removeWorkerOrigin, validateNonce, getWorkerIdByNonce } from './ipc-broker.js';
-import { updateQueueItem, WORKER_STAGE, activeWorkers, getQueue, runSchedulerOnce, getQueuePaused, _activeProcessing, processingSlots, sessionRegistry, destroyWorkerSession, getSessionToken, touchSessionActivity, updateSessionPopupRef } from './queue.js';
+import { updateQueueItem, WORKER_STAGE, activeWorkers, getQueue, runSchedulerOnce, getQueuePaused, _activeProcessing, processingSlots, sessionRegistry, destroyWorkerSession, getSessionToken, touchSessionActivity, updateSessionPopupRef, normalizeQueueItem } from './queue.js';
 import { EventBus, EVT } from './EventBus.js';
 import { getConfig, SLEEP_MULTIPLIERS } from './config.js';
 import { refreshCacheAfterUpload } from './gas.js';
@@ -13,6 +13,7 @@ import { EpubBuilder } from './epub.js';
 import { CbzBuilder } from './cbz.js';
 import { TxtBuilder } from './txt.js';
 import { saveFile } from './utils.js';
+import { deleteSeriesConfig } from './series-config.js';
 
 // Reference for the single worker popup (used in sequential mode)
 let activeWorkerRef = null;
@@ -540,7 +541,8 @@ export function initBatchWorkerController() {
         });
 
         try {
-            const { category, destination, novelFormat, episodeTitle, episodeNum, rootFolder, title, matchedRule, localNameTemplate } = item;
+            const normalized = normalizeQueueItem(item);
+            const { category, destination, novelFormat, episodeTitle, episodeNum, rootFolder, title, matchedRule, localNameTemplate } = normalized;
             const isNovel = (category === 'Novel' || category === 'novel');
             const siteName = matchedRule?.name || "TokiSync Parser";
 
@@ -711,22 +713,41 @@ export function initBatchWorkerController() {
 
         EventBus.emit(EVT.UPDATE_PROGRESS);
 
-        // 드라이브 캐시 최종 갱신
+        // 드라이브 캐시 최종 갱신 (전체 큐가 비었을 때만)
         const currentQueue = getQueue();
         const hasActive = currentQueue.some(i => i.status === 'pending' || i.status === 'processing');
         if (!hasActive) {
-            const completedItem = currentQueue.find(i => i.id === matchedId);
-            if (completedItem && (completedItem.destination === 'drive' || completedItem.destination === 'drive_kavita')) {
-                const cleanFolder = completedItem.rootFolder.replace(/^\[[^\]]+\]\s*/, '');
-                const targetFolder = completedItem.destination === 'drive_kavita' ? cleanFolder : completedItem.rootFolder;
-                console.log(`[WorkerController] ☁️ 전 대기열 수집 완료 -> 드라이브 캐시 갱신 시작: ${targetFolder}`);
-                refreshCacheAfterUpload(
-                    targetFolder,
-                    completedItem.category,
-                    completedItem.seriesMetadata || {}
-                ).catch(e =>
-                    console.warn(`[WorkerController] 캐시 갱신 실패: ${e.message}`)
+            const rawItem = currentQueue.find(i => i.id === matchedId);
+            const completedItem = normalizeQueueItem(rawItem);
+            if (completedItem) {
+                if (completedItem.destination === 'drive' || completedItem.destination === 'drive_kavita') {
+                    const cleanFolder = completedItem.rootFolder.replace(/^\[[^\]]+\]\s*/, '');
+                    const targetFolder = completedItem.destination === 'drive_kavita' ? cleanFolder : completedItem.rootFolder;
+                    console.log(`[WorkerController] ☁️ 전 대기열 수집 완료 -> 드라이브 캐시 갱신 시작: ${targetFolder}`);
+                    refreshCacheAfterUpload(
+                        targetFolder,
+                        completedItem.category,
+                        completedItem.seriesMetadata || {}
+                    ).catch(e =>
+                        console.warn(`[WorkerController] 캐시 갱신 실패: ${e.message}`)
+                    );
+                }
+            }
+        }
+
+        // 시리즈 컨피그 GC — 동일 seriesKey 가진 다른 항목 없으면 삭제
+        {
+            const rawItem = currentQueue.find(i => i.id === matchedId);
+            const completedItem = normalizeQueueItem(rawItem);
+            if (completedItem && completedItem.seriesKey) {
+                const sameSeriesActive = currentQueue.some(i =>
+                    i.id !== matchedId &&
+                    i.seriesKey === completedItem.seriesKey &&
+                    (i.status === 'pending' || i.status === 'processing')
                 );
+                if (!sameSeriesActive) {
+                    deleteSeriesConfig(completedItem.seriesKey);
+                }
             }
         }
 
@@ -805,7 +826,8 @@ export function initBatchWorkerController() {
 
             if (matchedId) {
                 const queue = getQueue();
-                const item = queue.find(i => i.id === matchedId);
+                const rawItem = queue.find(i => i.id === matchedId);
+                const item = normalizeQueueItem(rawItem);
                 
                 if (item) {
                     // 🛡️ 안전 대기 중 동일 에피소드의 READY 중복 처리 방어 가드
@@ -1078,18 +1100,37 @@ export function initBatchWorkerController() {
                 const currentQueue = getQueue();
                 const hasActive = currentQueue.some(i => i.status === 'pending' || i.status === 'processing');
                 if (!hasActive) {
-                    const failedItem = currentQueue.find(i => i.id === matchedId);
-                    if (failedItem && (failedItem.destination === 'drive' || failedItem.destination === 'drive_kavita')) {
-                        const cleanFolder = failedItem.rootFolder.replace(/^\[[^\]]+\]\s*/, '');
-                        const targetFolder = failedItem.destination === 'drive_kavita' ? cleanFolder : failedItem.rootFolder;
-                        console.log(`[WorkerController] ☁️ 전 대기열 수집 종료(실패 포함) -> 드라이브 캐시 갱신 시작: ${targetFolder}`);
-                        refreshCacheAfterUpload(
-                            targetFolder,
-                            failedItem.category,
-                            failedItem.seriesMetadata || {}
-                        ).catch(e =>
-                            console.warn(`[WorkerController] 캐시 갱신 실패: ${e.message}`)
+                    const rawItem = currentQueue.find(i => i.id === matchedId);
+                    const failedItem = normalizeQueueItem(rawItem);
+                    if (failedItem) {
+                        if (failedItem.destination === 'drive' || failedItem.destination === 'drive_kavita') {
+                            const cleanFolder = failedItem.rootFolder.replace(/^\[[^\]]+\]\s*/, '');
+                            const targetFolder = failedItem.destination === 'drive_kavita' ? cleanFolder : failedItem.rootFolder;
+                            console.log(`[WorkerController] ☁️ 전 대기열 수집 종료(실패 포함) -> 드라이브 캐시 갱신 시작: ${targetFolder}`);
+                            refreshCacheAfterUpload(
+                                targetFolder,
+                                failedItem.category,
+                                failedItem.seriesMetadata || {}
+                            ).catch(e =>
+                                console.warn(`[WorkerController] 캐시 갱신 실패: ${e.message}`)
+                            );
+                        }
+                    }
+                }
+
+                // 시리즈 컨피그 GC — 동일 seriesKey 가진 다른 항목 없으면 삭제
+                {
+                    const rawItem = currentQueue.find(i => i.id === matchedId);
+                    const failedItem = normalizeQueueItem(rawItem);
+                    if (failedItem && failedItem.seriesKey) {
+                        const sameSeriesActive = currentQueue.some(i =>
+                            i.id !== matchedId &&
+                            i.seriesKey === failedItem.seriesKey &&
+                            (i.status === 'pending' || i.status === 'processing')
                         );
+                        if (!sameSeriesActive) {
+                            deleteSeriesConfig(failedItem.seriesKey);
+                        }
                     }
                 }
 

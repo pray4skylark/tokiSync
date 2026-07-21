@@ -78,8 +78,22 @@ export class LogBox {
             EventBus.on(EVT.TOGGLE_DASHBOARD, () => {
                 this.toggle();
             });
+
+            // ── 저장소 치명적 오류 감지 ──────────────────────────
+            EventBus.on(EVT.STORAGE_FATAL, ({ key, retriesExhausted }) => {
+                const msg = `⚠️ 큐 저장 실패: Tampermonkey 저장소에 ${retriesExhausted}회 재시도 후 ${key} 저장 불가. 새로고침 시 대기열이 유실될 수 있습니다.`;
+                this.log(msg, 'error', 'Storage');
+                alert(msg);
+            });
         }
         // ─────────────────────────────────────────────────────
+
+        // 페이지 이탈 시 팝업 자동 정리 (고아 팝업 방지)
+        window.addEventListener('beforeunload', () => {
+            if (this.popupWindow && !this.popupWindow.closed) {
+                this.popupWindow.close();
+            }
+        });
     }
 
     openDashboard(defaultTab = '') {
@@ -89,14 +103,23 @@ export class LogBox {
         }
 
         if (this.popupWindow && !this.popupWindow.closed) {
-            if (typeof this.popupWindow.focus === 'function') {
-                this.popupWindow.focus();
+            try {
+                if (this.popupWindow.document) {
+                    if (typeof this.popupWindow.focus === 'function') {
+                        this.popupWindow.focus();
+                    }
+                    if (defaultTab) {
+                        this.switchTab(defaultTab);
+                    }
+                    this.startProgressSync();
+                    return;
+                }
+            } catch (e) {
+                // 이전 페이지 컨텍스트의 고아 팝업 — 닫고 새로 생성
+                console.warn('[TokiSync UI] 고아 팝업 감지 → 재생성', e.message);
+                try { this.popupWindow.close(); } catch (_) {}
+                this.popupWindow = null;
             }
-            if (defaultTab) {
-                this.switchTab(defaultTab);
-            }
-            this.startProgressSync();
-            return;
         }
 
         console.log('[TokiSync UI] 🛡️ 가상 팝업 대시보드 기동 (DOM 오염 차단)');

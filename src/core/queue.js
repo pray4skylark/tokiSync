@@ -6,6 +6,9 @@
 
 import { EventBus, EVT } from './EventBus.js';
 import { registerWorkerOrigin } from './ipc-broker.js';
+import { normalizeQueueItem, deleteSeriesConfig } from './series-config.js';
+
+export { normalizeQueueItem };
 
 let _storage = null;
 
@@ -171,11 +174,52 @@ export const getQueueItemId = (title, episodeNum) => {
 };
 
 /**
- * [v1.27.2] 디버그 일관성 검증: processingSlots와 sessionRegistry 동기화 확인
+ * [v1.28.1] 일관성 검증 및 자가 치유: processingSlots/sessionRegistry/activeWorkers 동기화
+ * - 멤버십 비교 후 교집합 기준으로 자동 reconcile
+ * - 좀비 항목 감지 시 로그 + 자동 제거
  */
-const assertConsistent = (context = '') => {
-  if (processingSlots.size !== sessionRegistry.size) {
-    console.warn(`[Queue] ⚠️ 상태 불일치 감지 (${context}): processingSlots=${processingSlots.size} != sessionRegistry=${sessionRegistry.size}`);
+export const assertConsistent = (context = '') => {
+  let healed = false;
+
+  // processingSlots → sessionRegistry 방향 검증
+  for (const id of processingSlots) {
+    if (!sessionRegistry.has(id)) {
+      console.warn(`[Queue] 🧹 자가 치유(${context}): processingSlots에만 존재하는 zombie → 제거 (${id})`);
+      processingSlots.delete(id);
+      activeWorkers.delete(id);
+      closedCounts.delete(id);
+      _activeProcessing.delete(id);
+      healed = true;
+    }
+  }
+
+  // sessionRegistry → processingSlots 방향 검증
+  for (const id of sessionRegistry.keys()) {
+    if (!processingSlots.has(id)) {
+      console.warn(`[Queue] 🧹 자가 치유(${context}): sessionRegistry에만 존재하는 zombie → 제거 (${id})`);
+      sessionRegistry.delete(id);
+      activeWorkers.delete(id);
+      closedCounts.delete(id);
+      _activeProcessing.delete(id);
+      healed = true;
+    }
+  }
+
+  // activeWorkers가 참조하는데 sessionRegistry/processingSlots에 없는 좀비
+  for (const id of activeWorkers.keys()) {
+    if (!sessionRegistry.has(id) && !processingSlots.has(id)) {
+      console.warn(`[Queue] 🧹 자가 치유(${context}): activeWorkers에만 존재하는 zombie → 제거 (${id})`);
+      activeWorkers.delete(id);
+      healed = true;
+    }
+  }
+
+  if (healed) {
+    EventBus.emit(EVT.LOG, {
+      msg: `[Queue] 🔧 세션 상태 불일치 감지 및 자동 복구 완료 (${context})`,
+      level: 'warn',
+      tag: 'Consistency'
+    });
   }
 };
 
@@ -221,6 +265,7 @@ export const destroyWorkerSession = (id, reason = 'unknown') => {
   processingSlots.delete(id);
   activeWorkers.delete(id);
   closedCounts.delete(id);
+  _activeProcessing.delete(id);
   
   assertConsistent('destroyWorkerSession');
   console.log(`[Queue] 🗑️ 세션 삭제: ${id} (reason=${reason}) → activeWorkers=${activeWorkers.size}, processingSlots=${processingSlots.size}`);
@@ -295,28 +340,38 @@ export const addEpisodesToQueue = (episodes, novelTitle) => {
     // 이미 존재하는지 중복성 검사
     const exists = queue.some(item => item.id === id);
     if (!exists) {
-      queue.push({
+      const baseItem = {
         id,
         title: novelTitle,
         episodeTitle: ep.title,
         episodeUrl: ep.url,
         episodeNum: ep.episodeNum || '',
-        folderId: ep.folderId || '',             // 구글 드라이브 스캔 위치 폴더 ID 보존
-        category: ep.category || 'Manga',       // 파서 룰 카테고리 (워커 targetType 판별용)
-        viewerCfg: ep.viewerCfg || {},           // 파서 룰 viewer 설정 (워커 이미지 셀렉터용)
-        rootFolder: ep.rootFolder || '',
-        destination: ep.destination || 'local',
-        novelFormat: ep.novelFormat || 'epub',
-        matchedRule: ep.matchedRule || {},
-        protocolDomain: ep.protocolDomain || '',
-        seriesMetadata: ep.seriesMetadata || {},
         forceOverwrite: ep.forceOverwrite || false,
         status: 'pending',
         progressPercent: 0,
         stage: WORKER_STAGE.INIT,
         retryCount: 0,
         addedAt: Date.now()
-      });
+      };
+
+      if (ep.seriesKey) {
+        // 신규 경량 포맷: 공유 필드는 seriesKey로 참조
+        queue.push({ ...baseItem, seriesKey: ep.seriesKey });
+      } else {
+        // 구 포맷: 공유 필드를 inline 저장 (하위 호환)
+        queue.push({
+          ...baseItem,
+          folderId: ep.folderId || '',
+          category: ep.category || 'Manga',
+          viewerCfg: ep.viewerCfg || {},
+          rootFolder: ep.rootFolder || '',
+          destination: ep.destination || 'local',
+          novelFormat: ep.novelFormat || 'epub',
+          matchedRule: ep.matchedRule || {},
+          protocolDomain: ep.protocolDomain || '',
+          seriesMetadata: ep.seriesMetadata || {},
+        });
+      }
       addedCount++;
     }
   });
@@ -368,9 +423,15 @@ export const updateQueueItemProgress = (id, percent) => {
 };
 
 /**
- * 대기열 전체 초기화
+ * 대기열 전체 초기화 — 진행 중인 작업이 있으면 먼저 중단
  */
 export const clearQueue = () => {
+  if (_activeProcessing.size > 0 || processingSlots.size > 0) {
+    stopAllWorkers(false);
+  }
+  const queue = getRawQueue();
+  const keys = new Set(queue.map(i => i.seriesKey).filter(Boolean));
+  keys.forEach(k => deleteSeriesConfig(k));
   saveRawQueue([]);
 };
 
@@ -404,10 +465,18 @@ export const removeQueueItem = (id) => {
 
 /**
  * 완료(completed) 및 실패(failed) 항목들 일괄 삭제 (큐 청소)
+ * 남은 아이템이 참조하는 seriesKey는 삭제하지 않음
  */
 export const removeCompletedAndFailedItems = () => {
   const queue = getRawQueue();
   const filtered = queue.filter(item => item.status !== 'completed' && item.status !== 'failed');
+  const remainingKeys = new Set(filtered.map(i => i.seriesKey).filter(Boolean));
+  // 삭제된 아이템의 seriesKey 중, 남은 아이템이 참조하지 않는 것만 GC
+  const removed = queue.filter(item => item.status === 'completed' || item.status === 'failed');
+  const removedKeys = new Set(removed.map(i => i.seriesKey).filter(Boolean));
+  removedKeys.forEach(k => {
+    if (!remainingKeys.has(k)) deleteSeriesConfig(k);
+  });
   saveRawQueue(filtered);
 };
 
@@ -509,6 +578,7 @@ export const stopAllWorkers = (shouldClear = false) => {
   closedCounts.clear();
   processingSlots.clear();
   sessionRegistry.clear();
+  _activeProcessing.clear();
 
   // 2. 큐 대기열 전체 청소 및 중단 마킹 (1회성 트랜잭션 병합으로 레이스 컨디션 제거)
   if (shouldClear) {
@@ -529,8 +599,8 @@ export const stopAllWorkers = (shouldClear = false) => {
     saveRawQueue(updatedQueue);
   }
 
-  // 3. 일시 정지 해제 및 크로스 탭 정지 동기화 트리거
-  setQueuePaused(false);
+  // 3. 중단 후 일시 정지 상태로 전환 (새 작업 시작 차단) 및 크로스 탭 동기화
+  setQueuePaused(true);
   try {
     if (_storage) _storage.set('tokisync_queue_stopped_trigger', Date.now());
     else if (typeof GM_setValue !== 'undefined') {
@@ -577,6 +647,7 @@ export const runSchedulerOnce = async () => {
         if (closedCount >= 3) {
           console.warn(`[Queue Scheduler] ⚠️ 자식 팝업 비정상 종료 확정 (연속 3회 감지): ${id} → activeWorkers 크기=${activeWorkers.size}`);
           destroyWorkerSession(id, 'popup_closed_3x');
+          assertConsistent('liveness:closed_3x');
           const item = queue.find(i => i.id === id);
           if (item && item.status === 'processing') {
             const nextRetry = item.retryCount + 1;
@@ -698,6 +769,7 @@ export const runSchedulerOnce = async () => {
     console.error('[Queue Scheduler] Error in scheduling loop:', err);
   } finally {
     isSchedulerRunning = false;
+    assertConsistent('runSchedulerOnce:exit');
   }
 };
 

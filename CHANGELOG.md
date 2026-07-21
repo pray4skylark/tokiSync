@@ -2,6 +2,50 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.28.1] - 2026-07-22
+
+### 🛡️ v1.28.0 안정성 강화 — 4-Phase 보완 패치
+- **Phase 1: Series Config DI 통합**: `series-config.js`에 StorageBackend DI 적용 (3단 폴백). 이중 직렬화 제거. v1.27.x JSON string 호환성 폴백 유지. `main.js`에 `setSeriesStorage()` 주입
+- **Phase 2: Abort/Error 경로 정리**: `saveSeriesConfig` 실패 시 inline fallback (P1). `runDrivePreWork` try/finally로 prepItem 항상 정리. `tokiDownload` abort 시 queue 정리. `addEpisodesToQueue` 중복 호출 제거. PrepItem ID random suffix. `getSeriesConfigKey` seriesTitle 해시 충돌 방지
+- **Phase 3: Session Consistency**: `assertConsistent` 멤버십 검사 + 3-way 자가 치유(processingSlots/sessionRegistry/activeWorkers). export 추가. 호출 지점 확대. `deleteSeriesConfig` TOCTOU 방지 (sameSeriesActive check). `processItem` queue item 충돌 방지
+- **Phase 4: UX/Visibility**: `STORAGE_FATAL` UI 리스너 (LogBox toast+alert). `EventBus.request()` pre-emit listener count check (0개 → 즉시 reject). `config.js` one-time console.debug
+
+### ✅ 크로스검증 수렴 결과 반영
+- solver-a(방어/보안) + solver-b(UX/운영) + cross-validator 4건 보완사항 검증
+- 수렴 결론: STORAGE_FATAL UI 리스너(P2), assertConsistent 자가 치유(P2) 우선 적용. MV3→localStorage 전환은 데이터 사일로로 인해 무효(invalid)
+
+### 📐 Architecture Rules 문서화
+- **`AGENTS.md`**: DI Storage Mandate + EventBus Patterns + Queue State Consistency + Storage Safety Rules + Queue Key Splitting + Test Conventions 6개 신규 규칙 섹션 추가 (153→215줄)
+
+### 🧪 테스트 강화 (50/50 → 61/61)
+- **신규**: E1-E13 에지케이스 회귀 (SeriesConfig/Queue/EventBus/State)
+- **통합**: mockStorage() 헬퍼 추출 (9중복 → 1함수), M2/E9 통합, assertConsistent 직접 검증 (4시나리오)
+- **실환경 복구**: test-real-env.js `window.addEventListener` JSDOM mock 추가 (0/3→3/3)
+
+### 🗂️ 릴리즈 노트
+- **`documentation/reports/RELEASE_NOTE_v1.28.0.md`**: v1.28.0+v1.28.1 통합 프리릴리즈 노트
+
+## [v1.28.0] - 2026-07-21
+
+### ⚡ 큐 키 분할(Queue Key Splitting) — 저장 공간 95% 절감
+- **`src/core/series-config.js`** (신규): 시리즈 공유 데이터 저장소 (`TOKI_SERIES_{ruleId}_{seriesId}`)
+  - `getSeriesConfig(seriesKey)` / `saveSeriesConfig(seriesKey, config)` / `deleteSeriesConfig(seriesKey)` / `normalizeQueueItem(item)`
+- **`src/core/parsers/RuleManager.js`**: `getRuleById(id)` 정적 메서드 추가
+- **`src/core/queue.js`**: `addEpisodesToQueue()` — `seriesKey` 경량 포맷 지원. `clearQueue()`, `removeCompletedAndFailedItems()` — seriesKey GC. `normalizeQueueItem` re-export
+- **`src/core/downloader.js`**: 시리즈 공유 데이터 `TOKI_SERIES_<key>` 1회 저장, episode는 `seriesKey`만 참조
+- **`src/core/worker-controller.js`**: 4곳에 `normalizeQueueItem()` 적용 + 대기열 소진 시 `deleteSeriesConfig()` GC (2곳)
+
+### 🛠️ 중단/초기화 처리 완전성 강화
+- **`src/core/queue.js`**: `stopAllWorkers()` — `_activeProcessing.clear()` 추가 + `setQueuePaused(true)`로 중단 후 재시작 방지
+- **`src/core/queue.js`**: `clearQueue()` — 진행 중 작업 있으면 `stopAllWorkers(false)` 선행 후 초기화
+- **`src/core/queue.js`**: `destroyWorkerSession()` — `_activeProcessing.delete(id)` 추가
+
+### ⚡ Drive 사전작업 리팩터 + 즉시 큐 등록 + 취소 감지
+- **`src/core/downloader.js`**: `runDrivePreWork()` 함수 추출 — 썸네일·기록·고속캐시 재사용 가능. `checkAbort()`로 사용자 중단 감지
+- **`src/core/downloader.js`**: 배치 다운로드 — 에피소드 목록을 사전작업 전에 큐에 즉시 등록, 대시보드에 전체 목록 바로 표시
+- **`src/core/downloader.js`**: 사전작업 완료 후 `uploadedHistorySet` 기준 중복 에피소드 자동 제거
+- **`src/core/main.js`**: `downloadCurrent()` 소설 단일 에피소드 — Drive 사전작업 추가 (prepItem 진행률 표시)
+
 ## [v1.27.8] - 2026-07-20
 
 ### 🏗️ 브랜치 전략 2-tier → 3-tier 전환 (main/develop → main/rc/develop)

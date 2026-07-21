@@ -35,6 +35,68 @@ npm run dev:viewer      # Vite dev server
 - **Singleton Parser**: Always via `ParserFactory.getParser()`, never `new`.
 - **Theme Variables**: No hardcoded colors. Use `--t-*` CSS variables.
 - **nav-zone pattern**: ABOLISHED. Do not reintroduce.
+- **DI Storage Mandate**: 모든 저장소 접근은 `StorageBackend` 추상화를 통해서만 수행한다.
+
+### DI Storage 규격 (v1.27.7+)
+모든 모듈에서 `GM_getValue` / `GM_setValue` / `GM_deleteValue` 직접 호출은 **금지**된다. 대신 `StorageBackend` 인터페이스를 주입받아 사용한다.
+
+| 모듈 | 주입 함수 | 저장소 도메인 | 예시 |
+|------|----------|-------------|------|
+| `config.js` | `setConfigStorage(backend)` | 설정 | `_storage.get(CFG_ID_KEY, "")` |
+| `queue.js` | `setQueueStorage(backend)` | 대기열 | `_storage.get(STORAGE_KEY, [])` |
+| `utils.js` | `setDownloadBackend(backend)` | 파일 다운로드 | `_downloadBackend.download(blob, path)` |
+| `series-config.js` | `setSeriesStorage(backend)` | 시리즈 공유 데이터 | `_storage.get(seriesKey, null)` |
+
+**Fallback chain** (모든 모듈 공통):
+```
+_storage (DI 주입) → GM_* (Tampermonkey) → localStorage → defaultValue/null
+```
+
+**신규 저장소 모듈 생성 시**:
+1. `let _storage = null` + `export function setXxxStorage(backend)` 패턴 사용
+2. `_get(k, d)` / `_set(k, v)` / `_delete(k)` 3단계 폴백 구현
+3. `main.js`에 `setXxxStorage(new GMStorageBackend())` 주입 호출 추가
+4. DI 미설정 시 직접 GM 호출로 폴백 (Prod 호환 유지, Test에서는 Mock 주입)
+5. `StorageBackend`가 JSON 직렬화를 처리하므로 수동 `JSON.stringify`/`JSON.parse` 불필요
+
+**예외**: `localStorage` 백업(shadow copy)은 config.js의 `backupToLocalStorage()`처럼 DI 외부에서 readonly 용도로만 허용.
+
+### EventBus Patterns (v1.26.0+)
+| 패턴 | 용도 | 예시 |
+|------|------|------|
+| `emit` / `on` | 단방향 통지 (응답 불필요) | `LOG`, `UPDATE_PROGRESS`, `STORAGE_FATAL` |
+| `request` / `respond` | 양방향 요청-응답 (Promise) | `TEST_NATIVE_DOWNLOAD`, `PARSE_VERIFY`, `PARSE_TEST` |
+
+- **Timeout**: 기본 8초. 진단/테스트용은 3초 이하. `request()` 호출 시 명시적 timeoutMs 전달.
+- **Responder 반드시 등록**: `request()` 호출 전에 반드시 `on()`으로 responder 등록. `init()` 단계에서 등록하고 runtime 동적 등록 금지.
+- **Respond guard**: 모든 `respond()` 경로는 try/catch로 감싸서 항상 응답 보장. 미응답 = caller timeout → 사용자 경험 저하.
+- **Pre-emit check** (v1.28.1): `request()`는 emit 전에 `_listeners[event].length === 0` 체크 → 리스너 없으면 즉시 reject (8초 대기 불필요).
+
+### Queue State Consistency (v1.28.1+)
+- **3개 레지스트리 동기화**: `processingSlots`, `sessionRegistry`, `activeWorkers`는 항상 같은 worker 집합.
+- **assertConsistent**: 모든 상태 변경 지점(create, destroy, liveness, scheduler entry/exit)에서 호출. 불일치 감지 시 자동 reconcile (멤버십 비교 + 교집합 self-healing).
+- **Session cleanup 단일 경로**: 세션 제거는 `destroyWorkerSession()`으로만 수행. `processingSlots.delete()` 등 개별 레지스트리 직접 조작 금지.
+- **zombie detection**: 좀비 팝업 감지 5회(10초) → 3회(6초)로 단축. `closedCounts` 추적.
+
+### Storage Safety Rules (v1.28.1+)
+- **STORAGE_FATAL listener mandatory**: 저장 실패 이벤트(`STORAGE_FATAL`)는 반드시 UI 리스너 존재. Dead event 금지. LogBox에서 toast/alert 표시.
+- **No silent data loss**: 저장 실패 시 항상 user-facing 경고 (alert/toast/log). console.error만으로 충분하지 않음.
+- **localStorage = backup only**: runtime primary storage로 전환 금지. config.js `backupToLocalStorage()` 패턴만 허용.
+- **No backend switching mid-session**: GM_setValue → localStorage 자동 전환 금지 (데이터 사일로, 크로스탭 동기화 깨짐).
+
+### Queue Key Splitting (v1.28.0+)
+- **공유 데이터 분리**: `matchedRule`, `viewerCfg`, `seriesMetadata` 등은 seriesKey로 참조. 큐 아이템에 inline 저장 금지.
+- **normalizeQueueItem 필수**: seriesKey가 있는 큐 아이템 읽을 때 반드시 `normalizeQueueItem()` 통과. 원본 item 직접 읽기 금지.
+- **saveSeriesConfig 실패 대비**: 저장 실패(`false` 반환) 시 episode에 inline fallback 필드 포함. dangling seriesKey 금지.
+- **getSeriesConfigKey**: `ruleId + shortHash(seriesTitle, 4 chars) + seriesId` 조합. 단순 `ruleId + seriesId`만으로 충돌 가능 (P3).
+- **Series Config GC**: `removeCompletedAndFailedItems`, `clearQueue` 호출 시 고아 seriesKey 자동 정리. 진행 중인 작업의 seriesKey는 보존.
+
+### Test Conventions
+- **Prefix**: `D#`=DI, `E#`=Edge Case, `M#`=Misc Regression, `H#`=Heisenbug, `L#`=Leak. 신규는 `E#` 다음 번호.
+- **mockStorage()**: DI 모듈 테스트 시 `const { store } = mockStorage(true, false)` 사용. `setSeries`/`setQueue` 플래그로 도메인 선택.
+- **State cleanup**: 각 테스트 종료 시 `setXxxStorage(null)` + `clearQueue()` + 레지스트리 초기화 호출.
+- **No production store mutation**: 테스트에서 GM_* 직접 호출 금지. 항상 `mockStorage()` 또는 `globalThis.GM_getValue` mock 통해.
+- **실환경 테스트**: `test-real-env.js` — JSDOM mock (`window.addEventListener`, `window.open`, `document`). 실제 Tampermonkey 환경 시뮬레이션.
 
 ## Layer Boundaries
 ```
