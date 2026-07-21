@@ -83,6 +83,15 @@ const EventBus = {
     },
     async request(event, payload = {}, timeoutMs = 8000) {
         const requestId = Math.random().toString(36).substring(2, 11);
+
+        // 리스너 미등록 시 즉시 reject (8초 대기 불필요)
+        const listenerCount = (_listeners[event] || []).length;
+        if (listenerCount === 0) {
+            return Promise.reject(new Error(
+                `[EventBus] "${event}" 리스너가 등록되지 않았습니다. 대시보드를 다시 열거나 페이지를 새로고침하세요.`
+            ));
+        }
+
         return new Promise((resolve, reject) => {
             const timer = setTimeout(() => {
                 cleanup();
@@ -133,6 +142,7 @@ const EVT = {
 
     // ── Queue → UI 방향 ─────────────────────────────────
     STORAGE_FATAL:      'storage:fatal',    // 큐 저장 완전 실패 (재시도 소진)
+    TEST_NATIVE_DOWNLOAD: 'native:test_download', // 자동 분류(Native) 다운로드 테스트
 };
 
 
@@ -150,7 +160,10 @@ const EVT = {
 /* harmony export */   IS: function() { return /* binding */ getQueue; },
 /* harmony export */   NQ: function() { return /* binding */ destroyWorkerSession; },
 /* harmony export */   PG: function() { return /* binding */ processingSlots; },
+/* harmony export */   R4: function() { return /* binding */ saveRawQueue; },
+/* harmony export */   Tm: function() { return /* binding */ setQueueStorage; },
 /* harmony export */   WB: function() { return /* binding */ WORKER_STAGE; },
+/* harmony export */   WY: function() { return /* reexport safe */ _series_config_js__WEBPACK_IMPORTED_MODULE_2__.WY; },
 /* harmony export */   a: function() { return /* binding */ sessionRegistry; },
 /* harmony export */   d$: function() { return /* binding */ removeQueueItem; },
 /* harmony export */   gi: function() { return /* binding */ runSchedulerOnce; },
@@ -164,8 +177,10 @@ const EVT = {
 /* harmony export */   zS: function() { return /* binding */ updateSessionPopupRef; },
 /* harmony export */   zX: function() { return /* binding */ getQueueStats; }
 /* harmony export */ });
-/* unused harmony exports createWorkerSession, updateQueueItemProgress, removeCompletedAndFailedItems */
+/* unused harmony exports assertConsistent, createWorkerSession, updateQueueItemProgress, removeCompletedAndFailedItems */
 /* harmony import */ var _EventBus_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(31);
+/* harmony import */ var _ipc_broker_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(941);
+/* harmony import */ var _series_config_js__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(451);
 /**
  * tokiSync v1.28.0 - Persistent Multi-Queue Batch Core
  * 영속성 디스크 큐 및 이벤트 기반 세마포어 스케줄러 엔진
@@ -173,6 +188,16 @@ const EVT = {
  */
 
 
+
+
+
+
+
+let _storage = null;
+
+function setQueueStorage(backend) {
+  _storage = backend;
+}
 
 const WORKER_STAGE = {
   INIT: 'STAGE_INIT',             // 초기화 및 Handshake 대기 중
@@ -208,6 +233,7 @@ const _activeProcessing = new Set();
 
 // Tampermonkey 환경 및 Node.js/일반 브라우저 환경 간의 영속성 호환 래퍼
 const getRawQueue = () => {
+  if (_storage) return _storage.get(STORAGE_KEY, []);
   try {
     if (typeof GM_getValue !== 'undefined') {
       return GM_getValue(STORAGE_KEY, []);
@@ -229,7 +255,7 @@ const getRawQueue = () => {
  * @returns {boolean} 동기 성공 여부 (MV3 Promise fire-and-forget은 항상 true)
  */
 const trySaveOnce = (queue) => {
-  // 1차: GM_setValue (Tampermonkey 네이티브)
+  if (_storage) return _storage.set(STORAGE_KEY, queue);
   if (typeof GM_setValue !== 'undefined') {
     try {
       const result = GM_setValue(STORAGE_KEY, queue);
@@ -331,11 +357,52 @@ const getQueueItemId = (title, episodeNum) => {
 };
 
 /**
- * [v1.27.2] 디버그 일관성 검증: processingSlots와 sessionRegistry 동기화 확인
+ * [v1.28.1] 일관성 검증 및 자가 치유: processingSlots/sessionRegistry/activeWorkers 동기화
+ * - 멤버십 비교 후 교집합 기준으로 자동 reconcile
+ * - 좀비 항목 감지 시 로그 + 자동 제거
  */
 const assertConsistent = (context = '') => {
-  if (processingSlots.size !== sessionRegistry.size) {
-    console.warn(`[Queue] ⚠️ 상태 불일치 감지 (${context}): processingSlots=${processingSlots.size} != sessionRegistry=${sessionRegistry.size}`);
+  let healed = false;
+
+  // processingSlots → sessionRegistry 방향 검증
+  for (const id of processingSlots) {
+    if (!sessionRegistry.has(id)) {
+      console.warn(`[Queue] 🧹 자가 치유(${context}): processingSlots에만 존재하는 zombie → 제거 (${id})`);
+      processingSlots.delete(id);
+      activeWorkers.delete(id);
+      closedCounts.delete(id);
+      _activeProcessing.delete(id);
+      healed = true;
+    }
+  }
+
+  // sessionRegistry → processingSlots 방향 검증
+  for (const id of sessionRegistry.keys()) {
+    if (!processingSlots.has(id)) {
+      console.warn(`[Queue] 🧹 자가 치유(${context}): sessionRegistry에만 존재하는 zombie → 제거 (${id})`);
+      sessionRegistry.delete(id);
+      activeWorkers.delete(id);
+      closedCounts.delete(id);
+      _activeProcessing.delete(id);
+      healed = true;
+    }
+  }
+
+  // activeWorkers가 참조하는데 sessionRegistry/processingSlots에 없는 좀비
+  for (const id of activeWorkers.keys()) {
+    if (!sessionRegistry.has(id) && !processingSlots.has(id)) {
+      console.warn(`[Queue] 🧹 자가 치유(${context}): activeWorkers에만 존재하는 zombie → 제거 (${id})`);
+      activeWorkers.delete(id);
+      healed = true;
+    }
+  }
+
+  if (healed) {
+    _EventBus_js__WEBPACK_IMPORTED_MODULE_0__/* .EventBus */ .l.emit(_EventBus_js__WEBPACK_IMPORTED_MODULE_0__/* .EVT */ .c.LOG, {
+      msg: `[Queue] 🔧 세션 상태 불일치 감지 및 자동 복구 완료 (${context})`,
+      level: 'warn',
+      tag: 'Consistency'
+    });
   }
 };
 
@@ -381,6 +448,7 @@ const destroyWorkerSession = (id, reason = 'unknown') => {
   processingSlots.delete(id);
   activeWorkers.delete(id);
   closedCounts.delete(id);
+  _activeProcessing.delete(id);
   
   assertConsistent('destroyWorkerSession');
   console.log(`[Queue] 🗑️ 세션 삭제: ${id} (reason=${reason}) → activeWorkers=${activeWorkers.size}, processingSlots=${processingSlots.size}`);
@@ -455,28 +523,38 @@ const addEpisodesToQueue = (episodes, novelTitle) => {
     // 이미 존재하는지 중복성 검사
     const exists = queue.some(item => item.id === id);
     if (!exists) {
-      queue.push({
+      const baseItem = {
         id,
         title: novelTitle,
         episodeTitle: ep.title,
         episodeUrl: ep.url,
         episodeNum: ep.episodeNum || '',
-        folderId: ep.folderId || '',             // 구글 드라이브 스캔 위치 폴더 ID 보존
-        category: ep.category || 'Manga',       // 파서 룰 카테고리 (워커 targetType 판별용)
-        viewerCfg: ep.viewerCfg || {},           // 파서 룰 viewer 설정 (워커 이미지 셀렉터용)
-        rootFolder: ep.rootFolder || '',
-        destination: ep.destination || 'local',
-        novelFormat: ep.novelFormat || 'epub',
-        matchedRule: ep.matchedRule || {},
-        protocolDomain: ep.protocolDomain || '',
-        seriesMetadata: ep.seriesMetadata || {},
         forceOverwrite: ep.forceOverwrite || false,
         status: 'pending',
         progressPercent: 0,
         stage: WORKER_STAGE.INIT,
         retryCount: 0,
         addedAt: Date.now()
-      });
+      };
+
+      if (ep.seriesKey) {
+        // 신규 경량 포맷: 공유 필드는 seriesKey로 참조
+        queue.push({ ...baseItem, seriesKey: ep.seriesKey });
+      } else {
+        // 구 포맷: 공유 필드를 inline 저장 (하위 호환)
+        queue.push({
+          ...baseItem,
+          folderId: ep.folderId || '',
+          category: ep.category || 'Manga',
+          viewerCfg: ep.viewerCfg || {},
+          rootFolder: ep.rootFolder || '',
+          destination: ep.destination || 'local',
+          novelFormat: ep.novelFormat || 'epub',
+          matchedRule: ep.matchedRule || {},
+          protocolDomain: ep.protocolDomain || '',
+          seriesMetadata: ep.seriesMetadata || {},
+        });
+      }
       addedCount++;
     }
   });
@@ -528,9 +606,15 @@ const updateQueueItemProgress = (id, percent) => {
 };
 
 /**
- * 대기열 전체 초기화
+ * 대기열 전체 초기화 — 진행 중인 작업이 있으면 먼저 중단
  */
 const clearQueue = () => {
+  if (_activeProcessing.size > 0 || processingSlots.size > 0) {
+    stopAllWorkers(false);
+  }
+  const queue = getRawQueue();
+  const keys = new Set(queue.map(i => i.seriesKey).filter(Boolean));
+  keys.forEach(k => (0,_series_config_js__WEBPACK_IMPORTED_MODULE_2__/* .deleteSeriesConfig */ .v9)(k));
   saveRawQueue([]);
 };
 
@@ -564,10 +648,18 @@ const removeQueueItem = (id) => {
 
 /**
  * 완료(completed) 및 실패(failed) 항목들 일괄 삭제 (큐 청소)
+ * 남은 아이템이 참조하는 seriesKey는 삭제하지 않음
  */
 const removeCompletedAndFailedItems = () => {
   const queue = getRawQueue();
   const filtered = queue.filter(item => item.status !== 'completed' && item.status !== 'failed');
+  const remainingKeys = new Set(filtered.map(i => i.seriesKey).filter(Boolean));
+  // 삭제된 아이템의 seriesKey 중, 남은 아이템이 참조하지 않는 것만 GC
+  const removed = queue.filter(item => item.status === 'completed' || item.status === 'failed');
+  const removedKeys = new Set(removed.map(i => i.seriesKey).filter(Boolean));
+  removedKeys.forEach(k => {
+    if (!remainingKeys.has(k)) deleteSeriesConfig(k);
+  });
   saveRawQueue(filtered);
 };
 
@@ -669,6 +761,7 @@ const stopAllWorkers = (shouldClear = false) => {
   closedCounts.clear();
   processingSlots.clear();
   sessionRegistry.clear();
+  _activeProcessing.clear();
 
   // 2. 큐 대기열 전체 청소 및 중단 마킹 (1회성 트랜잭션 병합으로 레이스 컨디션 제거)
   if (shouldClear) {
@@ -689,10 +782,11 @@ const stopAllWorkers = (shouldClear = false) => {
     saveRawQueue(updatedQueue);
   }
 
-  // 3. 일시 정지 해제 및 크로스 탭 정지 동기화 트리거
-  setQueuePaused(false);
+  // 3. 중단 후 일시 정지 상태로 전환 (새 작업 시작 차단) 및 크로스 탭 동기화
+  setQueuePaused(true);
   try {
-    if (typeof GM_setValue !== 'undefined') {
+    if (_storage) _storage.set('tokisync_queue_stopped_trigger', Date.now());
+    else if (typeof GM_setValue !== 'undefined') {
       GM_setValue('tokisync_queue_stopped_trigger', Date.now());
     } else if (typeof localStorage !== 'undefined') {
       localStorage.setItem('tokisync_queue_stopped_trigger', String(Date.now()));
@@ -720,7 +814,7 @@ const runSchedulerOnce = async () => {
     console.log(`[Queue Scheduler] 🔄 runSchedulerOnce 중복진입 차단 (processingSlots=${processingSlots.size})`);
     return;
   }
-  isSchedulerRunning = true;
+  isSchedulerRunning = true; console.error('[DEBUG_RUN] scheduler started, queue:', JSON.stringify(getRawQueue().map(i=>({id:i.id.substring(0,12),s:i.status}))));
   console.log(`[Queue Scheduler] 🔍 runSchedulerOnce 진입 (processingSlots=${processingSlots.size}, _activeProcessing=${_activeProcessing.size}, queue_statuses=[${getRawQueue().map(i=>i.status).join(',')}])`);
   assertConsistent('runSchedulerOnce');
 
@@ -736,6 +830,7 @@ const runSchedulerOnce = async () => {
         if (closedCount >= 3) {
           console.warn(`[Queue Scheduler] ⚠️ 자식 팝업 비정상 종료 확정 (연속 3회 감지): ${id} → activeWorkers 크기=${activeWorkers.size}`);
           destroyWorkerSession(id, 'popup_closed_3x');
+          assertConsistent('liveness:closed_3x');
           const item = queue.find(i => i.id === id);
           if (item && item.status === 'processing') {
             const nextRetry = item.retryCount + 1;
@@ -831,18 +926,18 @@ const runSchedulerOnce = async () => {
     processingSlots.add(nextItem.id);
     updateQueueItem(nextItem.id, { status: 'processing', startedAt: Date.now() });
     
-    const popupRef = openEpisodePopup(nextItem.episodeUrl, nextItem.id);
+    const sessionToken = (0,_ipc_broker_js__WEBPACK_IMPORTED_MODULE_1__/* .registerWorkerOrigin */ .S6)(nextItem.id, 'null');
+    const popupRef = openEpisodePopup(nextItem.episodeUrl, nextItem.id, sessionToken);
         if (popupRef) {
         activeWorkers.set(nextItem.id, popupRef);
-        // 세션 토큰은 worker-controller에서 IPC 연결 시 등록
         sessionRegistry.set(nextItem.id, {
-          sessionToken: null, // WORKER_READY 매칭 시 ipc-broker에서 생성
+          sessionToken,
           popupRef,
           createdAt: Date.now(),
           lastActivity: Date.now(),
-          queueItemRef: nextItem // 큐 배열 참조 (touchSessionActivity 최적화)
+          queueItemRef: nextItem
         });
-        console.log(`[Queue Scheduler] ✅ 팝업 등록 완료: ${nextItem.episodeTitle} (ID: ${nextItem.id}, activeWorkers.size=${activeWorkers.size})`);
+        console.log(`[Queue Scheduler] ✅ 팝업 등록 완료: ${nextItem.episodeTitle} (ID: ${nextItem.id}, token=${sessionToken.substring(0, 8)}..., activeWorkers.size=${activeWorkers.size})`);
     } else {
         console.log(`[Queue Scheduler] 🧹 activeWorkers 해제 (팝업 실패): ${nextItem.id}`);
         processingSlots.delete(nextItem.id);
@@ -857,26 +952,28 @@ const runSchedulerOnce = async () => {
     console.error('[Queue Scheduler] Error in scheduling loop:', err);
   } finally {
     isSchedulerRunning = false;
+    assertConsistent('runSchedulerOnce:exit');
   }
 };
 
 // 팝업 기동 가교 (window.open 래퍼)
-const openEpisodePopup = (url, id) => {
+const openEpisodePopup = (url, id, sessionToken = '') => {
   try {
-    // Node.js 테스트 환경 등 윈도우 객체가 실존하지 않는 환경에서의 안전 예외처리
     if (typeof window === 'undefined' || typeof window.open === 'undefined') {
-      // 가상 Mocking 반환
       return { closed: false };
     }
     
-    // 봇 감지 회피 절충안 규격 (400x600, right-aligned)
+    const tokenUrl = sessionToken
+      ? url + (url.includes('?') ? '&' : '?') + 'ts_token=' + encodeURIComponent(sessionToken)
+      : url;
+    
     const width = 400;
     const height = 600;
     const left = window.screen.width - width - 50;
     const top = 100;
     
     const popupRef = window.open(
-      url, 
+      tokenUrl, 
       `tokisync_novel_worker_${id}`.replace(/[^a-zA-Z0-9_]/g, ''), 
       `width=${width},height=${height},left=${left},top=${top},noopener=false,scrollbars=yes,resizable=yes`
     );
@@ -898,8 +995,36 @@ const initQueueScheduler = () => {
     return;
   }
   isQueueSchedulerInitialized = true;
-  // 1. Tampermonkey 네이티브 비동기 스토리지 리스너 감시 활성화
-  if (typeof GM_addValueChangeListener !== 'undefined') {
+  if (_storage) {
+    _storage.addChangeListener(STORAGE_KEY, (key, oldValue, newValue, remote) => {
+      const pendingCount = (Array.isArray(newValue) ? newValue.filter(i => i.status === 'pending').length : 0);
+      runSchedulerOnce();
+      console.log(`[Queue Scheduler] 📡 Storage_setValue 트리거 → runSchedulerOnce 호출 (pending=${pendingCount}, remote=${remote})`);
+    });
+    console.log('[TokiSync Queue] 🚦 스토리지 백엔드 기반 스케줄러가 활성화되었습니다.');
+    if (typeof GM_addValueChangeListener !== 'undefined') {
+      GM_addValueChangeListener('tokisync_queue_stopped_trigger', (key, oldValue, newValue, remote) => {
+        if (remote) {
+          console.log('[Queue] ⏹️ 타 탭의 중단 신호 감지 -> 현재 탭의 자식 워커 강제 폐쇄 및 클린업');
+          for (const [id, popupRef] of activeWorkers.entries()) {
+            try {
+              if (popupRef && !popupRef.closed) {
+                const actualRef = popupRef.ref || popupRef;
+                if (actualRef && typeof actualRef.postMessage === 'function') {
+                  actualRef.postMessage({ type: 'EMERGENCY_STOP', payload: { queueId: id } }, '*');
+                }
+                popupRef.close();
+              }
+            } catch (e) {}
+          }
+          activeWorkers.clear();
+          closedCounts.clear();
+          processingSlots.clear();
+          sessionRegistry.clear();
+        }
+      });
+    }
+  } else if (typeof GM_addValueChangeListener !== 'undefined') {
     GM_addValueChangeListener(STORAGE_KEY, (key, oldValue, newValue, remote) => {
       // 대기열 변동 이벤트가 오면 1회성 스케줄러 즉시 발동
       const pendingCount = (Array.isArray(newValue) ? newValue.filter(i => i.status === 'pending').length : 0);
@@ -2495,6 +2620,117 @@ class GenericParser extends BaseParser {
 
 /***/ }),
 
+/***/ 451:
+/***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
+
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   $O: function() { return /* binding */ saveSeriesConfig; },
+/* harmony export */   Ml: function() { return /* binding */ getSeriesConfig; },
+/* harmony export */   TS: function() { return /* binding */ getSeriesConfigKey; },
+/* harmony export */   WY: function() { return /* binding */ normalizeQueueItem; },
+/* harmony export */   pn: function() { return /* binding */ setSeriesStorage; },
+/* harmony export */   v9: function() { return /* binding */ deleteSeriesConfig; }
+/* harmony export */ });
+/* harmony import */ var _EventBus_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(31);
+/**
+ * tokiSync - Series Config Manager
+ * 시리즈별 공유 데이터를 큐 아이템과 분리하여 별도 GM 키에 저장
+ *   TOKI_SERIES_{ruleId}_{seriesId} = { matchedRule, viewerCfg, seriesMetadata,
+ *       rootFolder, folderId, category, destination, novelFormat, protocolDomain }
+ */
+
+
+const STORAGE_PREFIX = 'TOKI_SERIES_';
+
+let _storage = null;
+
+function setSeriesStorage(backend) {
+    _storage = backend;
+}
+
+function _get(key) {
+    if (_storage) return _storage.get(key, null);
+    if (typeof GM_getValue !== 'undefined') {
+        try { return GM_getValue(key, null); } catch (e) {}
+    }
+    if (typeof localStorage !== 'undefined') {
+        try {
+            const val = localStorage.getItem(key);
+            return val ? JSON.parse(val) : null;
+        } catch (e) {}
+    }
+    return null;
+}
+
+function _set(key, value) {
+    if (_storage) return _storage.set(key, value);
+    if (typeof GM_setValue !== 'undefined') {
+        try { GM_setValue(key, value); return true; } catch (e) {}
+    }
+    if (typeof localStorage !== 'undefined') {
+        try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch (e) {}
+    }
+    return false;
+}
+
+function _delete(key) {
+    if (_storage) { _storage.delete(key); return; }
+    if (typeof GM_deleteValue !== 'undefined') {
+        try { GM_deleteValue(key); } catch (e) {}
+    }
+    if (typeof localStorage !== 'undefined') {
+        try { localStorage.removeItem(key); } catch (e) {}
+    }
+}
+
+function getSeriesConfigKey(ruleId, seriesId, seriesTitle = '') {
+    // seriesTitle 단축 해시로 ruleId/seriesId 충돌 방지
+    let hash = 0;
+    for (let i = 0; i < seriesTitle.length; i++) {
+        hash = ((hash << 5) - hash) + seriesTitle.charCodeAt(i);
+        hash |= 0;
+    }
+    const shortHash = Math.abs(hash).toString(16).substring(0, 4);
+    return `${STORAGE_PREFIX}${ruleId}_${shortHash}_${seriesId}`;
+}
+
+function getSeriesConfig(seriesKey) {
+    const val = _get(seriesKey);
+    if (!val) return null;
+    if (typeof val === 'string') {
+        try { return JSON.parse(val); } catch (e) { return null; }
+    }
+    return val;
+}
+
+function saveSeriesConfig(seriesKey, config) {
+    return _set(seriesKey, config);
+}
+
+function deleteSeriesConfig(seriesKey) {
+    if (!seriesKey) return;
+    _delete(seriesKey);
+}
+
+/**
+ * 구 queue 아이템(공유 필드 inline) 또는 신규 아이템(seriesKey)을 정규화
+ * @param {Object} item queue item
+ * @returns {Object} 공유 필드가 주입된 완전한 item (원본은 변경하지 않음)
+ */
+function normalizeQueueItem(item) {
+    if (!item) return item;
+    if (!item.seriesKey) return item;
+    const cfg = getSeriesConfig(item.seriesKey);
+    if (!cfg) {
+        console.warn(`[SeriesConfig] normalizeQueueItem: seriesKey="${item.seriesKey}" 참조 실패 (config deleted or not saved)`);
+        return item;
+    }
+    return { ...cfg, ...item };
+}
+
+
+/***/ }),
+
 /***/ 488:
 /***/ (function(__unused_webpack___webpack_module__, __webpack_exports__, __webpack_require__) {
 
@@ -3216,6 +3452,17 @@ class RuleManager {
     }
 
     /**
+     * Get a rule by its ID
+     * @param {string} id
+     * @returns {Object|null}
+     */
+    static getRuleById(id) {
+        if (!id) return null;
+        const rules = this.getParserRules();
+        return rules.find(r => r.id === id) || null;
+    }
+
+    /**
      * Find a matching rule for the current URL
      * @param {string} url 
      * @returns {Promise<Object|null>}
@@ -3325,10 +3572,12 @@ const logger = {
 /* harmony import */ var _cbz_js__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(416);
 /* harmony import */ var _txt_js__WEBPACK_IMPORTED_MODULE_8__ = __webpack_require__(409);
 /* harmony import */ var _utils_js__WEBPACK_IMPORTED_MODULE_9__ = __webpack_require__(924);
+/* harmony import */ var _series_config_js__WEBPACK_IMPORTED_MODULE_10__ = __webpack_require__(451);
 /**
  * tokiSync - Unified Worker Controller
  * Manages single popup lifecycle and IPC routing for sequential download mode.
  */
+
 
 
 
@@ -3867,7 +4116,8 @@ function initBatchWorkerController() {
         });
 
         try {
-            const { category, destination, novelFormat, episodeTitle, episodeNum, rootFolder, title, matchedRule, localNameTemplate } = item;
+            const normalized = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .normalizeQueueItem */ .WY)(item);
+            const { category, destination, novelFormat, episodeTitle, episodeNum, rootFolder, title, matchedRule, localNameTemplate } = normalized;
             const isNovel = (category === 'Novel' || category === 'novel');
             const siteName = matchedRule?.name || "TokiSync Parser";
 
@@ -4038,22 +4288,41 @@ function initBatchWorkerController() {
 
         _EventBus_js__WEBPACK_IMPORTED_MODULE_3__/* .EventBus */ .l.emit(_EventBus_js__WEBPACK_IMPORTED_MODULE_3__/* .EVT */ .c.UPDATE_PROGRESS);
 
-        // 드라이브 캐시 최종 갱신
+        // 드라이브 캐시 최종 갱신 (전체 큐가 비었을 때만)
         const currentQueue = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getQueue */ .IS)();
         const hasActive = currentQueue.some(i => i.status === 'pending' || i.status === 'processing');
         if (!hasActive) {
-            const completedItem = currentQueue.find(i => i.id === matchedId);
-            if (completedItem && (completedItem.destination === 'drive' || completedItem.destination === 'drive_kavita')) {
-                const cleanFolder = completedItem.rootFolder.replace(/^\[[^\]]+\]\s*/, '');
-                const targetFolder = completedItem.destination === 'drive_kavita' ? cleanFolder : completedItem.rootFolder;
-                console.log(`[WorkerController] ☁️ 전 대기열 수집 완료 -> 드라이브 캐시 갱신 시작: ${targetFolder}`);
-                (0,_gas_js__WEBPACK_IMPORTED_MODULE_5__/* .refreshCacheAfterUpload */ .jz)(
-                    targetFolder,
-                    completedItem.category,
-                    completedItem.seriesMetadata || {}
-                ).catch(e =>
-                    console.warn(`[WorkerController] 캐시 갱신 실패: ${e.message}`)
+            const rawItem = currentQueue.find(i => i.id === matchedId);
+            const completedItem = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .normalizeQueueItem */ .WY)(rawItem);
+            if (completedItem) {
+                if (completedItem.destination === 'drive' || completedItem.destination === 'drive_kavita') {
+                    const cleanFolder = completedItem.rootFolder.replace(/^\[[^\]]+\]\s*/, '');
+                    const targetFolder = completedItem.destination === 'drive_kavita' ? cleanFolder : completedItem.rootFolder;
+                    console.log(`[WorkerController] ☁️ 전 대기열 수집 완료 -> 드라이브 캐시 갱신 시작: ${targetFolder}`);
+                    (0,_gas_js__WEBPACK_IMPORTED_MODULE_5__/* .refreshCacheAfterUpload */ .jz)(
+                        targetFolder,
+                        completedItem.category,
+                        completedItem.seriesMetadata || {}
+                    ).catch(e =>
+                        console.warn(`[WorkerController] 캐시 갱신 실패: ${e.message}`)
+                    );
+                }
+            }
+        }
+
+        // 시리즈 컨피그 GC — 동일 seriesKey 가진 다른 항목 없으면 삭제
+        {
+            const rawItem = currentQueue.find(i => i.id === matchedId);
+            const completedItem = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .normalizeQueueItem */ .WY)(rawItem);
+            if (completedItem && completedItem.seriesKey) {
+                const sameSeriesActive = currentQueue.some(i =>
+                    i.id !== matchedId &&
+                    i.seriesKey === completedItem.seriesKey &&
+                    (i.status === 'pending' || i.status === 'processing')
                 );
+                if (!sameSeriesActive) {
+                    (0,_series_config_js__WEBPACK_IMPORTED_MODULE_10__/* .deleteSeriesConfig */ .v9)(completedItem.seriesKey);
+                }
             }
         }
 
@@ -4132,7 +4401,8 @@ function initBatchWorkerController() {
 
             if (matchedId) {
                 const queue = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getQueue */ .IS)();
-                const item = queue.find(i => i.id === matchedId);
+                const rawItem = queue.find(i => i.id === matchedId);
+                const item = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .normalizeQueueItem */ .WY)(rawItem);
                 
                 if (item) {
                     // 🛡️ 안전 대기 중 동일 에피소드의 READY 중복 처리 방어 가드
@@ -4405,18 +4675,37 @@ function initBatchWorkerController() {
                 const currentQueue = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .getQueue */ .IS)();
                 const hasActive = currentQueue.some(i => i.status === 'pending' || i.status === 'processing');
                 if (!hasActive) {
-                    const failedItem = currentQueue.find(i => i.id === matchedId);
-                    if (failedItem && (failedItem.destination === 'drive' || failedItem.destination === 'drive_kavita')) {
-                        const cleanFolder = failedItem.rootFolder.replace(/^\[[^\]]+\]\s*/, '');
-                        const targetFolder = failedItem.destination === 'drive_kavita' ? cleanFolder : failedItem.rootFolder;
-                        console.log(`[WorkerController] ☁️ 전 대기열 수집 종료(실패 포함) -> 드라이브 캐시 갱신 시작: ${targetFolder}`);
-                        (0,_gas_js__WEBPACK_IMPORTED_MODULE_5__/* .refreshCacheAfterUpload */ .jz)(
-                            targetFolder,
-                            failedItem.category,
-                            failedItem.seriesMetadata || {}
-                        ).catch(e =>
-                            console.warn(`[WorkerController] 캐시 갱신 실패: ${e.message}`)
+                    const rawItem = currentQueue.find(i => i.id === matchedId);
+                    const failedItem = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .normalizeQueueItem */ .WY)(rawItem);
+                    if (failedItem) {
+                        if (failedItem.destination === 'drive' || failedItem.destination === 'drive_kavita') {
+                            const cleanFolder = failedItem.rootFolder.replace(/^\[[^\]]+\]\s*/, '');
+                            const targetFolder = failedItem.destination === 'drive_kavita' ? cleanFolder : failedItem.rootFolder;
+                            console.log(`[WorkerController] ☁️ 전 대기열 수집 종료(실패 포함) -> 드라이브 캐시 갱신 시작: ${targetFolder}`);
+                            (0,_gas_js__WEBPACK_IMPORTED_MODULE_5__/* .refreshCacheAfterUpload */ .jz)(
+                                targetFolder,
+                                failedItem.category,
+                                failedItem.seriesMetadata || {}
+                            ).catch(e =>
+                                console.warn(`[WorkerController] 캐시 갱신 실패: ${e.message}`)
+                            );
+                        }
+                    }
+                }
+
+                // 시리즈 컨피그 GC — 동일 seriesKey 가진 다른 항목 없으면 삭제
+                {
+                    const rawItem = currentQueue.find(i => i.id === matchedId);
+                    const failedItem = (0,_queue_js__WEBPACK_IMPORTED_MODULE_2__/* .normalizeQueueItem */ .WY)(rawItem);
+                    if (failedItem && failedItem.seriesKey) {
+                        const sameSeriesActive = currentQueue.some(i =>
+                            i.id !== matchedId &&
+                            i.seriesKey === failedItem.seriesKey &&
+                            (i.status === 'pending' || i.status === 'processing')
                         );
+                        if (!sameSeriesActive) {
+                            (0,_series_config_js__WEBPACK_IMPORTED_MODULE_10__/* .deleteSeriesConfig */ .v9)(failedItem.seriesKey);
+                        }
                     }
                 }
 
@@ -6998,23 +7287,26 @@ class MenuModal {
         const testNativeBtn = doc.getElementById('toki-btn-test-native');
         if (testNativeBtn) {
             testNativeBtn.onclick = async () => {
-                if (this.handlers.testNativeDownload) {
-                    testNativeBtn.disabled = true;
-                    testNativeBtn.textContent = '⏳ 테스트 중...';
-                    const success = await this.handlers.testNativeDownload();
-                    if (success) {
+                testNativeBtn.disabled = true;
+                testNativeBtn.textContent = '⏳ 테스트 중...';
+                try {
+                    const result = await EventBus/* EventBus */.l.request(EventBus/* EVT */.c.TEST_NATIVE_DOWNLOAD, {}, 3000);
+                    if (result.ok) {
                         testNativeBtn.textContent = '✅ 테스트 성공 (폴더 확인)';
                         testNativeBtn.style.color = '#67c23a';
                     } else {
                         testNativeBtn.textContent = '❌ 테스트 실패 (설정 확인)';
                         testNativeBtn.style.color = '#f56c6c';
                     }
-                    setTimeout(() => {
-                        testNativeBtn.disabled = false;
-                        testNativeBtn.textContent = '📂 자동 분류 기능 테스트';
-                        testNativeBtn.style.color = '';
-                    }, 3000);
+                } catch (e) {
+                    testNativeBtn.textContent = '❌ 테스트 실패 (응답 없음)';
+                    testNativeBtn.style.color = '#f56c6c';
                 }
+                setTimeout(() => {
+                    testNativeBtn.disabled = false;
+                    testNativeBtn.textContent = '📂 자동 분류 기능 테스트';
+                    testNativeBtn.style.color = '';
+                }, 3000);
             };
         }
 
@@ -7181,20 +7473,25 @@ class MenuModal {
                 if (urlMatch) finalGasId = urlMatch[1];
 
                 if (this.handlers.setConfig) {
-                    this.handlers.setConfig('TOKI_GAS_ID', finalGasId);
-                    this.handlers.setConfig('TOKI_FOLDER_ID', newFolder);
-                    this.handlers.setConfig('TOKI_API_KEY', newApiKey);
-                    this.handlers.setConfig('TOKI_DOWNLOAD_POLICY', newPolicy);
-                    this.handlers.setConfig('TOKI_LOCAL_NAME_TEMPLATE', newNameTemplate);
-                    this.handlers.setConfig('TOKI_SLEEP_MODE', newSleepMode);
-                    this.handlers.setConfig('TOKI_SCAN_SPEED', newScanSpeed);
-                    this.handlers.setConfig('TOKI_NOVEL_FORMAT', newNovelFormat);
-                    this.handlers.setConfig('TOKI_NOVEL_MODE', newNovelMode);
-                    this.handlers.setConfig('TOKI_SMART_SKIP_RATIO', newSmartSkip);
-                    this.handlers.setConfig('TOKI_LOG_LEVEL', newLogLevel);
+                    const results = [];
+                    results.push(this.handlers.setConfig('TOKI_GAS_ID', finalGasId));
+                    results.push(this.handlers.setConfig('TOKI_FOLDER_ID', newFolder));
+                    results.push(this.handlers.setConfig('TOKI_API_KEY', newApiKey));
+                    results.push(this.handlers.setConfig('TOKI_DOWNLOAD_POLICY', newPolicy));
+                    results.push(this.handlers.setConfig('TOKI_LOCAL_NAME_TEMPLATE', newNameTemplate));
+                    results.push(this.handlers.setConfig('TOKI_SLEEP_MODE', newSleepMode));
+                    results.push(this.handlers.setConfig('TOKI_SCAN_SPEED', newScanSpeed));
+                    results.push(this.handlers.setConfig('TOKI_NOVEL_FORMAT', newNovelFormat));
+                    results.push(this.handlers.setConfig('TOKI_NOVEL_MODE', newNovelMode));
+                    results.push(this.handlers.setConfig('TOKI_SMART_SKIP_RATIO', newSmartSkip));
+                    results.push(this.handlers.setConfig('TOKI_LOG_LEVEL', newLogLevel));
+                    const allSaved = results.every(Boolean);
+                    popupWindow.alert(allSaved
+                        ? '설정이 저장되었습니다.'
+                        : '일부 설정 저장에 실패했습니다.\nTampermonkey가 활성화되어 있는지 확인하세요.');
+                } else {
+                    popupWindow.alert('설정이 저장되었습니다.');
                 }
-
-                popupWindow.alert('설정이 저장되었습니다.');
             };
         }
 
@@ -7329,8 +7626,22 @@ class LogBox {
             EventBus/* EventBus */.l.on(EventBus/* EVT */.c.TOGGLE_DASHBOARD, () => {
                 this.toggle();
             });
+
+            // ── 저장소 치명적 오류 감지 ──────────────────────────
+            EventBus/* EventBus */.l.on(EventBus/* EVT */.c.STORAGE_FATAL, ({ key, retriesExhausted }) => {
+                const msg = `⚠️ 큐 저장 실패: Tampermonkey 저장소에 ${retriesExhausted}회 재시도 후 ${key} 저장 불가. 새로고침 시 대기열이 유실될 수 있습니다.`;
+                this.log(msg, 'error', 'Storage');
+                alert(msg);
+            });
         }
         // ─────────────────────────────────────────────────────
+
+        // 페이지 이탈 시 팝업 자동 정리 (고아 팝업 방지)
+        window.addEventListener('beforeunload', () => {
+            if (this.popupWindow && !this.popupWindow.closed) {
+                this.popupWindow.close();
+            }
+        });
     }
 
     openDashboard(defaultTab = '') {
@@ -7340,14 +7651,23 @@ class LogBox {
         }
 
         if (this.popupWindow && !this.popupWindow.closed) {
-            if (typeof this.popupWindow.focus === 'function') {
-                this.popupWindow.focus();
+            try {
+                if (this.popupWindow.document) {
+                    if (typeof this.popupWindow.focus === 'function') {
+                        this.popupWindow.focus();
+                    }
+                    if (defaultTab) {
+                        this.switchTab(defaultTab);
+                    }
+                    this.startProgressSync();
+                    return;
+                }
+            } catch (e) {
+                // 이전 페이지 컨텍스트의 고아 팝업 — 닫고 새로 생성
+                console.warn('[TokiSync UI] 고아 팝업 감지 → 재생성', e.message);
+                try { this.popupWindow.close(); } catch (_) {}
+                this.popupWindow = null;
             }
-            if (defaultTab) {
-                this.switchTab(defaultTab);
-            }
-            this.startProgressSync();
-            return;
         }
 
         console.log('[TokiSync UI] 🛡️ 가상 팝업 대시보드 기동 (DOM 오염 차단)');
@@ -7941,17 +8261,18 @@ function showProgressModal() {
 /* harmony export */   Nk: function() { return /* binding */ setConfig; },
 /* harmony export */   Pd: function() { return /* binding */ CFG_PARSER_RULES; },
 /* harmony export */   dx: function() { return /* binding */ SLEEP_MULTIPLIERS; },
+/* harmony export */   ij: function() { return /* binding */ setConfigStorage; },
 /* harmony export */   zj: function() { return /* binding */ getConfig; }
 /* harmony export */ });
 /* unused harmony exports CFG_URL_KEY, CFG_ID_KEY, CFG_FOLDER_ID, CFG_POLICY_KEY, CFG_API_KEY, CFG_SLEEP_MODE, CFG_SMART_SKIP_RATIO, CFG_NOVEL_MODE, CFG_NOVEL_FORMAT, CFG_SCAN_SPEED, CFG_LOCAL_NAME_TEMPLATE, CFG_LOG_LEVEL */
 const SLEEP_MULTIPLIERS = {
-    cautious: 1.0,   // 신중 (1.0배율)
-    thorough: 1.5,   // 철저 (1.5배율)
-    slow: 2.2,       // 느림 (2.2배율)
-    very_slow: 3.0   // 매우 느림 (3.0배율)
+    cautious: 1.0,
+    thorough: 1.5,
+    slow: 2.2,
+    very_slow: 3.0
 };
 
-const CFG_URL_KEY = "TOKI_GAS_URL"; // legacy
+const CFG_URL_KEY = "TOKI_GAS_URL";
 const CFG_ID_KEY = "TOKI_GAS_ID";
 const CFG_FOLDER_ID = "TOKI_FOLDER_ID";
 const CFG_POLICY_KEY = "TOKI_DOWNLOAD_POLICY";
@@ -7967,6 +8288,39 @@ const CFG_LOG_LEVEL = "TOKI_LOG_LEVEL";
 const CFG_RULE_SUBSCRIPTIONS = "TOKI_RULE_SUBSCRIPTIONS";
 
 const BACKUP_KEY = "tokisync_config_backup";
+
+let _storage = null;
+
+function setConfigStorage(backend) {
+    _storage = backend;
+}
+
+function _storageGet(key, defaultValue) {
+    if (_storage) return _storage.get(key, defaultValue);
+    if (!_storageGet._warned) {
+        console.debug('[Config] Storage backend not initialized (setConfigStorage not called), using direct GM/localStorage fallback.');
+        _storageGet._warned = true;
+    }
+    if (typeof GM_getValue !== 'undefined') return GM_getValue(key, defaultValue);
+    if (typeof localStorage !== 'undefined') {
+        const val = localStorage.getItem(key);
+        return val ? JSON.parse(val) : defaultValue;
+    }
+    return defaultValue;
+}
+
+function _storageSet(key, value) {
+    if (_storage) return _storage.set(key, value);
+    if (typeof GM_setValue !== 'undefined') {
+        GM_setValue(key, value);
+        return true;
+    }
+    if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(key, JSON.stringify(value));
+        return true;
+    }
+    return false;
+}
 
 function backupToLocalStorage(configObj) {
     try {
@@ -7985,18 +8339,18 @@ function restoreFromLocalStorage() {
             if (backupStr) {
                 const backup = JSON.parse(backupStr);
                 if (backup && (backup.gasId || backup.folderId)) {
-                    console.log("[Config] 🛡️ LocalStorage 백업 감지 -> GM_setValue로 복원을 수행합니다.");
-                    if (backup.gasId && typeof GM_setValue !== 'undefined') GM_setValue(CFG_ID_KEY, backup.gasId);
-                    if (backup.folderId && typeof GM_setValue !== 'undefined') GM_setValue(CFG_FOLDER_ID, backup.folderId);
-                    if (backup.policy && typeof GM_setValue !== 'undefined') GM_setValue(CFG_POLICY_KEY, backup.policy);
-                    if (backup.apiKey && typeof GM_setValue !== 'undefined') GM_setValue(CFG_API_KEY, backup.apiKey);
-                    if (backup.sleepMode && typeof GM_setValue !== 'undefined') GM_setValue(CFG_SLEEP_MODE, backup.sleepMode);
-                    if (backup.smartSkipRatio && typeof GM_setValue !== 'undefined') GM_setValue(CFG_SMART_SKIP_RATIO, backup.smartSkipRatio.toString());
-                    if (backup.novelMode && typeof GM_setValue !== 'undefined') GM_setValue(CFG_NOVEL_MODE, backup.novelMode);
-                    if (backup.novelFormat && typeof GM_setValue !== 'undefined') GM_setValue(CFG_NOVEL_FORMAT, backup.novelFormat);
-                    if (backup.scanSpeed && typeof GM_setValue !== 'undefined') GM_setValue(CFG_SCAN_SPEED, backup.scanSpeed.toString());
-                    if (backup.localNameTemplate && typeof GM_setValue !== 'undefined') GM_setValue(CFG_LOCAL_NAME_TEMPLATE, backup.localNameTemplate);
-                    if (backup.logLevel && typeof GM_setValue !== 'undefined') GM_setValue(CFG_LOG_LEVEL, backup.logLevel);
+                    console.log("[Config] 🛡️ LocalStorage 백업 감지 -> Storage로 복원");
+                    _storageSet(CFG_ID_KEY, backup.gasId);
+                    _storageSet(CFG_FOLDER_ID, backup.folderId);
+                    if (backup.policy) _storageSet(CFG_POLICY_KEY, backup.policy);
+                    if (backup.apiKey) _storageSet(CFG_API_KEY, backup.apiKey);
+                    if (backup.sleepMode) _storageSet(CFG_SLEEP_MODE, backup.sleepMode);
+                    if (backup.smartSkipRatio) _storageSet(CFG_SMART_SKIP_RATIO, backup.smartSkipRatio.toString());
+                    if (backup.novelMode) _storageSet(CFG_NOVEL_MODE, backup.novelMode);
+                    if (backup.novelFormat) _storageSet(CFG_NOVEL_FORMAT, backup.novelFormat);
+                    if (backup.scanSpeed) _storageSet(CFG_SCAN_SPEED, backup.scanSpeed.toString());
+                    if (backup.localNameTemplate) _storageSet(CFG_LOCAL_NAME_TEMPLATE, backup.localNameTemplate);
+                    if (backup.logLevel) _storageSet(CFG_LOG_LEVEL, backup.logLevel);
                     return true;
                 }
             }
@@ -8007,88 +8361,71 @@ function restoreFromLocalStorage() {
     return false;
 }
 
-/**
- * Get current configuration
- * @returns {{gasId: string, gasUrl: string, folderId: string, policy: string, apiKey: string, sleepMode: string, smartSkipRatio: number, logLevel: string}}
- */
 function getConfig() {
-    const _gmGet = (key, def) => typeof GM_getValue !== 'undefined' ? GM_getValue(key, def) : def;
-    let gasId = _gmGet(CFG_ID_KEY, "");
-    let folderId = _gmGet(CFG_FOLDER_ID, "");
+    let gasId = _storageGet(CFG_ID_KEY, "");
+    let folderId = _storageGet(CFG_FOLDER_ID, "");
 
-    // 2중 백업 복구 엔진 기동 (GM_getValue 정보 부재 시 로컬 스토리지 데이터셋 수복)
     if (!gasId && !folderId) {
         const restored = restoreFromLocalStorage();
         if (restored) {
-            gasId = _gmGet(CFG_ID_KEY, "");
-            folderId = _gmGet(CFG_FOLDER_ID, "");
+            gasId = _storageGet(CFG_ID_KEY, "");
+            folderId = _storageGet(CFG_FOLDER_ID, "");
         }
     }
 
-    let gasUrl = _gmGet(CFG_URL_KEY, "");
+    let gasUrl = _storageGet(CFG_URL_KEY, "");
 
-    // Auto-migration: gasUrl -> gasId
     if (!gasId && gasUrl) {
         const match = gasUrl.match(/\/s\/([^\/]+)\/exec/);
         if (match) {
             gasId = match[1];
-            if (typeof GM_setValue !== 'undefined') GM_setValue(CFG_ID_KEY, gasId);
+            _storageSet(CFG_ID_KEY, gasId);
             console.log("✅ [Config] GAS URL 마이그레이션 완료");
         }
     }
 
     const finalGasId = gasId;
-    // URL fallback for legacy or reconstructed from ID
-    const finalGasUrl = finalGasId 
-        ? `https://script.google.com/macros/s/${finalGasId}/exec` 
+    const finalGasUrl = finalGasId
+        ? `https://script.google.com/macros/s/${finalGasId}/exec`
         : gasUrl;
 
     const configObj = {
         gasId: finalGasId,
         gasUrl: finalGasUrl,
-        folderId: _gmGet(CFG_FOLDER_ID, ""),
-        policy: _gmGet(CFG_POLICY_KEY, "folderInCbz"),
-        apiKey: _gmGet(CFG_API_KEY, ""),
-        sleepMode: _gmGet(CFG_SLEEP_MODE, "cautious"), // default: cautious
-        smartSkipRatio: parseInt(_gmGet(CFG_SMART_SKIP_RATIO, "50"), 10), // default 50% of Max
-        novelMode: _gmGet(CFG_NOVEL_MODE, "perChapter"), // default: chapter-by-chapter
-        novelFormat: _gmGet(CFG_NOVEL_FORMAT, "epub"), // default: EPUB
+        folderId: _storageGet(CFG_FOLDER_ID, ""),
+        policy: _storageGet(CFG_POLICY_KEY, "folderInCbz"),
+        apiKey: _storageGet(CFG_API_KEY, ""),
+        sleepMode: _storageGet(CFG_SLEEP_MODE, "cautious"),
+        smartSkipRatio: parseInt(_storageGet(CFG_SMART_SKIP_RATIO, "50"), 10),
+        novelMode: _storageGet(CFG_NOVEL_MODE, "perChapter"),
+        novelFormat: _storageGet(CFG_NOVEL_FORMAT, "epub"),
         scanSpeed: (() => {
-            let val = parseFloat(_gmGet(CFG_SCAN_SPEED, "1000"));
+            let val = parseFloat(_storageGet(CFG_SCAN_SPEED, "1000"));
             if (isNaN(val)) val = 1000;
-            // 하위 호환성: 기존의 배속 배율 값(예: 0.5 ~ 5.0)이 저장되어 있는 경우 밀리세컨드 단위로 자동 변환
-            if (val <= 10) {
-                val = val * 1000; // 1.0배속 -> 1000ms, 3.0배속 -> 3000ms 등
-            }
+            if (val <= 10) val = val * 1000;
             return Math.round(val);
         })(),
-        localNameTemplate: _gmGet(CFG_LOCAL_NAME_TEMPLATE, "{number:4} - {title}"),
-        logLevel: _gmGet(CFG_LOG_LEVEL, "info")
+        localNameTemplate: _storageGet(CFG_LOCAL_NAME_TEMPLATE, "{number:4} - {title}"),
+        logLevel: _storageGet(CFG_LOG_LEVEL, "info")
     };
     backupToLocalStorage(configObj);
     return configObj;
 }
 
-/**
- * Set configuration value
- * @param {string} key 
- * @param {string} value 
- */
 function setConfig(key, value) {
-    if (typeof GM_setValue !== 'undefined') GM_setValue(key, value);
+    const ok = _storageSet(key, value);
+    if (!ok) {
+        console.error(`[Config] ${key} 저장 실패: storage backend unavailable`);
+    }
     try {
         const configObj = getConfig();
         backupToLocalStorage(configObj);
     } catch (e) {
         console.warn(`[Config] Backup to localStorage failed: ${e.message}`);
     }
+    return ok;
 }
 
-
-/**
- * Check if configuration is valid
- * @returns {boolean}
- */
 function isConfigValid() {
     const config = getConfig();
     return (config.gasId || config.gasUrl) && config.folderId;
@@ -8108,6 +8445,7 @@ function isConfigValid() {
 /* harmony export */   Yi: function() { return /* binding */ arrayBufferToBase64; },
 /* harmony export */   _L: function() { return /* binding */ blobToArrayBuffer; },
 /* harmony export */   iL: function() { return /* binding */ getCommonPrefix; },
+/* harmony export */   nJ: function() { return /* binding */ setDownloadBackend; },
 /* harmony export */   yy: function() { return /* binding */ sleep; }
 /* harmony export */ });
 /* unused harmony exports waitIframeLoad, pauseForCaptcha, getImageDimensions */
@@ -8115,6 +8453,12 @@ function isConfigValid() {
 /* harmony import */ var _ui_index_js__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(605);
 
 
+
+let _downloadBackend = null;
+
+function setDownloadBackend(backend) {
+    _downloadBackend = backend;
+}
 
 function arrayBufferToBase64(buffer) {
     const bytes = new Uint8Array(buffer);
@@ -8638,14 +8982,16 @@ async function saveFile(data, filename, type = 'local', extension = 'zip', metad
         link.remove();
         console.log(`[Local] 완료`);
     } else if (type === 'native') {
-        // [v1.6.0] GM_download with subfolder support
         const folderName = metadata.folderName || "TokiSync";
-        // Final Path: "TokiSync/SeriesTitle/Filename.zip"
-        const finalPath = `TokiSync/${folderName}/${fullFileName}`.replace(/[<>:"|?*]/g, '_'); // Sanitization for safety
+        const finalPath = `TokiSync/${folderName}/${fullFileName}`.replace(/[<>:"|?*]/g, '_');
 
         console.log(`[Native] 자동 분류 다운로드 시도... (${finalPath})`);
-        const logger = _ui_index_js__WEBPACK_IMPORTED_MODULE_1__/* .LogBox */ .ej.getInstance();
 
+        if (_downloadBackend) {
+            return _downloadBackend.download(content, finalPath);
+        }
+
+        const logger = _ui_index_js__WEBPACK_IMPORTED_MODULE_1__/* .LogBox */ .ej.getInstance();
         return new Promise((resolve, reject) => {
             if (typeof GM_download !== 'function') {
                 const err = "GM_download 권한이 없거나 지원되지 않는 환경입니다.";
@@ -9435,7 +9781,10 @@ var worker_controller = __webpack_require__(572);
 var core_queue = __webpack_require__(302);
 // EXTERNAL MODULE: ./src/core/ipc-broker.js
 var ipc_broker = __webpack_require__(941);
+// EXTERNAL MODULE: ./src/core/series-config.js
+var series_config = __webpack_require__(451);
 ;// ./src/core/downloader.js
+
 
 
 
@@ -9599,10 +9948,13 @@ async function processItem(item, builder, siteInfo, iframe, parser, seriesTitle 
         core_queue/* activeWorkers */.mR.delete(id);
         core_queue/* processingSlots */.PG.delete(id);
         core_queue/* sessionRegistry */.a.delete(id);
-        
+
         // 단일 합본 및 배치 모드가 아닐 때만 즉시 큐 청소 (UI 지속 노출 보장)
+        // 직접 호출된 processItem(큐에 등록되지 않은 항목)는 queueItem 제거 건너뜀
         if (!isSingleVolume && buildingPolicy !== 'zipOfCbzs') {
-            (0,core_queue/* removeQueueItem */.d$)(id);
+            const q = getRawQueue();
+            const exists = q.some(i => i.id === id);
+            if (exists) (0,core_queue/* removeQueueItem */.d$)(id);
         }
     }
 }
@@ -9631,10 +9983,188 @@ function parseRangeSpec(spec) {
     return nums.size > 0 ? nums : null;
 }
 
+/**
+ * Drive 업로드 사전작업 (썸네일·기록·고속캐시)
+ * @param prepItemId - 외부에서 생성한 prepItem ID (cleanupPrep=false일 때 필수)
+ * @param cleanupPrep - false면 prepItem 생성/정리를 호출자가 담당
+ * @returns {{ historyFolderId, uploadedHistorySet, episodeCacheMap, historyCheckTimeoutFlag, prepItemId }}
+ */
+async function runDrivePreWork({ parser, seriesTitle, rootFolder, category, destination, seriesId, forceOverwrite, prepItemId = null, cleanupPrep = true }) {
+    const ownPrep = !prepItemId;
+    if (ownPrep) {
+        prepItemId = `toki_prep_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+        const queue = (0,core_queue/* getQueue */.IS)();
+        queue.push({
+            id: prepItemId, title: seriesTitle, episodeTitle: '⏳ 업로드 준비 중...',
+            episodeNum: '', episodeUrl: '', folderId: '',
+            category: category, viewerCfg: {}, rootFolder: rootFolder,
+            destination: destination, novelFormat: 'epub', matchedRule: {},
+            protocolDomain: '', seriesMetadata: {}, forceOverwrite: false,
+            status: 'processing', progressPercent: 0, stage: 'preparing',
+            retryCount: 0, addedAt: Date.now()
+        });
+        (0,core_queue/* saveRawQueue */.R4)(queue);
+        EventBus/* EventBus */.l.emit(EventBus/* EVT */.c.UPDATE_PROGRESS);
+    }
+
+    const updatePrepProgress = (pct, label) => {
+        (0,core_queue/* updateQueueItem */.Gg)(prepItemId, { progressPercent: pct, episodeTitle: label });
+        EventBus/* EventBus */.l.emit(EventBus/* EVT */.c.UPDATE_PROGRESS);
+    };
+
+    const checkAbort = () => {
+        const q = (0,core_queue/* getQueue */.IS)();
+        const fresh = q.find(i => i.id === prepItemId);
+        if (!fresh || fresh.status !== 'processing') {
+            logger.logger.warn('⚠️ 사용자에 의해 다운로드가 중단되었습니다.', 'Downloader');
+            return true;
+        }
+        return false;
+    };
+
+    let historyFolderId = null;
+    let uploadedHistorySet = new Set();
+    let episodeCacheMap = new Map();
+    let historyCheckTimeoutFlag = false;
+    let aborted = false;
+
+    try {
+        // 썸네일 업로드
+        try {
+            const thumbnailUrl = parser.getThumbnailUrl();
+            if (thumbnailUrl) {
+                updatePrepProgress(5, '📷 시리즈 썸네일 업로드 중...');
+                logger.logger.log('📷 시리즈 썸네일 업로드 중...');
+                const thumbBlob = await (0,utils/* fetchBlobWithXHR */.Kt)(thumbnailUrl, document.URL);
+                if (checkAbort()) { aborted = true; return; }
+                const cleanSeries = seriesTitle.replace(/^\[[^\]]+\]\s*/, '');
+                const targetFolder = destination === 'drive_kavita' ? cleanSeries : rootFolder;
+                await (0,utils/* saveFile */.OJ)(thumbBlob, 'cover', 'drive', 'jpg', {
+                    category, folderName: targetFolder, destination: destination,
+                    folderId: historyFolderId || undefined
+                });
+                if (checkAbort()) { aborted = true; return; }
+                logger.logger.success('✅ 썸네일 업로드 완료');
+            } else {
+                logger.logger.log('⚠️  썸네일을 찾을 수 없습니다 (건너뜀)', 'warn');
+            }
+        } catch (thumbError) {
+            logger.logger.warn(`썸네일 업로드 실패 (계속 진행): ${thumbError.message}`, 'Downloader');
+        }
+
+        // Smart Skip: 업로드 기록 조회
+        updatePrepProgress(30, '📋 Drive 업로드 기록 확인 중 (Smart Skip)...');
+        try {
+            if (forceOverwrite) {
+                logger.logger.log('⚠️ 강제 재다운로드 옵션 활성화: 기존 업로드 기록 무시 (전체 덮어쓰기)');
+            } else {
+                logger.logger.log('☁️ 드라이브 업로드 기록 및 용량 확인 중 (Smart Skip)...');
+                const cleanFolder = rootFolder.replace(/^\[[^\]]+\]\s*/, '');
+                const targetFolder = destination === 'drive_kavita' ? cleanFolder : rootFolder;
+                const histResult = await (0,network/* fetchHistoryDirect */.GA)(targetFolder, category);
+                if (checkAbort()) { aborted = true; return; }
+                if (histResult.success) {
+                    historyFolderId = histResult.folderId;
+                    histResult.data.forEach(id => {
+                        const plain = parseInt(id).toString();
+                        uploadedHistorySet.add(id.toString());
+                        uploadedHistorySet.add(plain);
+                    });
+                    if (uploadedHistorySet.size > 0) {
+                        logger.logger.log(`⏭️ 조건 만족(기존 정상 업로드) 에피소드 ${histResult.data.length}개 감지 — 건너뜁니다.`);
+                    }
+                } else {
+                    historyCheckTimeoutFlag = true;
+                    historyFolderId = histResult.folderId;
+                    logger.logger.log(`⚠️ 업로드 기록 조회 지연/타임아웃 감지. 개별 스킵(페일세이프) 모드로 전환합니다.`, 'warn');
+                }
+            }
+        } catch (histErr) {
+            logger.logger.log(`⚠️ 업로드 기록 조회 실패: ${histErr.message}`, 'warn');
+        }
+
+        // Fast Path: 고속 업로드 캐시
+        updatePrepProgress(50, '⚡ 고속 업로드(Fast Path) 캐시 조회 중...');
+        try {
+            logger.logger.log('⚡ 고속 업로드(Fast Path) 캐시 조회 중...');
+            const config = (0,core_config/* getConfig */.zj)();
+            const indexResponse = await new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: "POST", url: config.gasUrl,
+                    data: JSON.stringify({ type: "get_library", folderId: config.folderId, apiKey: config.apiKey, protocolVersion: 3 }),
+                    headers: { "Content-Type": "text/plain" },
+                    timeout: 30000,
+                    onload: (r) => { try { resolve(JSON.parse(r.responseText)); } catch(e) { reject(e); } },
+                    onerror: reject,
+                    ontimeout: () => reject(new Error('get_library request timed out (30s)'))
+                });
+            });
+
+            if (checkAbort()) { aborted = true; return; }
+
+            if (indexResponse.status === 'success') {
+                const seriesList = indexResponse.body || indexResponse.list || [];
+                const matchedSeries = seriesList.find(s =>
+                    (s.sourceId && s.sourceId === seriesId) ||
+                    (s.name && s.name.includes(seriesTitle))
+                );
+                let targetCacheFileId = matchedSeries ? matchedSeries.cacheFileId : null;
+
+                if (targetCacheFileId) {
+                    logger.logger.log(`[Fast Path] 마스터 카탈로그에서 신규 캐시 파일 발견: ${targetCacheFileId}`);
+                } else {
+                    logger.logger.log(`[Fast Path] 마스터 카탈로그에 캐시 부재. _MergeIndex 대기열 파편을 탐색합니다...`);
+                    const fragRes = await (0,gas/* getMergeIndexFragment */.Jb)(seriesId);
+                    if (checkAbort()) { aborted = true; return; }
+                    if (fragRes.found && fragRes.data && fragRes.data.cacheFileId) {
+                        targetCacheFileId = fragRes.data.cacheFileId;
+                        logger.logger.log(`[Fast Path] 큐에서 비동기 병합 파편 발견 성공! (ID: ${targetCacheFileId})`);
+                    }
+                }
+
+                if (targetCacheFileId) {
+                    const cachedEpisodes = await (0,gas/* getBooksByCacheId */.B0)(targetCacheFileId);
+                    if (checkAbort()) { aborted = true; return; }
+                    if (cachedEpisodes && cachedEpisodes.length > 0) {
+                        cachedEpisodes.forEach(ep => {
+                            const nameWithoutExt = ep.name.replace(/\.[^/.]+$/, "");
+                            episodeCacheMap.set(nameWithoutExt, ep.id);
+                        });
+                        logger.logger.success(`[Fast Path] 맵핑 테이블 완성: ${episodeCacheMap.size}개 에피소드 캐시 로드 성공!`);
+                    }
+                } else {
+                    logger.logger.log('[Fast Path] 신규 작품이거나 캐시 파편이 아직 없습니다 (일반 업로드 분기로 진행)');
+                }
+            }
+        } catch (cacheErr) {
+            logger.logger.log(`⚠️ 고속 업로드 캐시 로드 실패 (일반 분기로 진행방향 전환): ${cacheErr.message}`, 'warn');
+        }
+    } finally {
+        if (cleanupPrep) {
+            const q = (0,core_queue/* getQueue */.IS)();
+            (0,core_queue/* saveRawQueue */.R4)(q.filter(i => i.id !== prepItemId));
+            EventBus/* EventBus */.l.emit(EventBus/* EVT */.c.UPDATE_PROGRESS);
+        }
+    }
+
+    return { historyFolderId, uploadedHistorySet, episodeCacheMap, historyCheckTimeoutFlag, prepItemId, aborted };
+}
+
 async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = false) {
     const config = (0,core_config/* getConfig */.zj)();
     let isAsyncDelegate = false;
-    
+
+    // [v1.27.5] 🛡️ 활성 batch 세션 보호 가드
+    if (core_queue/* processingSlots */.PG.size > 0 || core_queue/* activeWorkers */.mR.size > 0) {
+        EventBus/* EventBus */.l.emit(EventBus/* EVT */.c.LOG, {
+            msg: '⚠️ 현재 배치 다운로드가 진행 중입니다. 완료 후 다시 시도해주세요.',
+            tag: 'Downloader',
+            level: 'warn'
+        });
+        console.warn('[TokiSync] 🛡️ 활성 batch 세션 감지 — 다운로드 요청 차단됨');
+        return;
+    }
+
     // --- 🚨 대기열 프리체크 스마트 필터 및 UI 위임 ---
     const currentQueue = (0,core_queue/* getQueue */.IS)();
     if (currentQueue.length > 0) {
@@ -9652,6 +10182,7 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                 console.log('[TokiSync] 사용자의 승인으로 기존 대기열을 초기화합니다.');
                 (0,core_queue/* stopAllWorkers */.HO)();
                 (0,core_queue/* clearQueue */.lg)();
+                (0,core_queue/* setQueuePaused */.EB)(false);
             } else {
                 console.log('[TokiSync] 다운로드 요청을 취소하고 대기열 관리 창을 엽니다.');
                 (0,ui/* showProgressModal */.c9)();
@@ -9831,148 +10362,45 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
             vendor: parser.getSeriesMetadata().vendor || (matchedRule?.name || "").toLowerCase().replace(/[^a-z0-9]/g, '')
         };
 
+        // [큐 키 분할] 시리즈 공유 데이터를 별도 키에 저장 (TOKI_SERIES_{ruleId}_{seriesId})
+        const ruleId = parser.rule?.id || 'unknown';
+        const seriesKey = (0,series_config/* getSeriesConfigKey */.TS)(ruleId, seriesId || 'noseries', seriesTitle);
+        const seriesSaved = (0,series_config/* saveSeriesConfig */.$O)(seriesKey, {
+            matchedRule: parser.rule,
+            viewerCfg: parser.rule.viewer || {},
+            seriesMetadata: seriesMetadata,
+            rootFolder: rootFolder,
+            folderId: '',
+            category: category,
+            destination: destination,
+            novelFormat: configNovelFormat,
+            protocolDomain: parser.protocolDomain || window.location.origin,
+        });
+
+        // 시리즈 저장 실패 시 inline fallback 필드 (seriesKey 대신 각 episode에 직접 저장)
+        const sharedFallback = seriesSaved ? null : {
+            folderId: '',
+            category: category,
+            viewerCfg: parser.rule.viewer || {},
+            rootFolder: rootFolder,
+            destination: destination,
+            novelFormat: configNovelFormat,
+            matchedRule: parser.rule,
+            protocolDomain: parser.protocolDomain || window.location.origin,
+            seriesMetadata: seriesMetadata,
+        };
+
         // [Fix] Append Range [Start-End] for Local Merged Files (folderInCbz / zipOfCbzs)
         // GAS Upload uses individual files so no range needed in folder name
         // [v1.6.0 Update] Batch range is handled during saving, not in rootFolder variable
 
-        // [v1.4.0] Upload Series Thumbnail (if uploading to Drive)
+        // [v1.28.0] Drive 사전 작업 (썸네일·기록·고속캐시)
         let historyFolderId = null;
-        if (destination === 'drive' || destination === 'drive_kavita') {
-            try {
-                const thumbnailUrl = parser.getThumbnailUrl();
-                if (thumbnailUrl) {
-                    logger.logger.log('📷 시리즈 썸네일 업로드 중...');
-                    const thumbBlob = await (0,utils/* fetchBlobWithXHR */.Kt)(thumbnailUrl, document.URL);
-                    
-                    // Upload as 'cover.jpg' - network.js will auto-redirect to _Thumbnails/{ID}.jpg
-                    // saveFile(data, filename, type, extension, metadata)
-                    // → fullFileName = "cover.jpg"
-                    const cleanSeries = seriesTitle.replace(/^\[[^\]]+\]\s*/, '');
-                    const targetFolder = destination === 'drive_kavita' ? cleanSeries : rootFolder;
-                    await (0,utils/* saveFile */.OJ)(thumbBlob, 'cover', 'drive', 'jpg', { 
-                        category,
-                        folderName: targetFolder,
-                        destination: destination,
-                        folderId: historyFolderId || undefined
-                    });
-                    logger.logger.success('✅ 썸네일 업로드 완료');
-                } else {
-                    logger.logger.log('⚠️  썸네일을 찾을 수 없습니다 (건너뜀)', 'warn');
-                }
-            } catch (thumbError) {
-                logger.logger.warn(`썸네일 업로드 실패 (계속 진행): ${thumbError.message}`, 'Downloader');
-            }
-        }
-
-        // [v1.5.0 Smart Skip] Pre-load history for Drive uploads to skip already-uploaded episodes
         let uploadedHistorySet = new Set();
-        // [v1.6.0 Fast Path] Pre-load episode cache
-        let episodeCacheMap = new Map(); // key: "0001 - Title", value: "fileId"
-
+        let episodeCacheMap = new Map();
         let historyCheckTimeoutFlag = false;
 
-        if (destination === 'drive' || destination === 'drive_kavita') {
-            try {
-                if (forceOverwrite) {
-                    logger.logger.log('⚠️ 강제 재다운로드 옵션 활성화: 기존 업로드 기록 무시 (전체 덮어쓰기)');
-                } else {
-                    logger.logger.log('☁️ 드라이브 업로드 기록 및 용량 확인 중 (Smart Skip)...');
-                    const cleanFolder = rootFolder.replace(/^\[[^\]]+\]\s*/, '');
-                    const targetFolder = destination === 'drive_kavita' ? cleanFolder : rootFolder;
-                    const histResult = await (0,network/* fetchHistoryDirect */.GA)(targetFolder, category);
-                    
-                    if (histResult.success) {
-                        historyFolderId = histResult.folderId;
-                        // Normalize: accept padded ("0001") and plain ("1") forms
-                        histResult.data.forEach(id => {
-                            const plain = parseInt(id).toString();
-                            uploadedHistorySet.add(id.toString());   // e.g. "0001"
-                            uploadedHistorySet.add(plain);           // e.g. "1"
-                        });
-                        if (uploadedHistorySet.size > 0) {
-                            logger.logger.log(`⏭️ 조건 만족(기존 정상 업로드) 에피소드 ${histResult.data.length}개 감지 — 건너뜁니다.`);
-                        }
-                    } else {
-                        historyCheckTimeoutFlag = true;
-                        historyFolderId = histResult.folderId;
-                        logger.logger.log(`⚠️ 업로드 기록 조회 지연/타임아웃 감지. 개별 스킵(페일세이프) 모드로 전환합니다.`, 'warn');
-                    }
-                }
-            } catch (histErr) {
-                // Non-fatal: if history check fails unexpectedly
-                logger.logger.log(`⚠️ 업로드 기록 조회 실패: ${histErr.message}`, 'warn');
-            }
-
-            // [v1.6.0] Phase B-2: Load Master Index -> Cache File ID -> Episode List
-            try {
-                logger.logger.log('⚡ 고속 업로드(Fast Path) 캐시 조회 중...');
-                const config = (0,core_config/* getConfig */.zj)();
-                
-                // 1. Fetch Complete Master Index
-                const indexResponse = await new Promise((resolve, reject) => {
-                    GM_xmlhttpRequest({
-                        method: "POST", url: config.gasUrl,
-                        data: JSON.stringify({ type: "get_library", folderId: config.folderId, apiKey: config.apiKey, protocolVersion: 3 }),
-                        headers: { "Content-Type": "text/plain" },
-                        timeout: 30000, // [v1.27.3] 30초 타임아웃 추가 (무한 대기 방지)
-                        onload: (r) => {
-                            try { resolve(JSON.parse(r.responseText)); } 
-                            catch(e) { reject(e); }
-                        },
-                        onerror: reject,
-                        ontimeout: () => reject(new Error('get_library request timed out (30s)'))
-                    });
-                });
-
-                if (indexResponse.status === 'success') {
-                    // 2. Find Current Series in Index by ID or Title
-                    // [Fix] Handle both indexResponse.body (cached) and indexResponse.list (rebuild) structures
-                    const seriesList = indexResponse.body || indexResponse.list || [];
-                    
-                    // Match by sourceId or title
-                    const matchedSeries = seriesList.find(s => 
-                        (s.sourceId && s.sourceId === seriesId) || 
-                        (s.name && s.name.includes(seriesTitle))
-                    );
-
-                    let targetCacheFileId = matchedSeries ? matchedSeries.cacheFileId : null;
-                    
-                    if (targetCacheFileId) {
-                        logger.logger.log(`[Fast Path] 마스터 카탈로그에서 신규 캐시 파일 발견: ${targetCacheFileId}`);
-                    } else {
-                        // [v1.6.1] 2nd Attempt: Fetch Merge Index Fragment directly (Fallback for newly uploaded series)
-                        logger.logger.log(`[Fast Path] 마스터 카탈로그에 캐시 부재. _MergeIndex 대기열 파편을 탐색합니다...`);
-                        const fragRes = await (0,gas/* getMergeIndexFragment */.Jb)(seriesId);
-                        if (fragRes.found && fragRes.data && fragRes.data.cacheFileId) {
-                            targetCacheFileId = fragRes.data.cacheFileId;
-                            logger.logger.log(`[Fast Path] 큐에서 비동기 병합 파편 발견 성공! (ID: ${targetCacheFileId})`);
-                        }
-                    }
-
-                    if (targetCacheFileId) {
-                        // 3. Directly load episode cache using the cacheFileId
-                        const cachedEpisodes = await (0,gas/* getBooksByCacheId */.B0)(targetCacheFileId);
-                        
-                        if (cachedEpisodes && cachedEpisodes.length > 0) {
-                             cachedEpisodes.forEach(ep => {
-                                 // Map "name" (e.g. "0001 - Title.cbz") to its Drive File ID
-                                 // We strip the extension to match our `fullFilename` variable later
-                                 const nameWithoutExt = ep.name.replace(/\.[^/.]+$/, "");
-                                 episodeCacheMap.set(nameWithoutExt, ep.id);
-                             });
-                             logger.logger.success(`[Fast Path] 맵핑 테이블 완성: ${episodeCacheMap.size}개 에피소드 캐시 로드 성공!`);
-                        }
-                    } else {
-                        logger.logger.log('[Fast Path] 신규 작품이거나 캐시 파편이 아직 없습니다 (일반 업로드 분기로 진행)');
-                    }
-                }
-            } catch (cacheErr) {
-                logger.logger.log(`⚠️ 고속 업로드 캐시 로드 실패 (일반 분기로 진행방향 전환): ${cacheErr.message}`, 'warn');
-            }
-        }
-
-        // [v1.21.2] 공통 범용 큐 선등록 래퍼 (Universal Queue Pre-Registration)
-        // 어떤 다운로드 정책이 들어와도 루프 시작 전 전체 수집 대상 에피소드 목록을 큐에 선등록
+        // [v1.28.0] 에피소드 목록 선구축 (스킵 없이, Drive 사전작업과 동시에 큐 등록)
         const currentNovelMode = (0,core_config/* getConfig */.zj)().novelMode;
         const currentIsSingleVolume = isNovel && currentNovelMode === 'singleVolume';
         
@@ -9980,34 +10408,75 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
         for (let i = 0; i < list.length; i++) {
             const item = parser.parseListItem(list[i].element || list[i]);
             const numStr = item.num ? item.num.toString() : '';
-            const numPlain = parseInt(numStr).toString();
-            
-            // 구글 드라이브 스킵 필터 (드라이브 전용)
-            const isSkip = await shouldSkipEpisode({
-                numStr,
-                destination,
-                isSingleVolume: currentIsSingleVolume,
-                uploadedHistorySet,
-                historyCheckTimeoutFlag,
-                historyFolderId,
-                forceOverwrite
-            });
-            if (isSkip) continue;
-            
-            pendingEpisodes.push({
+            const ep = {
                 title: item.title,
                 url: item.src || item.url || (list[i].element || list[i]).href || location.href,
                 episodeNum: numStr,
-                category: category,
-                viewerCfg: parser.rule.viewer || {},
-                rootFolder: rootFolder,
-                destination: destination,
-                novelFormat: configNovelFormat,
-                matchedRule: parser.rule,
-                protocolDomain: parser.protocolDomain || window.location.origin,
-                seriesMetadata: seriesMetadata,
                 forceOverwrite: forceOverwrite || false
+            };
+            if (seriesSaved) {
+                ep.seriesKey = seriesKey;
+            } else if (sharedFallback) {
+                Object.assign(ep, sharedFallback);
+            }
+            pendingEpisodes.push(ep);
+        }
+
+        let prepItemId = null;
+
+        if (destination === 'drive' || destination === 'drive_kavita') {
+            // prepItem + 전체 에피소드 동시 큐 등록
+            (0,core_queue/* addEpisodesToQueue */.id)(pendingEpisodes, seriesTitle);
+            prepItemId = `toki_prep_${Date.now()}`;
+            const queue = (0,core_queue/* getQueue */.IS)();
+            queue.push({
+                id: prepItemId, title: seriesTitle, episodeTitle: '⏳ 업로드 준비 중...',
+                episodeNum: '', episodeUrl: '', folderId: '',
+                category: category, viewerCfg: {}, rootFolder: rootFolder,
+                destination: destination, novelFormat: 'epub', matchedRule: {},
+                protocolDomain: '', seriesMetadata: {}, forceOverwrite: false,
+                status: 'processing', progressPercent: 0, stage: 'preparing',
+                retryCount: 0, addedAt: Date.now()
             });
+            (0,core_queue/* saveRawQueue */.R4)(queue);
+            EventBus/* EventBus */.l.emit(EventBus/* EVT */.c.UPDATE_PROGRESS);
+
+            const preWorkResult = await runDrivePreWork({
+                parser, seriesTitle, rootFolder, category, destination, seriesId, forceOverwrite,
+                prepItemId, cleanupPrep: false
+            });
+
+            if (preWorkResult.aborted) {
+                core_stopSilentAudio();
+                (0,core_queue/* saveRawQueue */.R4)([]);
+                EventBus/* EventBus */.l.emit(EventBus/* EVT */.c.UPDATE_PROGRESS);
+                return;
+            }
+
+            historyFolderId = preWorkResult.historyFolderId;
+            uploadedHistorySet = preWorkResult.uploadedHistorySet;
+            episodeCacheMap = preWorkResult.episodeCacheMap;
+            historyCheckTimeoutFlag = preWorkResult.historyCheckTimeoutFlag;
+
+            // 이미 업로드된 에피소드 제외 + prepItem 제거
+            if (!forceOverwrite && uploadedHistorySet.size > 0) {
+                const filtered = pendingEpisodes.filter(ep => {
+                    const numPlain = parseInt(ep.episodeNum).toString();
+                    return !uploadedHistorySet.has(ep.episodeNum) && !uploadedHistorySet.has(numPlain);
+                });
+                const skipped = pendingEpisodes.length - filtered.length;
+                pendingEpisodes.length = 0;
+                pendingEpisodes.push(...filtered);
+                if (skipped > 0) {
+                    logger.logger.log(`⏭️ Smart Skip: ${skipped}개 에피소드 제외 (이미 업로드됨)`);
+                }
+            }
+            // 큐 갱신: prepItem 제거 + skipped 에피소드 제거
+            (0,core_queue/* saveRawQueue */.R4)([]);
+            (0,core_queue/* addEpisodesToQueue */.id)(pendingEpisodes, seriesTitle);
+            prepItemId = null;
+        } else {
+            (0,core_queue/* addEpisodesToQueue */.id)(pendingEpisodes, seriesTitle);
         }
 
         if (pendingEpisodes.length === 0) {
@@ -10037,14 +10506,13 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                 }
             }
 
-            // 모든 pendingEpisodes에 확정된 폴더 ID 주입
-            const mappedEpisodes = pendingEpisodes.map(ep => ({
-                ...ep,
-                folderId: activeFolderId || ''
-            }));
-
-            const injected = (0,core_queue/* addEpisodesToQueue */.id)(mappedEpisodes, seriesTitle);
-            logger.logger.log(`🗂️ [공통 큐] 수집 대상 ${injected}개 에피소드를 대기열에 선등록 완료.`, 'Queue');
+            if (activeFolderId) {
+                const cfg = (0,series_config/* getSeriesConfig */.Ml)(seriesKey);
+                if (cfg) {
+                    cfg.folderId = activeFolderId;
+                    (0,series_config/* saveSeriesConfig */.$O)(seriesKey, cfg);
+                }
+            }
         }
 
         // [v1.26.4] 소설 합본 모드를 제외한 모든 다운로드 정책을 신뢰성 높은 배치 큐 파이프라인으로 대통합
@@ -10542,6 +11010,190 @@ async function generateDownloadReport(seriesTitle, seriesId, listCount, failedEp
     }
 }
 
+;// ./src/core/storage/StorageBackend.js
+/**
+ * StorageBackend — 추상 인터페이스
+ * GM_setValue / Puter KV / Cloud API 등 저장소 구현체는 이 클래스를 상속
+ */
+class StorageBackend {
+  get(key, defaultValue) {
+    throw new Error(`StorageBackend.get(${key}) must be implemented`);
+  }
+  set(key, value) {
+    throw new Error(`StorageBackend.set(${key}) must be implemented`);
+  }
+  delete(key) {
+    throw new Error(`StorageBackend.delete(${key}) must be implemented`);
+  }
+  addChangeListener(key, callback) {
+    throw new Error(`StorageBackend.addChangeListener(${key}) must be implemented`);
+  }
+}
+
+;// ./src/core/storage/GMStorageBackend.js
+/**
+ * GMStorageBackend — Tampermonkey GM API 구현체
+ * GM_getValue / GM_setValue / GM_deleteValue / GM_addValueChangeListener
+ * localStorage 폴백, MV3 Promise 대응, 재시도 로직 포함
+ */
+
+
+
+const SAVE_RETRY_MAX = 3;
+const SAVE_RETRY_BASE_DELAY_MS = 1000;
+
+class GMStorageBackend extends StorageBackend {
+  constructor() {
+    super();
+    this._changeListeners = new Set();
+  }
+
+  get(key, defaultValue) {
+    try {
+      if (typeof GM_getValue !== 'undefined') {
+        return GM_getValue(key, defaultValue);
+      }
+      if (typeof localStorage !== 'undefined') {
+        const val = localStorage.getItem(key);
+        return val ? JSON.parse(val) : defaultValue;
+      }
+    } catch (e) {
+      console.error(`[GMStorageBackend] get(${key}) 실패:`, e);
+    }
+    return defaultValue;
+  }
+
+  set(key, value) {
+    try {
+      if (typeof GM_setValue !== 'undefined') {
+        const result = GM_setValue(key, value);
+        if (result && typeof result.catch === 'function') {
+          result.catch(err => {
+            console.warn(`[GMStorageBackend] MV3 set(${key}) 비동기 실패:`, err.message);
+            this._scheduleRetry(key, value, 1);
+          });
+        }
+        this._notifyListeners(key, value);
+        return true;
+      }
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(key, JSON.stringify(value));
+        this._notifyListeners(key, value);
+        return true;
+      }
+    } catch (e) {
+      console.warn(`[GMStorageBackend] set(${key}) 실패:`, e.message);
+    }
+    return false;
+  }
+
+  delete(key) {
+    try {
+      if (typeof GM_deleteValue !== 'undefined') {
+        GM_deleteValue(key);
+        this._notifyListeners(key, undefined);
+        return true;
+      }
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(key);
+        this._notifyListeners(key, undefined);
+        return true;
+      }
+    } catch (e) {
+      console.warn(`[GMStorageBackend] delete(${key}) 실패:`, e.message);
+    }
+    return false;
+  }
+
+  addChangeListener(key, callback) {
+    if (typeof GM_addValueChangeListener !== 'undefined') {
+      return GM_addValueChangeListener(key, callback);
+    }
+    const wrapper = (changedKey, oldVal, newVal) => {
+      if (changedKey === key) callback(changedKey, oldVal, newVal);
+    };
+    this._changeListeners.add(wrapper);
+    return () => this._changeListeners.delete(wrapper);
+  }
+
+  _notifyListeners(key, newVal) {
+    this._changeListeners.forEach(cb => {
+      try { cb(key, undefined, newVal); } catch (e) {}
+    });
+  }
+
+  _scheduleRetry(key, value, attempt) {
+    if (attempt > SAVE_RETRY_MAX) {
+      console.error(`[GMStorageBackend] ❌ set(${key}) 완전 실패 (${SAVE_RETRY_MAX}회 재시도)`);
+      EventBus/* EventBus */.l.emit(EventBus/* EVT */.c.STORAGE_FATAL, {
+        key,
+        retriesExhausted: SAVE_RETRY_MAX
+      });
+      return;
+    }
+    const delayMs = SAVE_RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1);
+    console.warn(`[GMStorageBackend] 저장 재시도 ${attempt}/${SAVE_RETRY_MAX} (${delayMs}ms)`);
+    setTimeout(() => {
+      if (this.set(key, value)) {
+        EventBus/* EventBus */.l.emit(EventBus/* EVT */.c.UPDATE_PROGRESS);
+      } else {
+        this._scheduleRetry(key, value, attempt + 1);
+      }
+    }, delayMs);
+  }
+}
+
+;// ./src/core/storage/DownloadBackend.js
+/**
+ * DownloadBackend — 추상 인터페이스
+ * GM_download / Cloud fetch 등 다운로드 구현체는 이 클래스를 상속
+ */
+class DownloadBackend {
+  download(blob, filename, options = {}) {
+    throw new Error('DownloadBackend.download() must be implemented');
+  }
+}
+
+;// ./src/core/storage/GMDownloadBackend.js
+/**
+ * GMDownloadBackend — Tampermonkey GM_download 구현체
+ */
+
+
+
+class GMDownloadBackend extends DownloadBackend {
+  download(blob, filename, options = {}) {
+    const finalPath = filename.replace(/[<>:"|?*]/g, '_');
+
+    return new Promise((resolve, reject) => {
+      if (typeof GM_download !== 'function') {
+        const err = 'GM_download 권한이 없거나 지원되지 않는 환경입니다.';
+        try { ui/* LogBox */.ej.getInstance().error(`[Native] 실패: ${err}`); } catch (e) {}
+        reject(new Error(err));
+        return;
+      }
+
+      GM_download({
+        url: URL.createObjectURL(blob),
+        name: finalPath,
+        saveAs: options.saveAs ?? false,
+        onload: () => resolve(true),
+        onerror: (err) => {
+          const errMsg = err ? (err.error || err.reason || '알 수 없는 오류') : '알 수 없는 오류';
+          const logger = ui/* LogBox */.ej.getInstance();
+          if (err && err.error === 'not_whitelisted') {
+            const ext = filename.split('.').pop() || 'txt';
+            logger.critical(`[Native 방어] 다운로드 차단됨: 지원하지 않는 확장자입니다.\n👉 템퍼몽키 [설정] -> [고급] -> [Whitelisted File Extensions]에 '${ext}' 확장자를 추가해주세요.`);
+          } else {
+            logger.error(`[Native] 다운로드 실패: ${errMsg}`);
+          }
+          reject(new Error(errMsg));
+        }
+      });
+    });
+  }
+}
+
 // EXTERNAL MODULE: ./src/core/parsers/SubscriptionManager.js
 var SubscriptionManager = __webpack_require__(330);
 ;// ./src/core/version.js
@@ -10575,8 +11227,18 @@ const VIEWER_VERSION = (/* unused pure expression or super */ null && ( true
 
 
 
+
+
+
+
+
 async function main() {
     console.log(`🚀 TokiDownloader Loaded (New Core v${SCRIPT_VERSION})`);
+
+    (0,core_config/* setConfigStorage */.ij)(new GMStorageBackend());
+    (0,core_queue/* setQueueStorage */.Tm)(new GMStorageBackend());
+    (0,utils/* setDownloadBackend */.nJ)(new GMDownloadBackend());
+    (0,series_config/* setSeriesStorage */.pn)(new GMStorageBackend());
 
     // -- 0. Bootstrap UI Instances --
     const _logbox = ui/* LogBox */.ej.getInstance();
@@ -10921,7 +11583,21 @@ async function main() {
                 const title = metadata.episodeTitle || "Current_Episode";
                 const seriesTitle = metadata.seriesTitle || "Unknown_Series";
 
-                // 2. 빌더 생성 (카테고리에 따라)
+                const config = (0,core_config/* getConfig */.zj)();
+                const destination = (config.policy === 'native') ? 'native' : (config.policy === 'drive' ? 'drive' : 'local');
+
+                // 2. Drive 사전작업 (썸네일·기록·고속캐시)
+                if (destination === 'drive' || destination === 'drive_kavita') {
+                    const match = document.URL.match(/\/novel\/(\d+)/);
+                    const seriesId = match ? match[1] : seriesTitle.replace(/[^a-z0-9]/gi, '_');
+                    await runDrivePreWork({
+                        parser, seriesTitle, rootFolder: seriesTitle,
+                        category: siteInfo.category, destination, seriesId,
+                        forceOverwrite: false
+                    });
+                }
+
+                // 3. 빌더 생성 (카테고리에 따라)
                 const isNovel = (siteInfo.category === 'Novel' || siteInfo.category === 'novel');
                 let builder;
                 let extension = 'cbz';
@@ -10933,7 +11609,7 @@ async function main() {
                     builder = new cbz/* CbzBuilder */.$(title);
                 }
 
-                // 3. 임시 아이템 객체 생성 (processItem 호환용)
+                // 4. 임시 아이템 객체 생성 (processItem 호환용)
                 const tempItem = {
                     title: title,
                     src: document.URL,   // processItem에서 item.src 참조 (API 복호화 포함)
@@ -10941,13 +11617,10 @@ async function main() {
                     num: metadata.episodeNum || "0000"
                 };
 
-                const config = (0,core_config/* getConfig */.zj)();
-                const destination = (config.policy === 'native') ? 'native' : (config.policy === 'drive' ? 'drive' : 'local');
-
-                // 4. 단건 다운로드 실행 (현재 페이지의 document를 직접 전달)
+                // 5. 단건 다운로드 실행 (현재 페이지의 document를 직접 전달)
                 await processItem(tempItem, builder, siteInfo, null, parser, seriesTitle, document, "", destination);
 
-                // 5. 파일 생성 및 저장
+                // 6. 파일 생성 및 저장
                 logger.logger.log('💾 파일 생성 및 저장 중...', 'System');
                 
                 const zip = await builder.build({
@@ -10966,6 +11639,17 @@ async function main() {
                 logger.logger.error(`❌ 다운로드 실패: ${e.message}`, 'System');
                 console.error(e);
             }
+        }
+    });
+
+    EventBus/* EventBus */.l.on(EventBus/* EVT */.c.TEST_NATIVE_DOWNLOAD, async ({ _requestId }) => {
+        try {
+            const testBlob = new Blob(["TokiSync Native Mode Test File"], { type: "text/plain" });
+            await (0,utils/* saveFile */.OJ)(testBlob, "test", "native", "txt", { folderName: "_Test" });
+            EventBus/* EventBus */.l.respond(EventBus/* EVT */.c.TEST_NATIVE_DOWNLOAD, _requestId, { ok: true, data: {} });
+        } catch (e) {
+            console.error("[Native Test Failed]", e);
+            EventBus/* EventBus */.l.respond(EventBus/* EVT */.c.TEST_NATIVE_DOWNLOAD, _requestId, { ok: false, data: { error: e.message } });
         }
     });
 
@@ -11097,12 +11781,16 @@ function initWorkerExtractor() {
 
     console.log("🚀 [TokiSync:Worker] 자립형 워커 엔진 시동 완료 (수집 전담 모드)");
 
+    // [v1.27.5] Extract session token from popup URL (injected by openEpisodePopup)
+    const workerSessionToken = new URLSearchParams(window.location.search).get('ts_token') || '';
+
     // Establish Handshake Heartbeat every second until parent injects instructions
     let handshakeInterval = setInterval(() => {
         console.log("[TokiSync:Worker] 📢 READY 핸드셰이킹 하트비트 전송 중...");
         (0,ipc_broker/* sendToParent */.Ac)('WORKER_READY', {
             targetUrl: window.location.href,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            sessionToken: workerSessionToken
         });
     }, 1000);
 
