@@ -4,6 +4,44 @@
  */
 
 import { sleep, waitForContent, scrollToLoad, fetchBlobWithXHR, blobToArrayBuffer } from './utils.js';
+
+// [v1.28.2] 이미지 Magic Bytes 기반 확장자 감지
+const KNOWN_IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'avif', 'svg']);
+
+function detectImageExtension(buffer) {
+    if (!buffer || buffer.byteLength < 12) return null;
+    const arr = new Uint8Array(buffer, 0, 12);
+    if (arr[0] === 0xFF && arr[1] === 0xD8 && arr[2] === 0xFF) return '.jpg';
+    if (arr[0] === 0x89 && arr[1] === 0x50 && arr[2] === 0x4E && arr[3] === 0x47) return '.png';
+    if (arr[0] === 0x47 && arr[1] === 0x49 && arr[2] === 0x46 && arr[3] === 0x38) return '.gif';
+    if (arr[0] === 0x52 && arr[1] === 0x49 && arr[2] === 0x46 && arr[3] === 0x46 &&
+        arr[8] === 0x57 && arr[9] === 0x45 && arr[10] === 0x42 && arr[11] === 0x50) return '.webp';
+    if (arr[0] === 0x42 && arr[1] === 0x4D) return '.bmp';
+    return null;
+}
+
+function resolveImageExtension(img, arrayBuffer) {
+    // 1) URL 확장자: 명확한 이미지 형식이면 우선
+    if (img.url) {
+        const urlExt = img.url.split('.').pop()?.split('?')[0]?.toLowerCase();
+        if (urlExt && KNOWN_IMAGE_EXTS.has(urlExt)) return '.' + urlExt;
+    }
+    // 2) HTTP Content-Type
+    if (img.type) {
+        if (img.type.includes('png')) return '.png';
+        if (img.type.includes('webp')) return '.webp';
+        if (img.type.includes('gif')) return '.gif';
+        if (img.type.includes('bmp')) return '.bmp';
+        if (img.type.includes('avif')) return '.avif';
+        if (img.type.includes('svg')) return '.svg';
+        if (img.type.includes('jpeg') || img.type.includes('jpg')) return '.jpg';
+    }
+    // 3) Magic Bytes (실제 파일 헤더)
+    const magicExt = detectImageExtension(arrayBuffer);
+    if (magicExt) return magicExt;
+    // 4) fallback
+    return '.jpg';
+}
 import { WORKER_STAGE, getQueue } from './queue.js';
 import { registerIpcListener, sendToParent } from './ipc-broker.js';
 import { GenericParser } from './parsers/GenericParser.js';
@@ -47,7 +85,7 @@ export function initWorkerExtractor() {
             timestamp: Date.now(),
             sessionToken: workerSessionToken
         });
-    }, 1000);
+    }, 500);
 
     let isExtracting = false;
 
@@ -259,12 +297,19 @@ export function initWorkerExtractor() {
                         attempt++;
                         console.log(`[TokiSync:Worker] 소설 Shadow DOM 폴링 중... (${attempt}/${maxAttempts})`);
                         
-                        const novelSel = viewerCfg.novelContent || '#novel_content';
-                        const shadowHost = document.querySelector(novelSel)?.getRootNode()?.host
-                                        || document.querySelector('.novel-epub-rendered')?.getRootNode()?.host
-                                        || document.querySelector('.vw-bot-mini--novel')?.parentElement?.querySelector('div[style*="--novel-font-size"]');
+                        // [v1.28.2] Generic shadow host auto-detect → 가장 많은 <p> 태그를 가진 shadow root 찾기
+                        let shadowHost = null;
+                        let bestPCount = 0;
+                        for (const el of document.querySelectorAll('*')) {
+                            if (!el.shadowRoot) continue;
+                            const pCount = el.shadowRoot.querySelectorAll('p').length;
+                            if (pCount > bestPCount) {
+                                bestPCount = pCount;
+                                shadowHost = el;
+                            }
+                        }
 
-                        if (shadowHost && shadowHost.shadowRoot) {
+                        if (shadowHost && shadowHost.shadowRoot && bestPCount >= 10) {
                             reportProgress(queueId, 50, WORKER_STAGE.PARSING);
                             const pTags = shadowHost.shadowRoot.querySelectorAll('.novel-epub-rendered p, p');
                             if (pTags.length > 0) {
@@ -415,7 +460,7 @@ export function initWorkerExtractor() {
                         return {
                             url: img.url,
                             data: img.data, // ArrayBuffer 유지 (Transferable)
-                            ext: img.type?.includes('png') ? '.png' : (img.type?.includes('webp') ? '.webp' : '.jpg'),
+                             ext: resolveImageExtension(img, img.data),
                             isMissing: !img.data
                         };
                     });

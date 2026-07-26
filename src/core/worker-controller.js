@@ -14,9 +14,54 @@ import { CbzBuilder } from './cbz.js';
 import { TxtBuilder } from './txt.js';
 import { saveFile } from './utils.js';
 import { deleteSeriesConfig } from './series-config.js';
+import JSZip from 'jszip';
+
+// [v1.28.2] 이미지 Magic Bytes 기반 확장자 감지
+const KNOWN_IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'avif', 'svg']);
+
+function detectImageExtension(buffer) {
+    if (!buffer || buffer.byteLength < 12) return null;
+    const arr = new Uint8Array(buffer, 0, 12);
+    // JPEG: FF D8 FF
+    if (arr[0] === 0xFF && arr[1] === 0xD8 && arr[2] === 0xFF) return '.jpg';
+    if (arr[0] === 0x89 && arr[1] === 0x50 && arr[2] === 0x4E && arr[3] === 0x47) return '.png';
+    if (arr[0] === 0x47 && arr[1] === 0x49 && arr[2] === 0x46 && arr[3] === 0x38) return '.gif';
+    if (arr[0] === 0x52 && arr[1] === 0x49 && arr[2] === 0x46 && arr[3] === 0x46 &&
+        arr[8] === 0x57 && arr[9] === 0x45 && arr[10] === 0x42 && arr[11] === 0x50) return '.webp';
+    if (arr[0] === 0x42 && arr[1] === 0x4D) return '.bmp';
+    if (arr[4] === 0x66 && arr[5] === 0x74 && arr[6] === 0x79 && arr[7] === 0x70 &&
+        arr[8] === 0x61 && arr[9] === 0x76 && arr[10] === 0x69 && arr[11] === 0x66) return '.avif';
+    return null;
+}
+
+function resolveImageExtension(img, arrayBuffer) {
+    // 1) URL 확장자: 명확한 이미지 형식이면 우선
+    if (img.url) {
+        const urlExt = img.url.split('.').pop()?.split('?')[0]?.toLowerCase();
+        if (urlExt && KNOWN_IMAGE_EXTS.has(urlExt)) return '.' + urlExt;
+    }
+    // 2) HTTP Content-Type
+    if (img.type) {
+        if (img.type.includes('png')) return '.png';
+        if (img.type.includes('webp')) return '.webp';
+        if (img.type.includes('gif')) return '.gif';
+        if (img.type.includes('bmp')) return '.bmp';
+        if (img.type.includes('avif')) return '.avif';
+        if (img.type.includes('svg')) return '.svg';
+        if (img.type.includes('jpeg') || img.type.includes('jpg')) return '.jpg';
+    }
+    // 3) Magic Bytes (실제 파일 헤더)
+    const magicExt = detectImageExtension(arrayBuffer);
+    if (magicExt) return magicExt;
+    // 4) fallback
+    return '.jpg';
+}
 
 // Reference for the single worker popup (used in sequential mode)
 let activeWorkerRef = null;
+
+// [v1.28.1] zipOfCbzs 배치용 마스터 압축 캐시 — seriesKey → JSZip
+const masterZipCache = new Map();
 
 // Security: Current session nonce for single worker mode
 let activeWorkerNonce = null;
@@ -542,7 +587,7 @@ export function initBatchWorkerController() {
 
         try {
             const normalized = normalizeQueueItem(item);
-            const { category, destination, novelFormat, episodeTitle, episodeNum, rootFolder, title, matchedRule, localNameTemplate } = normalized;
+            const { category, destination, novelFormat, episodeTitle, episodeNum, rootFolder, title, matchedRule, localNameTemplate, buildingPolicy } = normalized;
             const isNovel = (category === 'Novel' || category === 'novel');
             const siteName = matchedRule?.name || "TokiSync Parser";
 
@@ -634,32 +679,44 @@ export function initBatchWorkerController() {
 
             console.log(`[WorkerController] [배치 저장] 파일 조립 완료 (정책: ${destination}). 전송 시작: ${fullFilename}.${extension}`);
             
-            const isLocal = (destination === 'local' || destination === 'native');
-            EventBus.emit(EVT.LOG, {
-                msg: isLocal
-                    ? `💾 [${episodeTitle}] 로컬 파일 저장 개시... (${(blob.size / 1024 / 1024).toFixed(1)} MB)`
-                    : `🚀 [${episodeTitle}] 구글 드라이브 업로드 전송 시작... (${(blob.size / 1024 / 1024).toFixed(1)} MB)`,
-                tag: 'Downloader:Batch',
-                level: 'info'
-            });
+            // [v1.28.1] zipOfCbzs: 개별 저장 대신 마스터 압축에 추가
+            if (buildingPolicy === 'zipOfCbzs') {
+                if (!masterZipCache.has(normalized.seriesKey)) {
+                    masterZipCache.set(normalized.seriesKey, new JSZip());
+                }
+                masterZipCache.get(normalized.seriesKey).file(`${fullFilename}.${extension}`, blob);
 
-            // saveFile은 'local'/'native'/'drive' 3개 타입만 처리하므로 drive_kavita는 'drive'로 변환 전달
-            const saveType = (destination === 'drive_kavita') ? 'drive' : destination;
-
-            // [H8] 업로드 중 lastActivity keepalive — 30초마다 갱신하여 300초 타임아웃 오발사 방지
-            const keepalive = setInterval(() => {
-                updateQueueItem(matchedId, { lastActivity: Date.now() });
-            }, 30000);
-            try {
-                await saveFile(blob, fullFilename, saveType, extension, {
-                    folderId: item.folderId,
-                    folderName: targetFolderName,
-                    category: category,
-                    destination: destination,
-                    forceOverwrite: item.forceOverwrite || false
+                EventBus.emit(EVT.LOG, {
+                    msg: `📚 [${episodeTitle}] 마스터 압축에 추가 완료 (${(blob.size / 1024 / 1024).toFixed(1)} MB)`,
+                    tag: 'Downloader:Batch',
+                    level: 'info'
                 });
-            } finally {
-                clearInterval(keepalive);
+            } else {
+                const isLocal = (destination === 'local' || destination === 'native');
+                EventBus.emit(EVT.LOG, {
+                    msg: isLocal
+                        ? `💾 [${episodeTitle}] 로컬 파일 저장 개시... (${(blob.size / 1024 / 1024).toFixed(1)} MB)`
+                        : `🚀 [${episodeTitle}] 구글 드라이브 업로드 전송 시작... (${(blob.size / 1024 / 1024).toFixed(1)} MB)`,
+                    tag: 'Downloader:Batch',
+                    level: 'info'
+                });
+
+                const saveType = (destination === 'drive_kavita') ? 'drive' : destination;
+
+                const keepalive = setInterval(() => {
+                    updateQueueItem(matchedId, { lastActivity: Date.now() });
+                }, 30000);
+                try {
+                    await saveFile(blob, fullFilename, saveType, extension, {
+                        folderId: item.folderId,
+                        folderName: targetFolderName,
+                        category: category,
+                        destination: destination,
+                        forceOverwrite: item.forceOverwrite || false
+                    });
+                } finally {
+                    clearInterval(keepalive);
+                }
             }
 
             // 4. 업로드 완료 후 최종 성공 전이 및 캐시 삭제
@@ -717,6 +774,21 @@ export function initBatchWorkerController() {
         const currentQueue = getQueue();
         const hasActive = currentQueue.some(i => i.status === 'pending' || i.status === 'processing');
         if (!hasActive) {
+            // masterZip 저장 (zipOfCbzs)
+            for (const [seriesKey, masterZip] of masterZipCache) {
+                try {
+                    const srcItem = currentQueue.find(i => i.seriesKey === seriesKey);
+                    const norm = srcItem ? normalizeQueueItem(srcItem) : null;
+                    const masterFilename = (norm && norm.rootFolder ? norm.rootFolder.replace(/^\[[^\]]+\]\s*/, '') : seriesKey) + '_all';
+                    const masterBlob = await masterZip.generateAsync({ type: "blob" });
+                    await saveFile(masterBlob, masterFilename, 'local', 'zip', { folderName: 'TokiSync' });
+                    console.log(`[WorkerController] 📚 마스터 압축 저장 완료: ${masterFilename}.zip`);
+                } catch (e) {
+                    console.error(`[WorkerController] 마스터 압축 저장 실패: ${e.message}`);
+                }
+            }
+            masterZipCache.clear();
+
             const rawItem = currentQueue.find(i => i.id === matchedId);
             const completedItem = normalizeQueueItem(rawItem);
             if (completedItem) {
@@ -1100,6 +1172,21 @@ export function initBatchWorkerController() {
                 const currentQueue = getQueue();
                 const hasActive = currentQueue.some(i => i.status === 'pending' || i.status === 'processing');
                 if (!hasActive) {
+                    // masterZip 저장 (zipOfCbzs)
+                    for (const [seriesKey, masterZip] of masterZipCache) {
+                        try {
+                            const srcItem = currentQueue.find(i => i.seriesKey === seriesKey);
+                            const norm = srcItem ? normalizeQueueItem(srcItem) : null;
+                            const masterFilename = (norm && norm.rootFolder ? norm.rootFolder.replace(/^\[[^\]]+\]\s*/, '') : seriesKey) + '_all';
+                            const masterBlob = await masterZip.generateAsync({ type: "blob" });
+                            await saveFile(masterBlob, masterFilename, 'local', 'zip', { folderName: 'TokiSync' });
+                            console.log(`[WorkerController] 📚 마스터 압축 저장 완료: ${masterFilename}.zip`);
+                        } catch (e) {
+                            console.error(`[WorkerController] 마스터 압축 저장 실패: ${e.message}`);
+                        }
+                    }
+                    masterZipCache.clear();
+
                     const rawItem = currentQueue.find(i => i.id === matchedId);
                     const failedItem = normalizeQueueItem(rawItem);
                     if (failedItem) {

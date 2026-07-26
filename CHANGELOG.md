@@ -22,8 +22,33 @@ All notable changes to this project will be documented in this file.
 - **통합**: mockStorage() 헬퍼 추출 (9중복 → 1함수), M2/E9 통합, assertConsistent 직접 검증 (4시나리오)
 - **실환경 복구**: test-real-env.js `window.addEventListener` JSDOM mock 추가 (0/3→3/3)
 
-### 🗂️ 릴리즈 노트
-- **`documentation/reports/RELEASE_NOTE_v1.28.0.md`**: v1.28.0+v1.28.1 통합 프리릴리즈 노트
+### 📖 Shadow DOM 소설 추출 (5단계 전략 + Generic Auto-Detect)
+- **`GenericParser.js`**: `getNovelContent()` 5단계 전략 (rule selector → common selectors → shadow auto-detect → declarative shadow → body). `_extractFromElement()` 후손 shadow root 재귀 검색 (3단계: 직접 shadow → light DOM p → 후손 shadow)
+- **`extractor.js`**: `isNovelByContent()` heuristics — 룰 category가 Webtoon이어도 p > 50 && img < 5면 소설 분기 진입. `countShadowParagraphs()` + shadow root 재귀 검색
+- **`worker-extractor.js`**: 하드코딩 `.novel-epub-rendered`/`.vw-bot-mini--novel` → generic shadow auto-detect (most <p> tags)
+- **`RuleManager.js`**: `toki_common.viewer`에 `novelContent: "#novel_content"` 추가
+
+### 🐛 MenuModal EventBus 응답 버그 + DomInspector crash 수정
+- **`MenuModal.js`**: `result.ok` → try/catch — `EventBus.request()`는 `res.data`를 반환하므로 `result.ok`는 항상 undefined
+- **`DomInspector.js`**: `filterNodes()` null-safe guard (tag/classes/attrs undefined → crash fix)
+
+### 🌐 이미지 확장자 4단계 결정 (Magic Bytes + Content-Type + URL)
+- **`worker-extractor.js`** + **`worker-controller.js`**: `detectImageExtension()` (12-byte header) + `resolveImageExtension()` 4단계 파이프라인 (URL → Content-Type → Magic Bytes → fallback)
+- **`GenericParser.js`**: `getImageList()`의 `imageContainer` 미매칭 시 전체 `<img>` 태그 fallback (`.theme-viewer-images` 대응)
+
+### 🖥️ Native Download MV3 대응
+- **`GMDownloadBackend.js`**: `URL.createObjectURL(blob)` + `resolve(true)` 즉시 호출 — MV3 browser mode callback 무시 대응. `URL.revokeObjectURL` 10초 지연 cleanup
+- **`utils.js`**: fallback 경로도 동일 패턴 적용 + DI 진단 로그 제거
+- **`GMStorageBackend.js`**: set()에서 MV3 Promise 반환 시 `.then(() => true).catch()` 체인 반환
+
+### ⚡ IPC 핸드셰이킹 순서 보장 + 로그 노이즈 정리
+- **`downloader.js`**: `initBatchWorkerController()`를 pre-open 팝업보다 먼저 호출 → READY 메시지 유실 방지
+- **`worker-extractor.js`**: READY 핸드셰이킹 polling 간격 1000ms → 500ms
+- **`queue.js`**: `[DEBUG_RUN]` 제거, scheduler 로그 간소화 (47개 배열 덤프 → pending count)
+- **`LogBox.js`**: ProgressCard 큐 덤프 → console.debug
+
+### 🔧 Build 최적화
+- **`webpack.core.config.cjs`**: `externals: { jszip: 'JSZip' }` — 번들에서 JSZip 제외, CDN `@require`로 대체
 
 ## [v1.28.0] - 2026-07-21
 

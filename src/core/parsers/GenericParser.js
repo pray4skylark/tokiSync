@@ -27,9 +27,16 @@ export class GenericParser extends BaseParser {
         const attr = typeof config === 'object' ? config.attr : null;
         const regexStr = typeof config === 'object' ? config.regex : null;
 
-        const el = selector
+        let el = selector
             ? (root.matches?.(selector) ? root : root.querySelector(selector))
             : root;
+
+        // [v1.28.1] Shadow DOM fallback: shadow host 내부에서 selector 재시도
+        if (el && selector && el.shadowRoot) {
+            const inner = el.shadowRoot.querySelector(selector);
+            if (inner) el = inner;
+        }
+
         if (!el) return null;
 
         let val = null;
@@ -204,11 +211,117 @@ export class GenericParser extends BaseParser {
         };
     }
 
+    /**
+     * 소설 본문 추출 — 5단계 multi-strategy pipeline
+     * 1) 룰의 novelContent 셀렉터 (가장 정확)
+     * 2) 범용 콘텐츠 셀렉터 목록 (article, main, .content 등)
+     * 3) Shadow DOM auto-detect (가장 많은 <p>를 가진 shadow host)
+     * 4) Declarative Shadow DOM (<template shadowrootmode="open">)
+     * 5) body.innerText fallback
+     */
     getNovelContent(iframeDocument) {
         const viewerCfg = this.rule.viewer || {};
-        const selector = viewerCfg.novelContent || 'body';
-        const el = iframeDocument.querySelector(selector);
-        return el ? el.innerText : "";
+
+        // ── 전략 1: 룰에 정의된 novelContent 셀렉터 ──────────────
+        if (viewerCfg.novelContent) {
+            const el = iframeDocument.querySelector(viewerCfg.novelContent);
+            const result = this._extractFromElement(el);
+            if (result && result.length > 200) return result;
+        }
+
+        // ── 전략 2: 일반적인 콘텐츠 셀렉터 목록 ──────────────────
+        const commonSelectors = [
+            'article', '[role="main"]', 'main',
+            '.post-content', '.entry-content', '.content',
+            '#content', '#article', '.novel-content',
+            '.viewer-content', '.reader-content'
+        ];
+        for (const sel of commonSelectors) {
+            const el = iframeDocument.querySelector(sel);
+            const result = this._extractFromElement(el);
+            if (result && result.length > 200) return result;
+        }
+
+        // ── 전략 3: Shadow DOM auto-detect ───────────────────────
+        let best = { text: '', score: 0 };
+        for (const el of iframeDocument.querySelectorAll('*')) {
+            const root = el.shadowRoot;
+            if (!root) continue;
+            const paragraphs = root.querySelectorAll('p');
+            if (paragraphs.length <= 10) continue;
+            if (paragraphs.length <= best.score) continue;
+            const text = Array.from(paragraphs)
+                .map(p => p.textContent.trim())
+                .filter(t => t.length > 0)
+                .join('\n\n');
+            if (text.length > best.text.length) {
+                best = { text, score: paragraphs.length };
+            }
+        }
+        if (best.text.length > 200) return best.text;
+
+        // ── 전략 4: Declarative Shadow DOM ────────────────────────
+        for (const tmpl of iframeDocument.querySelectorAll('template[shadowrootmode]')) {
+            const paragraphs = tmpl.content?.querySelectorAll('p') || [];
+            if (paragraphs.length > 10) {
+                const text = Array.from(paragraphs)
+                    .map(p => p.textContent.trim())
+                    .filter(t => t.length > 0)
+                    .join('\n\n');
+                if (text.length > 200) return text;
+            }
+        }
+
+        // ── 전략 5: body.innerText fallback ────────────────────────
+        const bodyText = iframeDocument.body?.innerText || '';
+        return bodyText.length > 200 ? bodyText : '';
+    }
+
+    /**
+     * shadow root / plain element 공통 추출
+     * shadow host면 shadowRoot에서 <p> 추출 우선, plain element면 innerText
+     * el이 직접 shadow host가 아니면 하위 shadow host를 재귀 검색
+     */
+    _extractFromElement(el) {
+        if (!el) return null;
+
+        // 1) el이 직접 shadow host인 경우
+        if (el.shadowRoot) {
+            const paragraphs = el.shadowRoot.querySelectorAll('p');
+            if (paragraphs.length > 5) {
+                return Array.from(paragraphs)
+                    .map(p => p.textContent.trim())
+                    .filter(t => t.length > 0)
+                    .join('\n\n');
+            }
+        }
+
+        // 2) el의 light DOM <p> 태그 확인
+        const paragraphs = el.querySelectorAll('p');
+        if (paragraphs.length > 5) {
+            return Array.from(paragraphs)
+                .map(p => p.textContent.trim())
+                .filter(t => t.length > 0)
+                .join('\n\n');
+        }
+
+        // 3) el이 shadow host가 아니면, 하위 모든 shadow host 검색
+        let best = { text: '', score: 0 };
+        for (const child of el.querySelectorAll('*')) {
+            if (!child.shadowRoot) continue;
+            const p = child.shadowRoot.querySelectorAll('p');
+            if (p.length <= best.score) continue;
+            const text = Array.from(p)
+                .map(pp => pp.textContent.trim())
+                .filter(t => t.length > 0)
+                .join('\n\n');
+            if (text.length > best.text.length) {
+                best = { text, score: p.length };
+            }
+        }
+        if (best.text.length > 200) return best.text;
+
+        return el.innerText || '';
     }
 
     getImageList(iframeDocument) {
@@ -254,9 +367,34 @@ export class GenericParser extends BaseParser {
         let container = iframeDocument;
         if (viewerCfg.imageContainer) {
             container = iframeDocument.querySelector(viewerCfg.imageContainer);
+
+            // [v1.28.1] Shadow DOM fallback: shadow 내부에서 container 재검색
             if (!container) {
-                console.warn(`[GenericParser] 지정된 imageContainer(${viewerCfg.imageContainer})를 DOM에서 찾지 못했습니다.`);
-                return [];
+                for (const host of iframeDocument.querySelectorAll('*')) {
+                    if (host.shadowRoot) {
+                        const match = host.shadowRoot.querySelector(viewerCfg.imageContainer);
+                        if (match) { container = match; break; }
+                    }
+                }
+            }
+
+            if (!container) {
+                // [v1.28.2] container 미매칭 → 전체 문서 img fallback
+                console.warn(`[GenericParser] 지정된 imageContainer(${viewerCfg.imageContainer})를 DOM에서 찾지 못했습니다. 전체 img 태그 fallback을 시도합니다.`);
+                const allImgs = Array.from(iframeDocument.querySelectorAll('img'));
+                return allImgs.map(img => {
+                    const lazyAttrs = ['data-src', 'data-lazy', 'src'];
+                    for (const attr of lazyAttrs) {
+                        const val = img.getAttribute(attr);
+                        if (val) {
+                            const absoluteUrl = this.getAbsoluteUrl(val);
+                            if (absoluteUrl && !this.isDummyUrl(absoluteUrl)) {
+                                return { url: absoluteUrl, isDummy: false };
+                            }
+                        }
+                    }
+                    return null;
+                }).filter(Boolean);
             }
         }
 

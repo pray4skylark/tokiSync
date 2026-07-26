@@ -588,10 +588,11 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
             category: category,
             destination: destination,
             novelFormat: configNovelFormat,
+            buildingPolicy: buildingPolicy,
             protocolDomain: parser.protocolDomain || window.location.origin,
         });
 
-        // 시리즈 저장 실패 시 inline fallback 필드 (seriesKey 대신 각 episode에 직접 저장)
+        // 시리즈 저장 실패 시 inline fallback 필드
         const sharedFallback = seriesSaved ? null : {
             folderId: '',
             category: category,
@@ -599,6 +600,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
             rootFolder: rootFolder,
             destination: destination,
             novelFormat: configNovelFormat,
+            buildingPolicy: buildingPolicy,
             matchedRule: parser.rule,
             protocolDomain: parser.protocolDomain || window.location.origin,
             seriesMetadata: seriesMetadata,
@@ -733,6 +735,9 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
         if (!currentIsSingleVolume) {
             logger.log(`🚦 [멀티큐] 차세대 자율형 멀티큐 배치 수집기(v1.21.0) 가동 준비...`, 'Queue');
 
+            // [v1.28.2] IPC 리스너를 pre-open보다 먼저 등록 (READY 메시지 유실 방지)
+            initBatchWorkerController();
+
             // 팝업 차단 회피용 동기적 자식 창 사전 오픈 (Pre-open)
             const MAX_CONCURRENCY = 1;
             const openCount = Math.min(MAX_CONCURRENCY, pendingEpisodes.length);
@@ -780,7 +785,6 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
 
             if (freshlyOpened.length > 0) {
                 logger.success(`🚦 멀티큐 스케줄러 기동 완료. 릴레이 루프 활성화.`, 'Queue');
-                initBatchWorkerController();
                 initQueueScheduler();
                 isAsyncDelegate = true;
             } else {

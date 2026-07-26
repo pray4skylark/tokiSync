@@ -453,16 +453,11 @@ export class MenuModal {
                 testNativeBtn.disabled = true;
                 testNativeBtn.textContent = '⏳ 테스트 중...';
                 try {
-                    const result = await EventBus.request(EVT.TEST_NATIVE_DOWNLOAD, {}, 3000);
-                    if (result.ok) {
-                        testNativeBtn.textContent = '✅ 테스트 성공 (폴더 확인)';
-                        testNativeBtn.style.color = '#67c23a';
-                    } else {
-                        testNativeBtn.textContent = '❌ 테스트 실패 (설정 확인)';
-                        testNativeBtn.style.color = '#f56c6c';
-                    }
+                    await EventBus.request(EVT.TEST_NATIVE_DOWNLOAD, {}, 3000);
+                    testNativeBtn.textContent = '✅ 테스트 성공 (폴더 확인)';
+                    testNativeBtn.style.color = '#67c23a';
                 } catch (e) {
-                    testNativeBtn.textContent = '❌ 테스트 실패 (응답 없음)';
+                    testNativeBtn.textContent = '❌ 테스트 실패 (설정 확인)';
                     testNativeBtn.style.color = '#f56c6c';
                 }
                 setTimeout(() => {

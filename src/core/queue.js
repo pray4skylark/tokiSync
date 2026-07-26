@@ -66,7 +66,7 @@ const getRawQueue = () => {
 };
 
 /**
- * [v1.28.0] 단일 동기 저장 시도 — GM_setValue 1차, localStorage 2차 폴백
+ * [v1.28.2] 단일 동기 저장 시도 — GM_setValue 1차, localStorage 2차 폴백
  * MV3 대응: GM_setValue가 Promise를 반환하면 .catch로 비동기 재시도 트리거
  * @param {Array} queue 저장할 큐 데이터
  * @returns {boolean} 동기 성공 여부 (MV3 Promise fire-and-forget은 항상 true)
@@ -76,7 +76,6 @@ const trySaveOnce = (queue) => {
   if (typeof GM_setValue !== 'undefined') {
     try {
       const result = GM_setValue(STORAGE_KEY, queue);
-      // MV3: Promise 반환 시 실패하면 비동기 재시도 스케줄링
       if (result && typeof result.catch === 'function') {
         result.catch(err => {
           console.warn('[TokiSync Queue] MV3 GM_setValue 비동기 실패:', err.message);
@@ -88,7 +87,6 @@ const trySaveOnce = (queue) => {
       console.warn('[TokiSync Queue] GM_setValue 실패, localStorage 폴백 시도:', gmErr.message);
     }
   }
-  // 2차: localStorage 폴백 (GM API 불안정 시 영속성 보존)
   if (typeof localStorage !== 'undefined') {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(queue));
@@ -631,8 +629,8 @@ export const runSchedulerOnce = async () => {
     console.log(`[Queue Scheduler] 🔄 runSchedulerOnce 중복진입 차단 (processingSlots=${processingSlots.size})`);
     return;
   }
-  isSchedulerRunning = true; console.error('[DEBUG_RUN] scheduler started, queue:', JSON.stringify(getRawQueue().map(i=>({id:i.id.substring(0,12),s:i.status}))));
-  console.log(`[Queue Scheduler] 🔍 runSchedulerOnce 진입 (processingSlots=${processingSlots.size}, _activeProcessing=${_activeProcessing.size}, queue_statuses=[${getRawQueue().map(i=>i.status).join(',')}])`);
+  isSchedulerRunning = true; // [DEBUG_RUN] console.error('[DEBUG_RUN] scheduler started, queue:', JSON.stringify(getRawQueue().map(i=>({id:i.id.substring(0,12),s:i.status}))));
+  console.log(`[Queue Scheduler] 🔍 runSchedulerOnce 진입 (processingSlots=${processingSlots.size}, _activeProcessing=${_activeProcessing.size}, pending=${getRawQueue().filter(i=>i.status==='pending').length})`);
   assertConsistent('runSchedulerOnce');
 
   try {

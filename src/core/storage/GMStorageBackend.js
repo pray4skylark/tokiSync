@@ -34,13 +34,15 @@ export class GMStorageBackend extends StorageBackend {
     try {
       if (typeof GM_setValue !== 'undefined') {
         const result = GM_setValue(key, value);
+        this._notifyListeners(key, value);
         if (result && typeof result.catch === 'function') {
-          result.catch(err => {
+          // MV3: Promise 반환 → await 가능하도록 Promise 체인 반환
+          return result.then(() => true).catch(err => {
             console.warn(`[GMStorageBackend] MV3 set(${key}) 비동기 실패:`, err.message);
             this._scheduleRetry(key, value, 1);
+            return true; // fire-and-forget로 true 반환 (재시도가 별도 진행)
           });
         }
-        this._notifyListeners(key, value);
         return true;
       }
       if (typeof localStorage !== 'undefined') {

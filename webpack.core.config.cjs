@@ -65,6 +65,9 @@ try {
 module.exports = {
   mode: 'production',
   entry: './src/core/index.js',
+  externals: {
+    jszip: 'JSZip' // @require CDN 전역 → 번들 제외
+  },
   output: {
     filename: 'tokiSync.user.js',
     path: path.resolve(__dirname, 'dist'),

@@ -324,13 +324,13 @@ export class DomInspector {
     filterNodes(node, text) {
         if (!node || node.type === 'text') return false;
         const lower = text.toLowerCase();
-        let match = node.tag.includes(lower) ||
-            node.classes.some(c => c.includes(lower)) ||
-            Object.values(node.attrs).some(v => v.toLowerCase().includes(lower));
-        for (const child of node.children) {
+        let match = (node.tag || '').includes(lower) ||
+            (node.classes || []).some(c => (c || '').includes(lower)) ||
+            Object.values(node.attrs || {}).some(v => String(v || '').toLowerCase().includes(lower));
+        for (const child of node.children || []) {
             if (this.filterNodes(child, text)) match = true;
         }
-        node.matched = match;
+        node.matched = !!match;
         return match;
     }
 

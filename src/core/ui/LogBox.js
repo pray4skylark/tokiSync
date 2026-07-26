@@ -361,11 +361,11 @@ export class LogBox {
             if (!this._prevProgressIds) this._prevProgressIds = new Set();
             const newWorkerIds = activeWorkers.filter(w => !this._prevProgressIds.has(w.id));
             for (const w of newWorkerIds) {
-                console.log(`[ProgressCard] 🆕 새 진행률 카드 생성: ${w.episodeTitle} (ID: ${w.id}, totalCards=${activeWorkers.length}, queueStatuses=[${queue.map(i=>i.id.substring(0,8)+':'+i.status).join(',')}])`);
+                console.debug(`[ProgressCard] 새 진행률 카드 생성: ${w.episodeTitle} (ID: ${w.id})`);
             }
             const removedIds = [...this._prevProgressIds].filter(id => !currentIds.has(id));
             for (const id of removedIds) {
-                console.log(`[ProgressCard] 🗑️ 진행률 카드 제거: ${id}`);
+                // console.debug(`[ProgressCard] 🗑️ 진행률 카드 제거: ${id}`);
             }
             this._prevProgressIds = currentIds;
             

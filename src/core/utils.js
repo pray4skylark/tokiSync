@@ -547,15 +547,16 @@ export async function saveFile(data, filename, type = 'local', extension = 'zip'
                 return;
             }
 
+            const blobUrl = URL.createObjectURL(content);
+
             GM_download({
-                url: URL.createObjectURL(content),
+                url: blobUrl,
                 name: finalPath,
-                saveAs: false, // Use browser setting or automatic
-                onload: () => {
-                   logger.success(`[Native] 자동 저장 완료: ${fullFileName}`);
-                   resolve(true);
-                },
+                saveAs: false,
+                onload: () => { URL.revokeObjectURL(blobUrl); },
                 onerror: (err) => {
+                    URL.revokeObjectURL(blobUrl);
+                    console.error('[TokiSync] [Native GM_download RAW fallback] err=', err, JSON.stringify(err));
                     const errMsg = err ? (err.error || err.reason || "알 수 없는 오류") : "알 수 없는 오류";
                     if (err && err.error === 'not_whitelisted') {
                         logger.critical(`[Native 방어] 다운로드 차단됨: 지원하지 않는 확장자입니다.\n👉 템퍼몽키 [설정] -> [고급] -> [Whitelisted File Extensions]에 '${extension}' 확장자(cbz/epub)를 추가해주세요.`);
@@ -563,9 +564,12 @@ export async function saveFile(data, filename, type = 'local', extension = 'zip'
                         logger.error(`[Native] 다운로드 실패: ${errMsg}`);
                     }
                     console.error("[Native Error]", err);
-                    reject(new Error(errMsg));
                 }
             });
+
+            // MV3 browser mode: 먼저 resolve, blobUrl은 callback에서 revoke
+            resolve(true);
+            setTimeout(() => { URL.revokeObjectURL(blobUrl); }, 10000);
         });
     } else if (type === 'drive') {
         const logger = LogBox.getInstance();

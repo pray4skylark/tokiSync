@@ -38,6 +38,7 @@ export class RuleManager {
             },
             viewer: {
                 fetchMethod: "iframe",
+                novelContent: "#novel_content",
                 imageRegex: "https?:\\\\/\\\\/[a-zA-Z0-9_\\\\.\\\\/-]+\\\\.(?:jpg|png|webp|gif)",
                 imageContainer: "div.view-padding, div.viewer",
                 imageItem: "img",

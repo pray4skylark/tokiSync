@@ -3,6 +3,37 @@ import { logger } from './logger.js';
 import { fetchNovelText } from './worker-controller.js';
 
 /**
+ * Shadow root 내 모든 <p> 태그 개수 합산
+ * @param {Document|Element} root
+ * @returns {number}
+ */
+function countShadowParagraphs(root) {
+    let total = 0;
+    for (const el of root.querySelectorAll('*')) {
+        if (el.shadowRoot) {
+            total += el.shadowRoot.querySelectorAll('p').length;
+            total += countShadowParagraphs(el.shadowRoot);
+        }
+    }
+    return total;
+}
+
+/**
+ * DOM 구조 기반 소설 페이지 감지 (category override fallback)
+ * 룰의 category가 Webtoon이어도 페이지 구조가 소설이면 소설 분기로 진입
+ * @param {Document} targetDoc
+ * @returns {boolean}
+ */
+function isNovelByContent(targetDoc) {
+    const bodyP = (targetDoc.body || targetDoc).querySelectorAll('p').length;
+    const bodyImg = (targetDoc.body || targetDoc).querySelectorAll('img').length;
+    const shadowP = countShadowParagraphs(targetDoc);
+    const totalP = bodyP + shadowP;
+    // Signal: many <p> tags + few <img> tags = novel page
+    return totalP > 50 && bodyImg < 5;
+}
+
+/**
  * 뷰어 페이지(또는 팝업 워커) 내에서 직접 데이터를 추출하는 범용 모듈
  * 
  * @param {Document} targetDoc 대상 문서 객체 (현재 창의 document 또는 iframe 내부 document)
@@ -13,7 +44,9 @@ import { fetchNovelText } from './worker-controller.js';
  * @returns {Promise<Object>} 추출 결과 { urls: string[], content: string, title: string, episodeTitle: string }
  */
 export async function extractEpisodeData(targetDoc, parser, siteInfo, isStaticDoc = false, episodeUrl = null) {
-    const isNovel = (siteInfo.category === 'Novel' || siteInfo.category === 'novel');
+    // [v1.28.2] 콘텐츠 기반 heuristics: 룰 category가 Webtoon이어도 페이지 구조가 소설이면 override
+    const categoryIsNovel = (siteInfo.category === 'Novel' || siteInfo.category === 'novel');
+    const isNovel = categoryIsNovel || isNovelByContent(targetDoc);
     const viewerCfg = parser.rule.viewer || {};
 
     let extractedData = {
