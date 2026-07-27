@@ -10,7 +10,7 @@ import { logger } from './logger.js';
 import { getConfig, isConfigValid, SLEEP_MULTIPLIERS } from './config.js';
 import { EventBus, EVT } from './EventBus.js';
 import { startSilentAudio, stopSilentAudio } from './anti_sleep.js';
-import { fetchHistory, refreshCacheAfterUpload, getBooksByCacheId, initUpdateUploadViaGASRelay, getMergeIndexFragment } from './gas.js';
+import { fetchHistory, refreshCacheAfterUpload, getBooksByCacheId, initUpdateUploadViaGASRelay, getMergeIndexFragment, prepareSeriesCache } from './gas.js';
 import { fetchHistoryDirect, checkSingleHistoryDirect, getOAuthToken, getOrCreateFolder } from './network.js';
 import { fetchNovelText, fetchComicImages, closeActiveWorker, initBatchWorkerController } from './worker-controller.js';
 import { addEpisodesToQueue, initQueueScheduler, activeWorkers, WORKER_STAGE, updateQueueItem, getQueue, removeQueueItem, getQueueItemId, clearQueue, stopAllWorkers, saveRawQueue, processingSlots, sessionRegistry, createWorkerSession, destroyWorkerSession, getSessionToken, setQueuePaused } from './queue.js';
@@ -568,6 +568,8 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
             ...parser.getSeriesMetadata(),
             id: seriesId,
             sourceId: seriesId,
+            ruleId: ruleId,
+            sourceUrl: window.location.href,
             vendorId: parser.rule?.id || parser.getSeriesMetadata().vendorId || (matchedRule?.name || "").toLowerCase().replace(/[^a-z0-9]/g, ''),
             title: seriesTitle || rootFolder,
             originalSeriesTitle: parser.getSeriesTitle() || "",
@@ -590,6 +592,17 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
             novelFormat: configNovelFormat,
             buildingPolicy: buildingPolicy,
             protocolDomain: parser.protocolDomain || window.location.origin,
+        });
+
+        // [v1.28.2] 다운로드 사전작업: merge fragment 조기 생성 (메타데이터 미리 기록)
+        prepareSeriesCache({
+            folderName: rootFolder,
+            category: category,
+            sourceId: seriesId,
+            ruleId: ruleId,
+            sourceSite: seriesMetadata.vendor || '',
+            sourceUrl: window.location.href,
+            seriesTitle: seriesMetadata.originalSeriesTitle || seriesTitle
         });
 
         // 시리즈 저장 실패 시 inline fallback 필드

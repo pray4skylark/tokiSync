@@ -139,6 +139,15 @@ function SweepMergeIndex(folderId) {
                             if (fragData.lastUpdated) {
                                 masterList[targetIndex].lastModified = new Date(fragData.lastUpdated);
                             }
+                            if (fragData.vendor) {
+                                masterList[targetIndex].vendor = fragData.vendor;
+                            }
+                            if (fragData.ruleId) {
+                                masterList[targetIndex].ruleId = fragData.ruleId;
+                            }
+                            if (fragData.normalizedName) {
+                                masterList[targetIndex].normalizedName = fragData.normalizedName;
+                            }
                             hasMerged = true;
                             Debug.log("[MergeIndex] Merged fragment into main list: " + fragData.sourceId);
                         } else if (fragData.name && fragData.id) {
@@ -155,6 +164,10 @@ function SweepMergeIndex(folderId) {
                                     cacheFileId: fragData.cacheFileId,
                                     itemsCount: fragData.itemsCount || 0,
                                     category: fragData.category || "Unknown",
+                                    vendor: fragData.vendor || "",
+                                    ruleId: fragData.ruleId || "",
+                                    normalizedName: fragData.normalizedName || "",
+                                    vendorId: fragData.vendorId || "",
                                     created: fragData.created || new Date().toISOString(),
                                     lastModified: new Date(fragData.lastUpdated || Date.now())
                                 });
@@ -505,6 +518,8 @@ function View_updateMetadata(seriesId, metadata, rootFolderId) {
     author: metadata.author !== undefined ? metadata.author : (existingMeta.author || ""),
     vendor: metadata.vendor !== undefined ? metadata.vendor : (existingMeta.vendor || ""),
     vendorId: metadata.vendorId !== undefined ? metadata.vendorId : (existingMeta.vendorId || existingMeta.sourceId || ""),
+    ruleId: metadata.ruleId !== undefined ? metadata.ruleId : (existingMeta.ruleId || ""),
+    normalizedName: metadata.normalizedName !== undefined ? metadata.normalizedName : (existingMeta.normalizedName || ""),
     originalSeriesTitle: metadata.originalSeriesTitle !== undefined ? metadata.originalSeriesTitle : (existingMeta.originalSeriesTitle || ""),
     status: metadata.status !== undefined ? normalizeStatus(metadata.status) : (normalizeStatus(existingMeta.status) || "연재중"),
     summary: metadata.summary !== undefined ? metadata.summary : (existingMeta.summary || ""),
@@ -532,6 +547,8 @@ function View_updateMetadata(seriesId, metadata, rootFolderId) {
         masterList[idx].lastModified = updatedMeta.lastUpdated;
         masterList[idx].vendor = updatedMeta.vendor;
         masterList[idx].vendorId = updatedMeta.vendorId;
+        masterList[idx].ruleId = updatedMeta.ruleId;
+        masterList[idx].normalizedName = updatedMeta.normalizedName;
         masterList[idx].originalSeriesTitle = updatedMeta.originalSeriesTitle;
         if (!masterList[idx].metadata) masterList[idx].metadata = {};
         masterList[idx].metadata.category = updatedMeta.category;

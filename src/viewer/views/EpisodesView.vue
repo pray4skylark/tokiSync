@@ -81,7 +81,12 @@
               <span class="text-xs font-black uppercase tracking-widest ep-text">
                 전체 <span class="ep-text-accent">{{ episodes.length }}</span>화
               </span>
-              <button @click.stop="selectAllDownload"
+              <button
+                @click.stop="downloadMode = !downloadMode; if(!downloadMode) clearDownloadSelection()"
+                :class="downloadMode ? 'bg-theme-accent text-white shadow-lg shadow-theme-accent/30' : 'ep-bg text-theme-muted hover:ep-text'"
+                class="px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all"
+                title="다운로드 모드 전환">⬇ Download</button>
+              <button v-if="downloadMode" @click.stop="selectAllDownload"
                       class="text-[9px] font-black uppercase tracking-wider ep-text-sub hover:ep-text-accent transition-colors"
                       title="모두 선택">Select All</button>
             </div>
@@ -123,11 +128,12 @@
               v-for="ep in sortedEpisodes"
               :key="ep.id"
               :ref="el => { if (ep.id === activeId) activeElement = el }"
-              @click="startReading(ep)"
+              @click="downloadMode ? toggleDownloadSelection(ep.id) : startReading(ep)"
+              :class="{ 'ring-2 ring-theme-accent/60': downloadMode && downloadSelection.has(ep.id) }"
               class="ep-episode-row p-6 flex items-center cursor-pointer transition-all group"
             >
-              <!-- 체크박스 (다중 선택) -->
-              <div @click.stop="toggleDownloadSelection(ep.id)"
+              <!-- 체크박스 (다중 선택 — 다운로드 모드에서만 표시) -->
+              <div v-if="downloadMode" @click.stop="toggleDownloadSelection(ep.id)"
                    class="w-10 flex-shrink-0 flex items-center justify-center mr-2">
                 <div :class="downloadSelection.has(ep.id)
                   ? 'bg-theme-accent border-theme-accent'
@@ -220,6 +226,7 @@
 
       </div>
     </div>
+    <FloatingMenu :actions="fabActions" @action="handleFabAction" />
   </main>
 </template>
 
@@ -227,6 +234,7 @@
 import { ref, computed, watch, onMounted, nextTick } from 'vue';
 import { useStore } from '../composables/useStore';
 import { useDownloadManager } from '../composables/useDownloadManager.js';
+import FloatingMenu from '../components/FloatingMenu.vue';
 
 const {
   selectedItem, episodes, isSyncing,
@@ -237,6 +245,9 @@ const {
 } = useStore();
 
 const { startDownload, getStatus, isCached } = useDownloadManager();
+
+// [v1.28.2] 다운로드 모드 토글 — ON 시 열 클릭이 읽기가 아닌 선택/해제로 동작
+const downloadMode = ref(false);
 
 // 캐시 상태 추적용 (fileId -> boolean)
 const cacheMap = ref({});
@@ -325,6 +336,18 @@ function formatDate(dateStr) {
     const dd = String(d.getDate()).padStart(2, '0');
     return `${yy}.${mm}.${dd}`;
   } catch { return ''; }
+}
+
+const fabActions = [
+  { id: 'top', icon: '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 10l7-7m0 0l7 7m-7-7v18"/></svg>', label: '맨위로' },
+  { id: 'download', icon: '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>', label: '다운로드' },
+  { id: 'bottom', icon: '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>', label: '맨아래로' },
+];
+
+function handleFabAction(id) {
+  if (id === 'top') window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (id === 'download') downloadMode.value = !downloadMode.value;
+  if (id === 'bottom') window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
 }
 </script>
 

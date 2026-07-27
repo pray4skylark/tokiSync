@@ -111,6 +111,67 @@ export async function refreshCacheAfterUpload(folderName, category = 'Unknown', 
 }
 
 /**
+ * 제목 정규화: 다운/괄호 부가 정보 제거하여 크로스사이트 매칭용 정규명 반환
+ * e.g. "못 미더운 악녀입니다만 ~추궁접서 교체전~" → "못 미더운 악녀입니다만"
+ */
+export function normalizeTitle(title) {
+    if (!title) return '';
+    let s = title.trim();
+
+    // 1. Tilde (~) 기호 이후 제거 (가장 흔한 분기 표시)
+    const tildeIdx = s.indexOf('~');
+    if (tildeIdx > 0) s = s.substring(0, tildeIdx).trim();
+
+    // 2. 후치 괄호/대괄호修饰 제거
+    //    [외전], [리마스터판], [완결], (완결), (원작판) 등
+    s = s.replace(/[\[\(][^\]\)]*[\]\)]\s*$/g, '').trim();
+
+    // 3. trailing 하이픈/공백 제거
+    s = s.replace(/[-–—_\s]+$/, '').trim();
+
+    return s;
+}
+
+/**
+ * [v1.28.2] 다운로드 사전작업 시 merge fragment 조기 생성 (fire-and-forget)
+ * 큐 등록 직후 호출. 실패해도 배치 완료 시 refreshCacheAfterUpload가 복구.
+ */
+export function prepareSeriesCache({ folderName, category, sourceId, ruleId, sourceSite, sourceUrl, seriesTitle }) {
+    if (!isConfigValid()) return;
+    const meta = {
+        sourceId: sourceId || '',
+        ruleId: ruleId || '',
+        sourceSite: sourceSite || '',
+        sourceUrl: sourceUrl || '',
+        seriesTitle: seriesTitle || '',
+        normalizedName: normalizeTitle(seriesTitle),
+        status: 'preparing'
+    };
+    console.log(`[Meta] 사전 메타데이터 생성 요청: ${folderName} (${meta.sourceId})`);
+    gasRequest({
+        type: 'view_prepare_cache',
+        folderName,
+        category: category || 'Unknown',
+        metadata: meta
+    }, {
+        timeout: 15000,
+        defaultValue: undefined,
+        onSuccess: (body) => {
+            console.log('[Meta] 사전 메타데이터 생성 완료:', body);
+        },
+        onError: (errBody) => {
+            logger.warn(`사전 메타데이터 생성 실패: ${errBody} (${folderName}) — 완료 시 자동 복구`, 'GAS:Meta');
+        },
+        onNetworkError: () => {
+            console.log('[Meta] 사전 메타데이터 생성 네트워크 오류 — 완료 시 자동 복구');
+        },
+        onTimeout: () => {
+            console.log('[Meta] 사전 메타데이터 생성 타임아웃 — 완료 시 자동 복구');
+        }
+    });
+}
+
+/**
  * Legacy GAS Relay Upload (Fallback)
  * @param {Blob} blob File content
  * @param {string} folderName Target folder name

@@ -82,7 +82,12 @@
         <div class="mt-6 px-2 text-theme-text">
           <h4 class="font-black text-sm truncate tracking-tighter group-hover:text-theme-accent transition-colors uppercase italic">{{ item.name || item.title }}</h4>
           <div class="flex justify-between items-center mt-2">
-            <span class="text-[9px] font-black text-theme-muted uppercase">{{ item.category || item.type || 'Unknown' }}</span>
+            <div class="flex items-center gap-1">
+              <span class="text-[9px] font-black text-theme-muted uppercase">{{ item.category || item.type || 'Unknown' }}</span>
+              <span v-if="item.vendor" class="text-[9px] font-bold text-theme-accent bg-theme-bg px-1.5 py-0.5 rounded-full border border-theme-border/30">
+                {{ item.vendor }}
+              </span>
+            </div>
             <span class="text-[9px] font-bold text-theme-accent">{{ item.booksCount || 0 }} EPs</span>
           </div>
         </div>
@@ -91,6 +96,8 @@
     
     <!-- 메타데이터 수정 모달 -->
     <MetadataEditModal :isOpen="isEditOpen" :series="editingSeries" @close="isEditOpen = false" />
+
+    <FloatingMenu :actions="fabActions" @action="handleFabAction" />
   </main>
 </template>
 
@@ -99,8 +106,9 @@ import { ref } from 'vue';
 import { useStore } from '../composables/useStore';
 import ServerUpdateBanner from '../components/ServerUpdateBanner.vue';
 import MetadataEditModal from '../components/MetadataEditModal.vue';
+import FloatingMenu from '../components/FloatingMenu.vue';
 
-const { currentTab, tabs, searchQuery, isInitialLoading, isSyncing, filteredLibrary, openSeries, refreshLibrary, isConfigured, getThumbnailUrl, NO_IMAGE_SVG, librarySortMode } = useStore();
+const { currentTab, tabs, searchQuery, isInitialLoading, isSyncing, filteredLibrary, openSeries, refreshLibrary, isConfigured, getThumbnailUrl, NO_IMAGE_SVG, librarySortMode, showDownloadManager } = useStore();
 
 const isEditOpen = ref(false);
 const editingSeries = ref(null);
@@ -110,4 +118,16 @@ const openEditModal = (item) => {
   editingSeries.value = item;
   isEditOpen.value = true;
 };
+
+const fabActions = [
+  { id: 'top', icon: '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 10l7-7m0 0l7 7m-7-7v18"/></svg>', label: '맨위로' },
+  { id: 'downloads', icon: '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>', label: '다운로드' },
+  { id: 'refresh', icon: '<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>', label: '새로고침' },
+];
+
+function handleFabAction(id) {
+  if (id === 'top') window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (id === 'downloads') showDownloadManager.value = true;
+  if (id === 'refresh') refreshLibrary();
+}
 </script>

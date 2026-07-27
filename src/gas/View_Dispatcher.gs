@@ -98,6 +98,63 @@ function View_Dispatcher(data) {
       if (!folderId) throw new Error("folderId is required for history");
       resultBody = View_saveReadHistory(data, folderId);
       return resultBody; // Already wrapped in createRes
+    } else if (action === "view_prepare_cache") {
+      // [v1.28.2] 다운로드 사전작업: merge fragment 조기 생성
+      // 아직 시리즈 폴더가 없을 수도 있으므로, 없으면 조용히 넘어감 (배치 완료 시 생성)
+      if (!data.folderName)
+        throw new Error("folderName is required for cache prepare");
+      if (!data.metadata || !data.metadata.sourceId)
+        throw new Error("metadata.sourceId is required for cache prepare");
+
+      const meta = data.metadata;
+      let seriesId = lookupSeriesIdBySourceId(folderId, meta.sourceId);
+      if (!seriesId) {
+        seriesId = getOrCreateSeriesFolder(folderId, data.folderName, data.category || null, false);
+      }
+      if (!seriesId) {
+        resultBody = { prepared: false, reason: "series folder not found yet" };
+      } else {
+        try {
+          const mergeFolderId = DriveAccessService.ensureFolder(folderId, "_MergeIndex");
+          const fragName = `_toki_merge_${meta.sourceId}.json`;
+          const existingFrags = DriveAccessService.list(mergeFolderId, {
+            query: `name = '${fragName}'`,
+            fields: "files(id)"
+          });
+
+          const seriesMeta = DriveAccessService.getMetadata(seriesId);
+          const seriesFolderName = seriesMeta.name;
+
+          const fragData = JSON.stringify({
+            id: seriesId,
+            sourceId: meta.sourceId,
+            ruleId: meta.ruleId || "",
+            vendor: meta.sourceSite || "",
+            name: meta.seriesTitle || seriesFolderName,
+            normalizedName: meta.normalizedName || meta.seriesTitle || "",
+            aliases: [],
+            folderName: seriesFolderName,
+            url: meta.sourceUrl || "",
+            category: data.category || "Unknown",
+            cacheFileId: "",
+            itemsCount: 0,
+            created: seriesMeta.modifiedTime,
+            lastUpdated: new Date().toISOString(),
+            status: meta.status || "preparing"
+          });
+
+          if (existingFrags.length > 0) {
+            DriveAccessService.updateFileContent(existingFrags[0].id, fragData);
+          } else {
+            DriveAccessService.createFile(mergeFolderId, fragName, fragData, "application/json");
+          }
+          Debug.log(`[PrepareCache] Fragment ${meta.status} for sourceId=${meta.sourceId}`);
+          resultBody = { prepared: true, seriesId: seriesId };
+        } catch (e) {
+          Debug.error(`[PrepareCache] Error: ${e.toString()}`);
+          resultBody = { prepared: false, reason: e.toString() };
+        }
+      }
     } else if (action === "view_update_cache") {
       // UserScript 업로드 완료 후 호출 — folderName 기반으로 캐시 갱신
       if (!data.folderName)
@@ -183,14 +240,17 @@ function View_Dispatcher(data) {
                     ...existingMeta,
                     id: seriesId,
                     sourceId: sourceId,
+                    ruleId: extraMeta.ruleId || existingMeta.ruleId || "",
                     vendorId: extraMeta.vendorId || existingMeta.vendorId || sourceId,
                     name: titleClean || existingMeta.name || seriesFolderName.replace(/^\[[a-zA-Z0-9_\-]+\]\s*/, '').trim(),
+                    normalizedName: extraMeta.normalizedName || existingMeta.normalizedName || titleClean || "",
+                    aliases: existingMeta.aliases || [],
                     originalSeriesTitle: extraMeta.originalSeriesTitle || existingMeta.originalSeriesTitle || "",
                     folderName: seriesFolderName,
-                    url: existingMeta.url || "", 
+                    url: extraMeta.sourceUrl || existingMeta.url || "", 
                     category: data.category || existingMeta.category || "Unknown",
                     author: existingMeta.author || extraMeta.author || "",
-                    vendor: data.vendor || existingMeta.vendor || extraMeta.vendor || "",
+                    vendor: data.vendor || existingMeta.vendor || extraMeta.vendor || extraMeta.sourceSite || "",
                     status: normalizeStatus(existingMeta.status || extraMeta.status || "연재중"),
                     summary: existingMeta.summary || extraMeta.summary || "",
                     thumbnail: existingMeta.thumbnail || extraMeta.thumbnail || "",

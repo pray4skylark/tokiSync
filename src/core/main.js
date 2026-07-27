@@ -460,10 +460,19 @@ export async function main() {
             // [v1.28.2] 신 정책: ID prefix 없는 순수 제목 사용 (GAS index lookup으로 폴더 탐색)
             const rootFolder = seriesTitle;
             const category = siteInfo.category || 'Webtoon';
+            const ruleId = parser.rule?.id || 'unknown';
+            const metaData = parser.getSeriesMetadata?.() || {};
+            const sourceSite = metaData.vendor || siteInfo.name || category;
 
             logger.show();
             logger.log(`🔄 [${seriesTitle}] 메타데이터 동기화 중...`, 'Sync');
-            await refreshCacheAfterUpload(rootFolder, category, { sourceId: seriesId });
+            await refreshCacheAfterUpload(rootFolder, category, {
+                sourceId: seriesId,
+                ruleId: ruleId,
+                sourceSite: sourceSite,
+                sourceUrl: window.location.href,
+                seriesTitle: seriesTitle,
+            });
             logger.success(`✅ [${seriesTitle}] 메타데이터 동기화 완료`, 'Sync');
 
             EventBus.respond(EVT.SYNC_SERIES_META, _requestId, { ok: true, data: {} });
