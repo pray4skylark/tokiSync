@@ -102,16 +102,28 @@ function View_Dispatcher(data) {
       // UserScript 업로드 완료 후 호출 — folderName 기반으로 캐시 갱신
       if (!data.folderName)
         throw new Error("folderName is required for cache update");
-      const seriesId = getOrCreateSeriesFolder(
-        folderId,
-        data.folderName,
-        null,
-        false,
-      );
+
+      const extraMeta = data.metadata || {};
+
+      // [v1.28.2] 신 정책: sourceId 기반 index lookup 우선 시도
+      let seriesId = null;
+      if (extraMeta.sourceId) {
+        seriesId = lookupSeriesIdBySourceId(folderId, extraMeta.sourceId);
+      }
+
+      // Fallback: 폴더명 기반 검색 (구 정책 호환, ID prefix 또는 신 정책 순수 제목)
+      if (!seriesId) {
+        seriesId = getOrCreateSeriesFolder(
+          folderId,
+          data.folderName,
+          data.category || null,
+          false,
+        );
+      }
+
       if (!seriesId) {
         resultBody = { updated: false, reason: "folder not found" };
       } else {
-        const extraMeta = data.metadata || {};
         const booksArray = View_getBooks(seriesId, true, extraMeta.episodeTitles || null);
         const itemsCount = booksArray ? booksArray.length : 0;
         
@@ -124,8 +136,6 @@ function View_Dispatcher(data) {
             const meta = DriveAccessService.getMetadata(seriesId);
             const seriesFolderName = meta.name;
             const idMatch = seriesFolderName.match(/^\[([a-zA-Z0-9_\-]+)\]/);
-            
-            const extraMeta = data.metadata || {};
             const sourceId = extraMeta.sourceId || extraMeta.id || (idMatch ? idMatch[1] : seriesId);
             
             let cacheFileId = "";

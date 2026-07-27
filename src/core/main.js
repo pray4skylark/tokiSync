@@ -12,7 +12,7 @@ import { extractEpisodeData } from './extractor.js';
 import { EpubBuilder } from './epub.js';
 import { CbzBuilder } from './cbz.js';
 import { TxtBuilder } from './txt.js';
-import { fetchHistory } from './gas.js';
+import { fetchHistory, refreshCacheAfterUpload } from './gas.js';
 import { ParserFactory } from './parsers/ParserFactory.js';
 import { SubscriptionManager } from './parsers/SubscriptionManager.js';
 import { getOAuthToken, fetchHistoryDirect } from './network.js';
@@ -439,6 +439,38 @@ export async function main() {
         } catch (e) {
             console.error("[Native Test Failed]", e);
             EventBus.respond(EVT.TEST_NATIVE_DOWNLOAD, _requestId, { ok: false, data: { error: e.message } });
+        }
+    });
+
+    EventBus.on(EVT.SYNC_SERIES_META, async ({ _requestId }) => {
+        try {
+            const siteInfo = await detectSite();
+            if (!siteInfo) throw new Error('사이트를 인식할 수 없습니다.');
+
+            const parser = await ParserFactory.getParser();
+            if (!parser) throw new Error('파서를 찾을 수 없습니다.');
+
+            const list = await parser.getListItems();
+            if (!list || list.length === 0) throw new Error('목록 정보를 가져올 수 없습니다.');
+
+            const first = parser.parseListItem(list[list.length - 1]?.element || list[list.length - 1]);
+            const last = parser.parseListItem(list[0]?.element || list[0]);
+            const seriesId = parser.getSeriesId();
+            const seriesTitle = parser.getSeriesTitle();
+            // [v1.28.2] 신 정책: ID prefix 없는 순수 제목 사용 (GAS index lookup으로 폴더 탐색)
+            const rootFolder = seriesTitle;
+            const category = siteInfo.category || 'Webtoon';
+
+            logger.show();
+            logger.log(`🔄 [${seriesTitle}] 메타데이터 동기화 중...`, 'Sync');
+            await refreshCacheAfterUpload(rootFolder, category, { sourceId: seriesId });
+            logger.success(`✅ [${seriesTitle}] 메타데이터 동기화 완료`, 'Sync');
+
+            EventBus.respond(EVT.SYNC_SERIES_META, _requestId, { ok: true, data: {} });
+        } catch (e) {
+            logger.error(`❌ 메타데이터 동기화 실패: ${e.message}`, 'Sync');
+            console.error("[Series Meta Sync Failed]", e);
+            EventBus.respond(EVT.SYNC_SERIES_META, _requestId, { ok: false, data: { error: e.message } });
         }
     });
 

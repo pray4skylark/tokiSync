@@ -62,6 +62,22 @@ function findFolderId(folderName, rootFolderId) {
         Debug.log(`   ✅ Fallback Found: ${fallbackRes[0].name} (${fallbackRes[0].id})`);
         return fallbackRes[0].id;
       }
+    } else {
+      // 3. Reverse Fallback: 순수 제목 실패 시, [ID] prefix 구 형식 검색
+      Debug.log(`⚠️ Exact name failed. Trying contains search (legacy [ID] prefix)...`);
+      const safeName = folderName.replace(/'/g, "\\'");
+      const containsQuery = `'${rootFolderId}' in parents and name contains '${safeName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+
+      const containsRes = DriveAccessService.list(rootFolderId, {
+        query: containsQuery,
+        fields: "files(id, name)",
+        pageSize: 1
+      });
+
+      if (containsRes.length > 0) {
+        Debug.log(`   ✅ Contains Fallback Found: ${containsRes[0].name} (${containsRes[0].id})`);
+        return containsRes[0].id;
+      }
     }
   } catch (e) {
     Debug.error("❌ Advanced Search Failed", e);
@@ -83,10 +99,60 @@ function getOrCreateSeriesFolder(
   const seriesId = findFolderId(folderName, rootFolderId);
   if (seriesId) return seriesId;
 
+  if (category) {
+    const catFolder = findFolderId(category, rootFolderId);
+    if (catFolder) {
+      const catSeriesId = findFolderId(folderName, catFolder);
+      if (catSeriesId) return catSeriesId;
+    }
+  }
+
   if (!createIfMissing) return null;
 
   Debug.log(`🆕 Creating New Series Folder in Root: ${folderName}`);
   return DriveAccessService.ensureFolder(rootFolderId, folderName);
+}
+
+/**
+ * [v1.28.2] sourceId 기반 시리즈 폴더 검색.
+ * _MergeIndex 아래의 merge fragment에서 series 폴더 ID를 조회합니다.
+ * 신 정책 (폴더명에 [ID] prefix 없음) 환경에서도 폴더 탐색 가능.
+ *
+ * @param {string} rootFolderId - 루트 폴더 ID (GAS config.folderId)
+ * @param {string} sourceId - 사이트 시리즈 ID (e.g. "33266")
+ * @returns {string|null} 시리즈 폴더 ID 또는 null
+ */
+function lookupSeriesIdBySourceId(rootFolderId, sourceId) {
+  try {
+    const mergeFolders = DriveAccessService.list(rootFolderId, {
+      query: "name = '_MergeIndex' and mimeType = 'application/vnd.google-apps.folder'",
+      fields: "files(id)"
+    });
+    if (mergeFolders.length === 0) {
+      Debug.log(`[IndexLookup] _MergeIndex folder not found under root`);
+      return null;
+    }
+
+    const mergeFolderId = mergeFolders[0].id;
+    const fragName = `_toki_merge_${sourceId}.json`;
+    const fragFiles = DriveAccessService.list(mergeFolderId, {
+      query: `name = '${fragName}'`,
+      fields: "files(id)"
+    });
+    if (fragFiles.length === 0) {
+      Debug.log(`[IndexLookup] Fragment not found: ${fragName}`);
+      return null;
+    }
+
+    const content = DriveAccessService.getFileContent(fragFiles[0].id);
+    const frag = JSON.parse(content);
+    const seriesFolderId = frag.id || null;
+    Debug.log(`[IndexLookup] Resolved sourceId=${sourceId} → folderId=${seriesFolderId}`);
+    return seriesFolderId;
+  } catch (e) {
+    Debug.error(`[IndexLookup] Failed for sourceId=${sourceId}: ${e.toString()}`);
+    return null;
+  }
 }
 
 /**

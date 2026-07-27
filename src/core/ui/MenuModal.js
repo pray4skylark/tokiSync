@@ -110,6 +110,17 @@ export class MenuModal {
                     </div>
 
                     <div class="toki-control-group">
+                        <label class="toki-label">🔄 시리즈 메타데이터 동기화</label>
+                        <div class="toki-text-sm toki-text-primary toki-mb-10 toki-helper-desc">
+                            현재 페이지의 시리즈 정보를 구글 드라이브에 동기화합니다.<br>
+                            뷰어에서 작품이 표시되지 않을 때 사용하세요.
+                        </div>
+                        <button class="toki-btn-action toki-btn-secondary toki-btn-sm" id="toki-btn-sync-meta">
+                            🔄 메타데이터 동기화 실행
+                        </button>
+                    </div>
+
+                    <div class="toki-control-group">
                         <label class="toki-label">로컬 파일명 템플릿</label>
                         <input type="text" id="toki-sel-nametemplate" class="toki-input" placeholder="{number:4} - {title}" style="height: 36px; padding: 8px 14px; border-radius: 12px; font-size: 13px; width: 100%;">
                         <div class="toki-hint" style="font-size: 11px; color: #888; margin-top: 6px;">
@@ -464,6 +475,27 @@ export class MenuModal {
                     testNativeBtn.disabled = false;
                     testNativeBtn.textContent = '📂 자동 분류 기능 테스트';
                     testNativeBtn.style.color = '';
+                }, 3000);
+            };
+        }
+
+        const syncMetaBtn = doc.getElementById('toki-btn-sync-meta');
+        if (syncMetaBtn) {
+            syncMetaBtn.onclick = async () => {
+                syncMetaBtn.disabled = true;
+                syncMetaBtn.textContent = '⏳ 동기화 중...';
+                try {
+                    await EventBus.request(EVT.SYNC_SERIES_META, {}, 15000);
+                    syncMetaBtn.textContent = '✅ 동기화 성공';
+                    syncMetaBtn.style.color = '#67c23a';
+                } catch (e) {
+                    syncMetaBtn.textContent = '❌ 동기화 실패';
+                    syncMetaBtn.style.color = '#f56c6c';
+                }
+                setTimeout(() => {
+                    syncMetaBtn.disabled = false;
+                    syncMetaBtn.textContent = '🔄 메타데이터 동기화 실행';
+                    syncMetaBtn.style.color = '';
                 }, 3000);
             };
         }

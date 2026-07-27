@@ -770,11 +770,47 @@ export function initBatchWorkerController() {
 
         EventBus.emit(EVT.UPDATE_PROGRESS);
 
-        // 드라이브 캐시 최종 갱신 (전체 큐가 비었을 때만)
         const currentQueue = getQueue();
         const hasActive = currentQueue.some(i => i.status === 'pending' || i.status === 'processing');
+
+        // [v1.28.2] 시리즈별 캐시 갱신 (sameSeriesActive 기준, GC 이전 실행)
+        {
+            const rawItem = currentQueue.find(i => i.id === matchedId);
+            const completedItem = normalizeQueueItem(rawItem);
+            if (completedItem) {
+                // seriesKey 있으면 seriesKey 기준, 없으면 hasActive 기준 (하위 호환)
+                const isSeriesEnd = completedItem.seriesKey
+                    ? !currentQueue.some(i =>
+                        i.id !== matchedId &&
+                        i.seriesKey === completedItem.seriesKey &&
+                        (i.status === 'pending' || i.status === 'processing'))
+                    : !hasActive;
+
+                if (isSeriesEnd) {
+                    if (completedItem.destination === 'drive' || completedItem.destination === 'drive_kavita') {
+                        const cleanFolder = completedItem.rootFolder.replace(/^\[[^\]]+\]\s*/, '');
+                        const targetFolder = completedItem.destination === 'drive_kavita' ? cleanFolder : completedItem.rootFolder;
+                        console.log(`[WorkerController] ☁️ 시리즈 수집 완료 -> 드라이브 캐시 갱신 시작: ${targetFolder}`);
+                        try {
+                            await refreshCacheAfterUpload(
+                                targetFolder,
+                                completedItem.category,
+                                completedItem.seriesMetadata || {}
+                            );
+                        } catch (e) {
+                            console.warn(`[WorkerController] 캐시 갱신 실패: ${e.message}`);
+                        }
+                    }
+                    // seriesKey 있는 항목만 GC
+                    if (completedItem.seriesKey) {
+                        deleteSeriesConfig(completedItem.seriesKey);
+                    }
+                }
+            }
+        }
+
+        // 전체 큐가 비었을 때 masterZip 저장
         if (!hasActive) {
-            // masterZip 저장 (zipOfCbzs)
             for (const [seriesKey, masterZip] of masterZipCache) {
                 try {
                     const srcItem = currentQueue.find(i => i.seriesKey === seriesKey);
@@ -788,39 +824,6 @@ export function initBatchWorkerController() {
                 }
             }
             masterZipCache.clear();
-
-            const rawItem = currentQueue.find(i => i.id === matchedId);
-            const completedItem = normalizeQueueItem(rawItem);
-            if (completedItem) {
-                if (completedItem.destination === 'drive' || completedItem.destination === 'drive_kavita') {
-                    const cleanFolder = completedItem.rootFolder.replace(/^\[[^\]]+\]\s*/, '');
-                    const targetFolder = completedItem.destination === 'drive_kavita' ? cleanFolder : completedItem.rootFolder;
-                    console.log(`[WorkerController] ☁️ 전 대기열 수집 완료 -> 드라이브 캐시 갱신 시작: ${targetFolder}`);
-                    refreshCacheAfterUpload(
-                        targetFolder,
-                        completedItem.category,
-                        completedItem.seriesMetadata || {}
-                    ).catch(e =>
-                        console.warn(`[WorkerController] 캐시 갱신 실패: ${e.message}`)
-                    );
-                }
-            }
-        }
-
-        // 시리즈 컨피그 GC — 동일 seriesKey 가진 다른 항목 없으면 삭제
-        {
-            const rawItem = currentQueue.find(i => i.id === matchedId);
-            const completedItem = normalizeQueueItem(rawItem);
-            if (completedItem && completedItem.seriesKey) {
-                const sameSeriesActive = currentQueue.some(i =>
-                    i.id !== matchedId &&
-                    i.seriesKey === completedItem.seriesKey &&
-                    (i.status === 'pending' || i.status === 'processing')
-                );
-                if (!sameSeriesActive) {
-                    deleteSeriesConfig(completedItem.seriesKey);
-                }
-            }
         }
 
         // 다음 릴레이 스케줄 기동
@@ -1168,11 +1171,47 @@ export function initBatchWorkerController() {
                 // [v1.27.2] 안전 대기 플래그 정리
                 delete window[`tokisync_waiting_${matchedId}`];
 
-                // 배치 최종 실패 마감 시 처리
                 const currentQueue = getQueue();
                 const hasActive = currentQueue.some(i => i.status === 'pending' || i.status === 'processing');
-                if (!hasActive) {
-                    // masterZip 저장 (zipOfCbzs)
+
+                // [v1.28.2] 시리즈별 캐시 갱신 (sameSeriesActive 기준, GC 이전 실행)
+                {
+                    const rawItem = currentQueue.find(i => i.id === matchedId);
+                    const completedItem = normalizeQueueItem(rawItem);
+                    if (completedItem) {
+                // seriesKey 있으면 seriesKey 기준, 없으면 hasActive 기준 (하위 호환)
+                const isSeriesEnd = completedItem.seriesKey
+                    ? !currentQueue.some(i =>
+                        i.id !== matchedId &&
+                        i.seriesKey === completedItem.seriesKey &&
+                        (i.status === 'pending' || i.status === 'processing'))
+                    : !hasActive;
+
+                if (isSeriesEnd) {
+                    if (completedItem.destination === 'drive' || completedItem.destination === 'drive_kavita') {
+                        const cleanFolder = completedItem.rootFolder.replace(/^\[[^\]]+\]\s*/, '');
+                        const targetFolder = completedItem.destination === 'drive_kavita' ? cleanFolder : completedItem.rootFolder;
+                        console.log(`[WorkerController] ☁️ 시리즈 수집 완료 -> 드라이브 캐시 갱신 시작: ${targetFolder}`);
+                        try {
+                            await refreshCacheAfterUpload(
+                                targetFolder,
+                                completedItem.category,
+                                completedItem.seriesMetadata || {}
+                            );
+                        } catch (e) {
+                            console.warn(`[WorkerController] 캐시 갱신 실패: ${e.message}`);
+                        }
+                    }
+                    // seriesKey 있는 항목만 GC
+                    if (completedItem.seriesKey) {
+                        deleteSeriesConfig(completedItem.seriesKey);
+                    }
+                }
+                }
+            }
+
+            // 전체 큐가 비었을 때 masterZip 저장
+            if (!hasActive) {
                     for (const [seriesKey, masterZip] of masterZipCache) {
                         try {
                             const srcItem = currentQueue.find(i => i.seriesKey === seriesKey);
@@ -1186,39 +1225,6 @@ export function initBatchWorkerController() {
                         }
                     }
                     masterZipCache.clear();
-
-                    const rawItem = currentQueue.find(i => i.id === matchedId);
-                    const failedItem = normalizeQueueItem(rawItem);
-                    if (failedItem) {
-                        if (failedItem.destination === 'drive' || failedItem.destination === 'drive_kavita') {
-                            const cleanFolder = failedItem.rootFolder.replace(/^\[[^\]]+\]\s*/, '');
-                            const targetFolder = failedItem.destination === 'drive_kavita' ? cleanFolder : failedItem.rootFolder;
-                            console.log(`[WorkerController] ☁️ 전 대기열 수집 종료(실패 포함) -> 드라이브 캐시 갱신 시작: ${targetFolder}`);
-                            refreshCacheAfterUpload(
-                                targetFolder,
-                                failedItem.category,
-                                failedItem.seriesMetadata || {}
-                            ).catch(e =>
-                                console.warn(`[WorkerController] 캐시 갱신 실패: ${e.message}`)
-                            );
-                        }
-                    }
-                }
-
-                // 시리즈 컨피그 GC — 동일 seriesKey 가진 다른 항목 없으면 삭제
-                {
-                    const rawItem = currentQueue.find(i => i.id === matchedId);
-                    const failedItem = normalizeQueueItem(rawItem);
-                    if (failedItem && failedItem.seriesKey) {
-                        const sameSeriesActive = currentQueue.some(i =>
-                            i.id !== matchedId &&
-                            i.seriesKey === failedItem.seriesKey &&
-                            (i.status === 'pending' || i.status === 'processing')
-                        );
-                        if (!sameSeriesActive) {
-                            deleteSeriesConfig(failedItem.seriesKey);
-                        }
-                    }
                 }
 
                 runSchedulerOnce();
