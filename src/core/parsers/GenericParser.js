@@ -379,7 +379,7 @@ export class GenericParser extends BaseParser {
             }
 
             if (!container) {
-                // [v1.28.2] container 미매칭 → 전체 문서 img fallback
+                // [v1.28.2-rc.1] container 미매칭 → 전체 문서 img fallback
                 console.warn(`[GenericParser] 지정된 imageContainer(${viewerCfg.imageContainer})를 DOM에서 찾지 못했습니다. 전체 img 태그 fallback을 시도합니다.`);
                 const allImgs = Array.from(iframeDocument.querySelectorAll('img'));
                 return allImgs.map(img => {

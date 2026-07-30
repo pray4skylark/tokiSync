@@ -99,7 +99,7 @@ function View_Dispatcher(data) {
       resultBody = View_saveReadHistory(data, folderId);
       return resultBody; // Already wrapped in createRes
     } else if (action === "view_prepare_cache") {
-      // [v1.28.2] 다운로드 사전작업: merge fragment 조기 생성
+      // [v1.28.2-rc.1] 다운로드 사전작업: merge fragment 조기 생성
       // 아직 시리즈 폴더가 없을 수도 있으므로, 없으면 조용히 넘어감 (배치 완료 시 생성)
       if (!data.folderName)
         throw new Error("folderName is required for cache prepare");
@@ -162,7 +162,7 @@ function View_Dispatcher(data) {
 
       const extraMeta = data.metadata || {};
 
-      // [v1.28.2] 신 정책: sourceId 기반 index lookup 우선 시도
+      // [v1.28.2-rc.1] 신 정책: sourceId 기반 index lookup 우선 시도
       let seriesId = null;
       if (extraMeta.sourceId) {
         seriesId = lookupSeriesIdBySourceId(folderId, extraMeta.sourceId);

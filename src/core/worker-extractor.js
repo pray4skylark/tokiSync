@@ -5,7 +5,7 @@
 
 import { sleep, waitForContent, scrollToLoad, fetchBlobWithXHR, blobToArrayBuffer } from './utils.js';
 
-// [v1.28.2] 이미지 Magic Bytes 기반 확장자 감지
+// [v1.28.2-rc.1] 이미지 Magic Bytes 기반 확장자 감지
 const KNOWN_IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'avif', 'svg']);
 
 function detectImageExtension(buffer) {
@@ -297,7 +297,7 @@ export function initWorkerExtractor() {
                         attempt++;
                         console.log(`[TokiSync:Worker] 소설 Shadow DOM 폴링 중... (${attempt}/${maxAttempts})`);
                         
-                        // [v1.28.2] Generic shadow host auto-detect → 가장 많은 <p> 태그를 가진 shadow root 찾기
+                        // [v1.28.2-rc.1] Generic shadow host auto-detect → 가장 많은 <p> 태그를 가진 shadow root 찾기
                         let shadowHost = null;
                         let bestPCount = 0;
                         for (const el of document.querySelectorAll('*')) {

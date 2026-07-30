@@ -594,7 +594,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
             protocolDomain: parser.protocolDomain || window.location.origin,
         });
 
-        // [v1.28.2] 다운로드 사전작업: merge fragment 조기 생성 (메타데이터 미리 기록)
+        // [v1.28.2-rc.1] 다운로드 사전작업: merge fragment 조기 생성 (메타데이터 미리 기록)
         prepareSeriesCache({
             folderName: rootFolder,
             category: category,
@@ -748,7 +748,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
         if (!currentIsSingleVolume) {
             logger.log(`🚦 [멀티큐] 차세대 자율형 멀티큐 배치 수집기(v1.21.0) 가동 준비...`, 'Queue');
 
-            // [v1.28.2] IPC 리스너를 pre-open보다 먼저 등록 (READY 메시지 유실 방지)
+            // [v1.28.2-rc.1] IPC 리스너를 pre-open보다 먼저 등록 (READY 메시지 유실 방지)
             initBatchWorkerController();
 
             // 팝업 차단 회피용 동기적 자식 창 사전 오픈 (Pre-open)

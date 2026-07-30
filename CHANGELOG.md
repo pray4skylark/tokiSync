@@ -2,6 +2,50 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.28.2-rc.1] - 2026-07-31
+
+### 🔄 시리즈 메타데이터 동기화 및 GAS 3계층 검색
+- **`main.js` + `MenuModal.js` + `EventBus.js`**: `SYNC_SERIES_META` 버튼 및 리스너 — 현재 페이지의 시리즈 정보를 Drive에 동기화 (뷰어에서 표시 안 되는 작품 복구용)
+- **`Utils.gs`**: `lookupSeriesIdBySourceId()` — `_MergeIndex/_toki_merge_${sourceId}.json`에서 series 폴더 ID 직접 조회 (이름 검색 불필요)
+- **`Utils.gs`**: `getOrCreateSeriesFolder()` category 하위 검색 추가 (구 정책 `root/Webtoon/[ID] name/` 호환)
+- **`Utils.gs`**: `findFolderId()` 역방향 contains fallback (순수 제목 → `[ID]` prefix 구 형식 재검색)
+- **`View_Dispatcher.gs`**: `view_update_cache` sourceId-first lookup — 3계층: sourceId index → folderName + category → contains
+- **`Worker-controller.js`**: 캐시 갱신 시점 `!hasActive`(전체) → `isSeriesEnd`(시리즈별). GC 순서 refresh → GC로 수정 (메타누락 방지)
+
+### 📦 다운로드 사전 메타데이터 생성 (중단 시에도 복구 가능)
+- **`gas.js`**: `prepareSeriesCache()` + `normalizeTitle()` — 큐 추가 시 merge fragment 조기 생성, tilde/bracket 제거 정규화
+- **`downloader.js`**: `saveSeriesConfig` 직후 `prepareSeriesCache()` 호출 + `seriesMetadata`에 `ruleId`/`sourceUrl` 추가
+- **`View_Dispatcher.gs`**: `view_prepare_cache` 액션 신규 — sourceId 기반 merge fragment 생성 (status: "preparing")
+- **Merge fragment 확장**: `ruleId`, `normalizedName`, `aliases`, `sourceUrl` 필드 추가
+- **`View_LibraryService.gs`**: `SweepMergeIndex` vendor/ruleId/normalizedName/vendorId INSERT/UPDATE 경로 모두 보존
+- **`View_LibraryService.gs`**: `View_updateMetadata` ruleId/normalizedName 지원
+
+### 📱 EpisodesView 다운로드 모드 토글 (모바일 대응)
+- **`EpisodesView.vue`**: 체크박스 → 전체 열 탭으로 선택 (⬇Download 토글)
+- ON: 열 클릭 = 선택/해제, 체크박스 표시, 선택 시 ring highlight
+- OFF: 열 클릭 = 읽기 시작, 체크박스 숨김
+- Select All 버튼도 다운로드 모드에서만 표시
+- Select All / Download row / Batch download bar 모두 기존 로직 재사용
+
+### 🔘 FloatingMenu FAB 컴포넌트
+- **`FloatingMenu.vue`** (신규): 우측 하단 floating action button — + 버튼 탭 시 spring 애니메이션으로 액션 메뉴 펼침
+- **`LibraryView.vue`** 통합: 맨위로 / 다운로드 관리자 열기 / 새로고침
+- **`EpisodesView.vue`** 통합: 맨위로 / 다운로드 모드 토글 / 맨아래로
+- SVG Heroicons 아이콘 통일, hover 시 라벨 slide-in
+
+### 🏷️ LibraryView vendor badge
+- **`LibraryView.vue`**: 시리즈 카드 category 옆에 vendor(source site) 배지 (e.g. "Kakaopage")
+- `item.vendor` 필드 조건부 표시 (`v-if="item.vendor"`)
+
+### 🛠️ Viewer 개선
+- **`main.js`**: SYNC_SERIES_META metadata에 `ruleId`/`sourceSite`/`sourceUrl`/`seriesTitle` 전송
+- **`Worker-controller.js`**: `refreshCacheAfterUpload` 호출 시 `completedItem.seriesMetadata`에 ruleId/vendor 포함
+
+### 📖 문서 갱신
+- README.md, INSTALL_GUIDE.md: v1.28.1 → v1.28.2-rc.1
+- GAS_DEPLOY_CHECKLIST.md: v1.28.2-rc.1 신규 GAS 변경 체크리스트 추가
+- CHANGELOG.md: v1.28.2-rc.1 항목 신규 작성
+
 ## [v1.28.1] - 2026-07-22
 
 ### 🛡️ v1.28.0 안정성 강화 — 4-Phase 보완 패치

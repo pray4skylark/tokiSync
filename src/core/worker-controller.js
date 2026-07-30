@@ -16,7 +16,7 @@ import { saveFile } from './utils.js';
 import { deleteSeriesConfig } from './series-config.js';
 import JSZip from 'jszip';
 
-// [v1.28.2] 이미지 Magic Bytes 기반 확장자 감지
+// [v1.28.2-rc.1] 이미지 Magic Bytes 기반 확장자 감지
 const KNOWN_IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'avif', 'svg']);
 
 function detectImageExtension(buffer) {
@@ -773,7 +773,7 @@ export function initBatchWorkerController() {
         const currentQueue = getQueue();
         const hasActive = currentQueue.some(i => i.status === 'pending' || i.status === 'processing');
 
-        // [v1.28.2] 시리즈별 캐시 갱신 (sameSeriesActive 기준, GC 이전 실행)
+        // [v1.28.2-rc.1] 시리즈별 캐시 갱신 (sameSeriesActive 기준, GC 이전 실행)
         {
             const rawItem = currentQueue.find(i => i.id === matchedId);
             const completedItem = normalizeQueueItem(rawItem);
@@ -1174,7 +1174,7 @@ export function initBatchWorkerController() {
                 const currentQueue = getQueue();
                 const hasActive = currentQueue.some(i => i.status === 'pending' || i.status === 'processing');
 
-                // [v1.28.2] 시리즈별 캐시 갱신 (sameSeriesActive 기준, GC 이전 실행)
+                // [v1.28.2-rc.1] 시리즈별 캐시 갱신 (sameSeriesActive 기준, GC 이전 실행)
                 {
                     const rawItem = currentQueue.find(i => i.id === matchedId);
                     const completedItem = normalizeQueueItem(rawItem);

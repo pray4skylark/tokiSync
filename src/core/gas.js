@@ -133,7 +133,7 @@ export function normalizeTitle(title) {
 }
 
 /**
- * [v1.28.2] 다운로드 사전작업 시 merge fragment 조기 생성 (fire-and-forget)
+ * [v1.28.2-rc.1] 다운로드 사전작업 시 merge fragment 조기 생성 (fire-and-forget)
  * 큐 등록 직후 호출. 실패해도 배치 완료 시 refreshCacheAfterUpload가 복구.
  */
 export function prepareSeriesCache({ folderName, category, sourceId, ruleId, sourceSite, sourceUrl, seriesTitle }) {

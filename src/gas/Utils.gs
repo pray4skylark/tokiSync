@@ -114,7 +114,7 @@ function getOrCreateSeriesFolder(
 }
 
 /**
- * [v1.28.2] sourceId 기반 시리즈 폴더 검색.
+ * [v1.28.2-rc.1] sourceId 기반 시리즈 폴더 검색.
  * _MergeIndex 아래의 merge fragment에서 series 폴더 ID를 조회합니다.
  * 신 정책 (폴더명에 [ID] prefix 없음) 환경에서도 폴더 탐색 가능.
  *

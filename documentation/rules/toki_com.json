@@ -1,0 +1,120 @@
+[
+  {
+    "id": "sbxh_webtoon",
+    "name": "SBXH 웹툰 규칙",
+    "urlPattern": "https://toki[0-9]+\\.com/webtoon/.*",
+    "category": "Webtoon",
+    "idExtraction": {
+      "source": "url",
+      "regex": "\\/webtoon\\/([0-9]+)"
+    },
+    "meta": {
+      "title": "h1.hero-v2-title",
+      "author": "div.hero-v2-author",
+      "thumb": {
+        "selector": "div.hero-v2-thumb > img",
+        "attr": "src"
+      }
+    },
+    "list": {
+      "container": "ul.ep-list-v2",
+      "item": "li.ep-row-v2",
+      "num": "span.ep-row-v2-no",
+      "title": ".ep-row-v2-title strong",
+      "link": {
+        "selector": "a.ep-row-v2-link",
+        "attr": "href"
+      }
+    },
+    "viewer": {
+      "fetchMethod": "iframe",
+      "imageRegex": "https?:\\\\/\\\\/[a-zA-Z0-9_\\\\.\\\\/-]+\\\\.(?:jpg|png|webp|gif)",
+      "imageContainer": "div.theme-viewer-images.theme-viewer-width-fit",
+      "imageItem": "div.theme-viewer-image > img",
+      "lazyAttrOptions": [
+        "data-src",
+        "data-lazy",
+        "src"
+      ]
+    },
+    "_version": "1.28.1"
+  },
+  {
+    "id": "sbxh_manhwa",
+    "name": "SBXH 만화 규칙",
+    "urlPattern": "https://toki[0-9]+\\.com/manhwa/.*",
+    "idExtraction": {
+      "source": "url",
+      "regex": "\\/manhwa\\/([0-9]+)"
+    },
+    "category": "Manga",
+    "meta": {
+      "title": "h1.hero-v2-title",
+      "author": "div.hero-v2-author",
+      "thumb": {
+        "selector": "div.hero-v2-thumb > img",
+        "attr": "src"
+      }
+    },
+    "list": {
+      "container": "ul.ep-list-v2",
+      "item": "li.ep-row-v2",
+      "num": "span.ep-row-v2-no",
+      "title": ".ep-row-v2-title strong",
+      "link": {
+        "selector": "a.ep-row-v2-link",
+        "attr": "href"
+      }
+    },
+    "viewer": {
+      "fetchMethod": "iframe",
+      "imageRegex": "https?:\\\\/\\\\/[a-zA-Z0-9_\\\\.\\\\/-]+\\\\.(?:jpg|png|webp|gif)",
+      "imageContainer": "div.vw-imgs",
+      "imageItem": "img",
+      "lazyAttrOptions": [
+        "data-src",
+        "data-lazy",
+        "src"
+      ]
+    },
+    "_version": "1.28.1"
+  },
+  {
+    "id": "sbxh_novel",
+    "name": "SBXH 소설 규칙",
+    "urlPattern": "https://toki[0-9]+\\.com/novel/.*",
+    "category": "Novel",
+    "idExtraction": {
+      "source": "url",
+      "regex": "\\/novel\\/([0-9]+)"
+    },
+    "meta": {
+      "title": "div.nd-info > h1",
+      "author": "div.nd-meta span:first-child",
+      "thumb": {
+        "selector": "div.nd-thumb img",
+        "attr": "src"
+      }
+    },
+    "list": {
+      "container": "ul.novel-eps",
+      "item": "li.novel-ep-row",
+      "num": {
+        "attr": "data-ep"
+      },
+      "title": "span.ne-title",
+      "link": {
+        "selector": "a.novel-ep-link",
+        "attr": "href"
+      }
+    },
+    "viewer": {
+      "fetchMethod": "api",
+      "imageRegex": "https?:\\\\/\\\\/[a-zA-Z0-9_\\\\.\\\\/-]+\\\\.(?:jpg|png|webp|gif)",
+      "imageContainer": "article.novel-viewer",
+      "imageItem": "p",
+      "lazyAttrOptions": []
+    },
+    "_version": "1.28.1"
+  }
+]

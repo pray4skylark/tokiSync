@@ -246,7 +246,7 @@ const {
 
 const { startDownload, getStatus, isCached } = useDownloadManager();
 
-// [v1.28.2] 다운로드 모드 토글 — ON 시 열 클릭이 읽기가 아닌 선택/해제로 동작
+// [v1.28.2-rc.1] 다운로드 모드 토글 — ON 시 열 클릭이 읽기가 아닌 선택/해제로 동작
 const downloadMode = ref(false);
 
 // 캐시 상태 추적용 (fileId -> boolean)

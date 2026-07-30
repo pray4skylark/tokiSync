@@ -66,7 +66,7 @@ const getRawQueue = () => {
 };
 
 /**
- * [v1.28.2] 단일 동기 저장 시도 — GM_setValue 1차, localStorage 2차 폴백
+ * [v1.28.2-rc.1] 단일 동기 저장 시도 — GM_setValue 1차, localStorage 2차 폴백
  * MV3 대응: GM_setValue가 Promise를 반환하면 .catch로 비동기 재시도 트리거
  * @param {Array} queue 저장할 큐 데이터
  * @returns {boolean} 동기 성공 여부 (MV3 Promise fire-and-forget은 항상 true)

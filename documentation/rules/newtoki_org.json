@@ -1,0 +1,98 @@
+[
+  {
+    "id": "newtoki_org_novel",
+    "name": "뉴토끼 소설",
+    "urlPattern": "https://newtoki[0-9]+\\.org/novel/.*",
+    "category": "Novel",
+    "meta": {
+      "title": "div.row > div.col-sm-8 > div.theme-detail-title-line",
+      "author": "div.theme-detail-info-row > span.theme-detail-info-value > a",
+      "thumb": {
+        "selector": "div.view-content1 > div.view-img > img",
+        "attr": "src"
+      }
+    },
+    "list": {
+      "container": "ul.list-body",
+      "item": "li.list-item",
+      "num": "div.wr-num",
+      "title": "a.item-subject",
+      "link": {
+        "selector": "a.item-subject",
+        "attr": "href"
+      }
+    },
+    "viewer": {
+      "fetchMethod": "api",
+      "imageRegex": "https?:\\\\/\\\\/[a-zA-Z0-9_\\\\.\\\\/-]+\\\\.(?:jpg|png|webp|gif)",
+      "imageContainer": "div.theme-novel-content",
+      "imageItem": "p",
+      "lazyAttrOptions": []
+    },
+    "_version": "1.28.1"
+  },
+  {
+    "id": "newtoki_org_manhwa",
+    "name": "뉴토끼 만화",
+    "urlPattern": "https://newtoki[0-9]+\\.org/manhwa/.*",
+    "category": "Manga",
+    "meta": {
+      "title": "div.row > div.col-sm-8 > div.theme-detail-title-line",
+      "author": "div.theme-detail-info-row > span.theme-detail-info-value > a",
+      "thumb": {
+        "selector": "div.view-content1 > div.view-img > img",
+        "attr": "src"
+      }
+    },
+    "list": {
+      "container": "ul.list-body",
+      "item": "ul.list-body > li.list-item",
+      "num": "ul.list-body > li.list-item > div.wr-num",
+      "title": "a.item-subject",
+      "link": {
+        "selector": "a.item-subject",
+        "attr": "href"
+      }
+    },
+    "viewer": {
+      "fetchMethod": "iframe",
+      "imageRegex": "https?:\\\\/\\\\/[a-zA-Z0-9_\\\\.\\\\/-]+\\\\.(?:jpg|png|webp|gif)",
+      "imageContainer": "div.theme-viewer-images.theme-viewer-width-fit",
+      "imageItem": "div.theme-viewer-image > img",
+      "lazyAttrOptions": []
+    },
+    "_version": "1.28.1"
+  },
+  {
+    "id": "newtoki_org_webtoon",
+    "name": "뉴토끼 웹툰",
+    "urlPattern": "https://newtoki[0-9]+\\.org/webtoon/.*",
+    "category": "Webtoon",
+    "meta": {
+      "title": "div.row > div.col-sm-8 > div.theme-detail-title-line",
+      "author": "div.theme-detail-info-row > span.theme-detail-info-value > a",
+      "thumb": {
+        "selector": "div.view-content1 > div.view-img > img",
+        "attr": "src"
+      }
+    },
+    "list": {
+      "container": "ul.list-body",
+      "item": "ul.list-body > li.list-item",
+      "num": "ul.list-body > li.list-item > div.wr-num",
+      "title": "a.item-subject",
+      "link": {
+        "selector": "a.item-subject",
+        "attr": "href"
+      }
+    },
+    "viewer": {
+      "fetchMethod": "iframe",
+      "imageRegex": "https?:\\\\/\\\\/[a-zA-Z0-9_\\\\.\\\\/-]+\\\\.(?:jpg|png|webp|gif)",
+      "imageContainer": "div.theme-viewer-images.theme-viewer-width-fit",
+      "imageItem": "div.theme-viewer-image > img",
+      "lazyAttrOptions": []
+    },
+    "_version": "1.28.1"
+  }
+]

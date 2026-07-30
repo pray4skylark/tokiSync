@@ -53,6 +53,18 @@
 - [ ] `View_BookService.gs`에 M29(size guard)가 적용되어 있음
 - [ ] 수정된 GAS 파일 수: **7개** (Main, View_LibraryService, View_KavitaService, View_BookService, SyncService, Debug, Migrate_Service)
 
+## v1.28.2-rc.1 신규 GAS 변경사항
+
+- [ ] `Utils.gs`: `lookupSeriesIdBySourceId()` 함수 정의 (merge fragment → 폴더 ID 조회)
+- [ ] `Utils.gs`: `getOrCreateSeriesFolder()` category 하위 검색 추가
+- [ ] `Utils.gs`: `findFolderId()` 역방향 contains fallback (순수 제목 → [ID] prefix)
+- [ ] `View_Dispatcher.gs`: `view_prepare_cache` 액션 라우팅 (사전 메타데이터 생성)
+- [ ] `View_Dispatcher.gs`: `view_update_cache` sourceId-first lookup (3계층: sourceId → folderName → contains)
+- [ ] `View_Dispatcher.gs`: `mergedMeta`에 `ruleId`/`normalizedName`/`aliases`/`sourceUrl` 추가
+- [ ] `View_LibraryService.gs`: `SweepMergeIndex` vendor/ruleId/normalizedName/vendorId 필드 보존
+- [ ] `View_LibraryService.gs`: `View_updateMetadata` ruleId/normalizedName 지원
+- [ ] 수정된 GAS 파일 수: **3개** (Utils, View_Dispatcher, View_LibraryService)
+
 ---
 
 ## 배포 명령

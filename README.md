@@ -1,13 +1,14 @@
-# ⚡️ TokiSync (토끼싱크) v1.28.1
+# ⚡️ TokiSync (토끼싱크) v1.28.2-rc.1
 
 **북토끼, 뉴토끼, 마나토끼**의 콘텐츠를 **구글 드라이브로 직접 업로드**하고, **전용 웹 뷰어**를 통해 편리하게 관리/열람할 수 있는 올인원 솔루션입니다.
 
-> **v1.28.1 업데이트 요약:**
-> - ⚡ 큐 키 분할: 시리즈 공유 데이터 분리로 저장 공간 95% 절감
-> - 🛡️ 안정성 강화: abort 경로 정리, 워커 세션 자가 치유, STORAGE_FATAL UI 알림
-> - 🏗️ DI StorageBackend: series-config 전 모듈 DI 적용 완료
-> - 📐 Agent Rulebook: AGENTS.md에 6개 신규 규칙 섹션
-> - 🧪 테스트 61/61: E1-E13 에지케이스 + assertConsistent 자가 치유까지
+> **v1.28.2-rc.1 업데이트 요약:**
+> - 🔄 시리즈 메타데이터 동기화 버튼 + GAS 3계층 index 검색 (sourceId → folderName → contains)
+> - 📦 다운로드 사전 메타데이터 생성 (큐 추가 시점, 중단되어도 복구 가능)
+> - 📱 EpisodesView 다운로드 모드 토글 (체크박스 → 전체 열 탭 — 모바일 대응)
+> - 🔘 FloatingMenu FAB 우측 하단 (LibraryView: 맨위로/다운로드/새로고침, EpisodesView: 맨위로/다운로드/맨아래로)
+> - 🏷️ LibraryView 시리즈 카드에 vendor(source site) 배지 표시
+> - 🛠️ GAS merge fragment 확장: ruleId, normalizedName, aliases, sourceUrl 기록
 
 ---
 

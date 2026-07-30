@@ -44,7 +44,7 @@ function isNovelByContent(targetDoc) {
  * @returns {Promise<Object>} 추출 결과 { urls: string[], content: string, title: string, episodeTitle: string }
  */
 export async function extractEpisodeData(targetDoc, parser, siteInfo, isStaticDoc = false, episodeUrl = null) {
-    // [v1.28.2] 콘텐츠 기반 heuristics: 룰 category가 Webtoon이어도 페이지 구조가 소설이면 override
+    // [v1.28.2-rc.1] 콘텐츠 기반 heuristics: 룰 category가 Webtoon이어도 페이지 구조가 소설이면 override
     const categoryIsNovel = (siteInfo.category === 'Novel' || siteInfo.category === 'novel');
     const isNovel = categoryIsNovel || isNovelByContent(targetDoc);
     const viewerCfg = parser.rule.viewer || {};

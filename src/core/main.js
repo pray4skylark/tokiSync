@@ -457,7 +457,7 @@ export async function main() {
             const last = parser.parseListItem(list[0]?.element || list[0]);
             const seriesId = parser.getSeriesId();
             const seriesTitle = parser.getSeriesTitle();
-            // [v1.28.2] 신 정책: ID prefix 없는 순수 제목 사용 (GAS index lookup으로 폴더 탐색)
+            // [v1.28.2-rc.1] 신 정책: ID prefix 없는 순수 제목 사용 (GAS index lookup으로 폴더 탐색)
             const rootFolder = seriesTitle;
             const category = siteInfo.category || 'Webtoon';
             const ruleId = parser.rule?.id || 'unknown';
