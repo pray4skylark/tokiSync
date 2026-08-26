@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.28.2-rc.2] - 2026-08-26
+
+### 🐛 P1: 현재 에피소드 다운로드 ReferenceError 수정
+- **`downloader.js`**: `processItem` finally 블록이 queue.js 미수출 내부 함수(`getRawQueue`)를 직접 호출 → `ReferenceError`로 수집 성공 후 저장 실패. 공개 래퍼 `getQueue()`로 교체. `downloadCurrent`(현재 에피소드 다운로드) 만화/비합본 경로 정상화
+
+### 🐛 P2: 업로드 페이즈 스케줄러 가드 회귀 수정
+- **`worker-controller.js`**: `handleBatchSuccess`에서 `_activeProcessing.add` → `destroyWorkerSession` 순서였으나 v1.28.1부터 `destroyWorkerSession`이 `_activeProcessing.delete(id)`를 포함하여 add가 즉시 소거됨 → 업로드 중 다음 에피소드 팝업이 병렬 기동(직렬 설계 위반). 순서를 destroy → add로 스왑
+
+### 🐛 P2: GenericParser imageContainer 미매칭 fallback 개선
+- **`GenericParser.js`**: 기존 fallback은 전체 `<img>`를 early-return하여 exclude/remove 광고 제거 규칙과 동적 lazy 키 탐지를 모두 스킵 → CBZ에 광고/아이콘 유입. early-return을 제거하고 `container = iframeDocument`로 정상 흐름에 합류시켜 단일 추출 경로 유지
+
+### 🛡️ P2: masterZipCache 중단 시 오염 방지 + 죽은 이벤트 배선
+- **`queue.js`**: `stopAllWorkers()`가 `QUEUE_STOP_ALL({clear})`, `clearQueue()`가 `QUEUE_RESET` 이벤트를 방출하도록 배선 (기존 리스너는 죽은 코드 상태)
+- **`worker-controller.js`**: 마스터 압축 저장 로직을 `flushMasterZipCache()` 헬퍼로 추출. 수집 중단(clear=false) 시 완료된 에피소드만큼 부분 ZIP을 저장 후 캐시 폐기(재다운로드 시 신구 배치 혼입 차단 + 완료분 손실 방지), 전체 초기화(clear=true) 시 즉시 폐기
+
+### 🧟 좀비 팝업 회수 강화 (forceClose SOS 메커니즘)
+- **문제**: WAF/리다이렉트 체인으로 네비게이션 히스토리가 쌓인 자식 팝업은 브라우저 정책상 `window.close()` 자폭이 조용히 실패 → 완료 후 유령 팝업 잔존
+- **`worker-extractor.js`**: `closeSelf()`에서 500ms 후 `window.closed` 자가진단 → 생존 시 `WORKER_READY`에 `forceClose:true` + `sessionToken` 부착해 부모에 SOS
+- **`worker-controller.js`**: forceClose 수신 핸들러 — 토큰 매칭으로 세션 확인 후 부모 권한으로 팝업 강제 폐쇄
+- **`worker-controller.js`**: 이미 정리된 세션의 stale `WORKER_READY` silent drop (SOS 재전송 flood 방지)
+- **`worker-controller.js`**: nonce(`removeWorkerOrigin`) 정리를 destroy 즉시 → 3초 가드 후로 지연 (성공/실패 양쪽 경로, 늦게 도착하는 SOS 토큰 매칭 보장)
+
+### 🧪 테스트
+- **E14**: 업로드 페이즈 세션 생존 계약 (destroy → re-add 순서 + 스케줄러 가드 조건)
+- **E15**: `stopAllWorkers`/`clearQueue` 캐시 정리 이벤트 방출 검증
+- **M33/M34** (static-verify): downloader.js 미수출 함수 참조 금지, handleBatchSuccess destroy 선행 순서 검증
+- **검증**: Unit 52 + Real-env 3 + Static 10 통과, `npm run build:core` ✅
+
 ## [v1.28.2-rc.1] - 2026-07-31
 
 ### 🔄 시리즈 메타데이터 동기화 및 GAS 3계층 검색
