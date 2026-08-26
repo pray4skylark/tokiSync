@@ -187,6 +187,21 @@ export function initWorkerExtractor() {
                 stopSilentAudio();
                 console.log(`[TokiSync:Worker] 🏁 자체 파기(window.close)를 집행합니다.`);
                 window.close();
+                // [v1.28.2] window.close() 실패 감지 — 500ms 후 부모에게 강제 폐쇄 요청
+                const forceCloseToken = workerSessionToken;
+                setTimeout(() => {
+                    if (!window.closed) {
+                        console.warn('[TokiSync:Worker] window.close() 실패 — 부모에게 강제 폐쇄 요청');
+                        try {
+                            sendToParent('WORKER_READY', {
+                                targetUrl: window.location.href,
+                                timestamp: Date.now(),
+                                sessionToken: forceCloseToken,
+                                forceClose: true
+                            });
+                        } catch (e) {}
+                    }
+                }, 500);
             };
 
             try {

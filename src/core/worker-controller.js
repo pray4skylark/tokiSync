@@ -583,20 +583,20 @@ export function initBatchWorkerController() {
 
         const ackPayload = { queueId: matchedId };
 
-        // 자식에게 즉시 수신 ACK 신호 전송 및 즉시 팝업 닫기 회수
+        // [v1.28.2] 팝업 참조 선취득 — destroyWorkerSession이 activeWorkers에서 삭제하기 전에 캡처
+        const capturedPopupRef = activeWorkers.get(matchedId);
+        const batchToken = getSessionToken(matchedId);
+
+        // 자식에게 즉시 수신 ACK 신호 전송 및 1차 닫기
         if (sourceWindow) {
             try {
                 if (!sourceWindow.closed) {
                     sendToWorker(sourceWindow, 'IPC_ACK', ackPayload);
-                    sourceWindow.close(); // 즉시 close 강제
+                    sourceWindow.close();
                 }
             } catch (ackErr) {
-                console.warn('[WorkerController] [배치] 자식 팝업 close 또는 ACK 전송 실패:', ackErr);
+                console.warn('[WorkerController] [배치] ACK 전송 실패:', ackErr);
             }
-        }
-        const batchToken = getSessionToken(matchedId);
-        if (batchToken) {
-            removeWorkerOrigin(matchedId, batchToken);
         }
         // [v1.28.2] destroyWorkerSession이 _activeProcessing을 먼저 소거하므로(회귀 수정) 반드시 destroy 후에 재등록
         destroyWorkerSession(matchedId, 'collection_complete');
@@ -795,17 +795,23 @@ export function initBatchWorkerController() {
             });
         }
 
-        const popupRef = activeWorkers.get(matchedId);
-        if (popupRef) {
+        // [v1.28.2] 선취득한 참조로 2차 강제 닫기 (destroyWorkerSession 이후에도 유효)
+        if (capturedPopupRef) {
             setTimeout(() => {
                 try {
-                    const actualRef = popupRef.ref || popupRef;
+                    const actualRef = capturedPopupRef.ref || capturedPopupRef;
                     if (actualRef && !actualRef.closed) {
                         console.log(`[WorkerController] 🛡️ [자가 종료 가드] 3초 초과 자식 팝업 강제 폐쇄: ${matchedId}`);
                         actualRef.close();
                     }
                 } catch (e) {}
+                // 2차 가드 완료 후 nonce 정리
+                if (batchToken) {
+                    removeWorkerOrigin(matchedId, batchToken);
+                }
             }, 3000);
+        } else {
+            if (batchToken) removeWorkerOrigin(matchedId, batchToken);
         }
 
         EventBus.emit(EVT.UPDATE_PROGRESS);
@@ -874,6 +880,26 @@ export function initBatchWorkerController() {
         // 1. WORKER_READY: 자식 워커 핸드셰이킹 수신
         if (type === 'WORKER_READY') {
             const { targetUrl, sessionToken: childToken } = payload || {};
+
+            // [v1.28.2] 자식이 forceClose 플래그를 보낸 경우 → 팝업 강제 close
+            if (payload?.forceClose && childToken) {
+                const tokenWorkerId = getWorkerIdByNonce(childToken);
+                for (const [id, popupRef] of activeWorkers.entries()) {
+                    const session = sessionRegistry.get(id);
+                    if (session?.sessionToken === childToken || id === tokenWorkerId) {
+                        try {
+                            const actualRef = popupRef && (popupRef.ref || popupRef);
+                            if (actualRef && !actualRef.closed) {
+                                console.log(`[WorkerController] 🧹 [forceClose] 자식 요청으로 팝업 강제 폐쇄: ${id}`);
+                                actualRef.close();
+                            }
+                        } catch (e) {}
+                        break;
+                    }
+                }
+                return;
+            }
+
             let matchedId = null;
 
             // [v1.27.0] 1순위: 세션 토큰 매칭 (크로스 오리진 네비게이션 안전)
@@ -885,6 +911,10 @@ export function initBatchWorkerController() {
                         matchedId = tokenWorkerId;
                         console.log(`[WorkerController] 🔑 [배치] 세션 토큰 매칭 성공: ${matchedId}`);
                     }
+                } else {
+                    // [v1.28.2] nonce 존재하지만 등록 안 됨 → 이미 정리된 세션의 stale WORKER_READY
+                    // flood 방지: silent drop (로깅 없이 즉시 무시)
+                    return;
                 }
             }
 
@@ -1189,15 +1219,30 @@ export function initBatchWorkerController() {
                     EventBus.emit(EVT.UPDATE_PROGRESS);
                 }
                 
+                // [v1.28.2] 팝업 참조 선취득 + nonce 지연 (TASK_FAILED)
+                const capturedPopupRef = activeWorkers.get(matchedId);
                 const sessionToken = getSessionToken(matchedId);
-                if (sessionToken) {
-                    removeWorkerOrigin(matchedId, sessionToken);
-                }
                 destroyWorkerSession(matchedId, 'task_failed');
                 console.log(`[WorkerController] 🧹 세션 정리 (수집패): ${matchedId} → processingSlots=${processingSlots.size}`);
                 
                 // [v1.27.2] 안전 대기 플래그 정리
                 delete window[`tokisync_waiting_${matchedId}`];
+
+                // [v1.28.2] TASK_FAILED popup close — 선취득 참조로 2차 강제 닫기
+                if (capturedPopupRef) {
+                    setTimeout(() => {
+                        try {
+                            const actualRef = capturedPopupRef.ref || capturedPopupRef;
+                            if (actualRef && !actualRef.closed) {
+                                console.log(`[WorkerController] 🛡️ [실패 종료 가드] 3초 초과 자식 팝업 강제 폐쇄: ${matchedId}`);
+                                actualRef.close();
+                            }
+                        } catch (e) {}
+                        if (sessionToken) removeWorkerOrigin(matchedId, sessionToken);
+                    }, 3000);
+                } else {
+                    if (sessionToken) removeWorkerOrigin(matchedId, sessionToken);
+                }
 
                 const currentQueue = getQueue();
                 const hasActive = currentQueue.some(i => i.status === 'pending' || i.status === 'processing');
