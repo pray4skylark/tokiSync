@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.28.2-rc.1
+// @version      1.28.2-rc.2
 // @description  Toki series sites -> Google Drive syncing tool (Bundled)
 // @author       pray4skylark
 // @updateURL    https://pray4skylark.github.io/tokiSync/tokiSync.user.js
@@ -615,6 +615,8 @@ const clearQueue = () => {
   const keys = new Set(queue.map(i => i.seriesKey).filter(Boolean));
   keys.forEach(k => (0,_series_config_js__WEBPACK_IMPORTED_MODULE_2__/* .deleteSeriesConfig */ .v9)(k));
   saveRawQueue([]);
+  // [v1.28.2] 인메모리 캐시 완전 폐기 이벤트 방출
+  _EventBus_js__WEBPACK_IMPORTED_MODULE_0__/* .EventBus */ .l.emit(_EventBus_js__WEBPACK_IMPORTED_MODULE_0__/* .EVT */ .c.QUEUE_RESET);
 };
 
 /**
@@ -791,6 +793,10 @@ const stopAllWorkers = (shouldClear = false) => {
       localStorage.setItem('tokisync_queue_stopped_trigger', String(Date.now()));
     }
   } catch (e) {}
+
+  // [v1.28.2] 캐시 정리 이벤트 방출 (worker-controller: extractedDataCache/masterZipCache 정리)
+  // clear=true(전체 초기화)면 폐기, false(수집 중단)면 완료분 부분 ZIP 저장 후 폐기
+  _EventBus_js__WEBPACK_IMPORTED_MODULE_0__/* .EventBus */ .l.emit(_EventBus_js__WEBPACK_IMPORTED_MODULE_0__/* .EVT */ .c.QUEUE_STOP_ALL, { clear: shouldClear });
 };
 
 let isSchedulerRunning = false;
@@ -2648,22 +2654,10 @@ class GenericParser extends BaseParser {
             }
 
             if (!container) {
-                // [v1.28.2-rc.1] container 미매칭 → 전체 문서 img fallback
-                console.warn(`[GenericParser] 지정된 imageContainer(${viewerCfg.imageContainer})를 DOM에서 찾지 못했습니다. 전체 img 태그 fallback을 시도합니다.`);
-                const allImgs = Array.from(iframeDocument.querySelectorAll('img'));
-                return allImgs.map(img => {
-                    const lazyAttrs = ['data-src', 'data-lazy', 'src'];
-                    for (const attr of lazyAttrs) {
-                        const val = img.getAttribute(attr);
-                        if (val) {
-                            const absoluteUrl = this.getAbsoluteUrl(val);
-                            if (absoluteUrl && !this.isDummyUrl(absoluteUrl)) {
-                                return { url: absoluteUrl, isDummy: false };
-                            }
-                        }
-                    }
-                    return null;
-                }).filter(Boolean);
+                // [v1.28.2] container 미매칭 → 전체 문서로 폴백 후 정상 흐름 합류
+                // (exclude/remove 정리, imageItem 셀렉터, dynamicLazyAttr 모두 적용받도록 단일 경로 유지)
+                console.warn(`[GenericParser] 지정된 imageContainer(${viewerCfg.imageContainer})를 DOM에서 찾지 못했습니다. 전체 문서 fallback을 시도합니다.`);
+                container = iframeDocument;
             }
         }
 
@@ -2977,13 +2971,52 @@ let activeWorkerId = null;
 // 🧠 인메모리 수집 콘텐츠 데이터 캐시 (GM Storage 512KB 용량 초과 및 ArrayBuffer 직렬화 실패 원천 차단)
 const extractedDataCache = new Map();
 
-// 대기열 전체 삭제 또는 중단 시 인메모리 캐시 강제 비우기
-EventBus/* EventBus */.l.on(EventBus/* EVT */.c.QUEUE_RESET, () => extractedDataCache.clear());
-EventBus/* EventBus */.l.on(EventBus/* EVT */.c.QUEUE_STOP_ALL, () => extractedDataCache.clear());
+// 대기열 전체 삭제 또는 중단 시 인메모리 캐시 정리
+// [v1.28.2] QUEUE_RESET=완전 폐기 / QUEUE_STOP_ALL=완료분 부분 ZIP 저장 후 폐기 (clear 플래그)
+EventBus/* EventBus */.l.on(EventBus/* EVT */.c.QUEUE_RESET, () => {
+    extractedDataCache.clear();
+    masterZipCache.clear();
+});
+EventBus/* EventBus */.l.on(EventBus/* EVT */.c.QUEUE_STOP_ALL, async ({ clear }) => {
+    extractedDataCache.clear();
+    if (clear) {
+        masterZipCache.clear();
+    } else {
+        await flushMasterZipCache('[수집 중단]');
+    }
+});
 
 // 🛡️ 배치 제어용 중복 리스너 방지 로컬 변수 가드
 let batchIpcCleanup = null;
 let isBatchControllerInitialized = false;
+
+/**
+ * [v1.28.2] masterZipCache 플러시 — 시리즈별 마스터 압축을 로컬에 저장 후 캐시 비움
+ * 배치 정상 종료(!hasActive) 및 수집 중단(QUEUE_STOP_ALL clear=false) 경로에서 공용 사용
+ * @param {string} [context] 로그 식별용 컨텍스트 문자열
+ */
+async function flushMasterZipCache(context = '') {
+    const queue = (0,core_queue/* getQueue */.IS)();
+    for (const [seriesKey, masterZip] of masterZipCache) {
+        try {
+            const srcItem = queue.find(i => i.seriesKey === seriesKey);
+            const norm = srcItem ? (0,core_queue/* normalizeQueueItem */.WY)(srcItem) : null;
+            const masterFilename = (norm && norm.rootFolder ? norm.rootFolder.replace(/^\[[^\]]+\]\s*/, '') : seriesKey) + '_all';
+            if (masterZip.files && Object.keys(masterZip.files).length === 0) continue;
+            const masterBlob = await masterZip.generateAsync({ type: "blob" });
+            await (0,utils/* saveFile */.OJ)(masterBlob, masterFilename, 'local', 'zip', { folderName: 'TokiSync' });
+            console.log(`[WorkerController] ${context} 📚 마스터 압축 저장 완료: ${masterFilename}.zip`);
+            EventBus/* EventBus */.l.emit(EventBus/* EVT */.c.LOG, {
+                msg: `📚 ${context} 부분 마스터 압축 저장: ${masterFilename}.zip`,
+                tag: 'Downloader:Batch',
+                level: 'info'
+            });
+        } catch (e) {
+            console.error(`[WorkerController] ${context} 마스터 압축 저장 실패: ${e.message}`);
+        }
+    }
+    masterZipCache.clear();
+}
 
 // 🛡️ 배치 폴링 setInterval ID 추적 (중복 초기화 시 이전 인터벌 정리)
 let _batchPollingInterval = null;
@@ -3451,23 +3484,24 @@ function initBatchWorkerController() {
 
         const ackPayload = { queueId: matchedId };
 
-        // 자식에게 즉시 수신 ACK 신호 전송 및 즉시 팝업 닫기 회수
+        // [v1.28.2] 팝업 참조 선취득 — destroyWorkerSession이 activeWorkers에서 삭제하기 전에 캡처
+        const capturedPopupRef = core_queue/* activeWorkers */.mR.get(matchedId);
+        const batchToken = (0,core_queue/* getSessionToken */.mj)(matchedId);
+
+        // 자식에게 즉시 수신 ACK 신호 전송 및 1차 닫기
         if (sourceWindow) {
             try {
                 if (!sourceWindow.closed) {
                     (0,ipc_broker/* sendToWorker */.eu)(sourceWindow, 'IPC_ACK', ackPayload);
-                    sourceWindow.close(); // 즉시 close 강제
+                    sourceWindow.close();
                 }
             } catch (ackErr) {
-                console.warn('[WorkerController] [배치] 자식 팝업 close 또는 ACK 전송 실패:', ackErr);
+                console.warn('[WorkerController] [배치] ACK 전송 실패:', ackErr);
             }
         }
-        core_queue/* _activeProcessing */.xx.add(matchedId);
-        const batchToken = (0,core_queue/* getSessionToken */.mj)(matchedId);
-        if (batchToken) {
-            (0,ipc_broker/* removeWorkerOrigin */.Re)(matchedId, batchToken);
-        }
+        // [v1.28.2] destroyWorkerSession이 _activeProcessing을 먼저 소거하므로(회귀 수정) 반드시 destroy 후에 재등록
         (0,core_queue/* destroyWorkerSession */.NQ)(matchedId, 'collection_complete');
+        core_queue/* _activeProcessing */.xx.add(matchedId);
         console.log(`[WorkerController] 🧹 세션 정리 (수집완료): ${matchedId} → processingSlots=${core_queue/* processingSlots */.PG.size}`);
         
         // [v1.27.2] 안전 대기 플래그 정리 — 완료 시점
@@ -3662,17 +3696,23 @@ function initBatchWorkerController() {
             });
         }
 
-        const popupRef = core_queue/* activeWorkers */.mR.get(matchedId);
-        if (popupRef) {
+        // [v1.28.2] 선취득한 참조로 2차 강제 닫기 (destroyWorkerSession 이후에도 유효)
+        if (capturedPopupRef) {
             setTimeout(() => {
                 try {
-                    const actualRef = popupRef.ref || popupRef;
+                    const actualRef = capturedPopupRef.ref || capturedPopupRef;
                     if (actualRef && !actualRef.closed) {
                         console.log(`[WorkerController] 🛡️ [자가 종료 가드] 3초 초과 자식 팝업 강제 폐쇄: ${matchedId}`);
                         actualRef.close();
                     }
                 } catch (e) {}
+                // 2차 가드 완료 후 nonce 정리
+                if (batchToken) {
+                    (0,ipc_broker/* removeWorkerOrigin */.Re)(matchedId, batchToken);
+                }
             }, 3000);
+        } else {
+            if (batchToken) (0,ipc_broker/* removeWorkerOrigin */.Re)(matchedId, batchToken);
         }
 
         EventBus/* EventBus */.l.emit(EventBus/* EVT */.c.UPDATE_PROGRESS);
@@ -3718,19 +3758,7 @@ function initBatchWorkerController() {
 
         // 전체 큐가 비었을 때 masterZip 저장
         if (!hasActive) {
-            for (const [seriesKey, masterZip] of masterZipCache) {
-                try {
-                    const srcItem = currentQueue.find(i => i.seriesKey === seriesKey);
-                    const norm = srcItem ? (0,core_queue/* normalizeQueueItem */.WY)(srcItem) : null;
-                    const masterFilename = (norm && norm.rootFolder ? norm.rootFolder.replace(/^\[[^\]]+\]\s*/, '') : seriesKey) + '_all';
-                    const masterBlob = await masterZip.generateAsync({ type: "blob" });
-                    await (0,utils/* saveFile */.OJ)(masterBlob, masterFilename, 'local', 'zip', { folderName: 'TokiSync' });
-                    console.log(`[WorkerController] 📚 마스터 압축 저장 완료: ${masterFilename}.zip`);
-                } catch (e) {
-                    console.error(`[WorkerController] 마스터 압축 저장 실패: ${e.message}`);
-                }
-            }
-            masterZipCache.clear();
+            await flushMasterZipCache('[배치 완료]');
         }
 
         // 다음 릴레이 스케줄 기동
@@ -3753,6 +3781,26 @@ function initBatchWorkerController() {
         // 1. WORKER_READY: 자식 워커 핸드셰이킹 수신
         if (type === 'WORKER_READY') {
             const { targetUrl, sessionToken: childToken } = payload || {};
+
+            // [v1.28.2] 자식이 forceClose 플래그를 보낸 경우 → 팝업 강제 close
+            if (payload?.forceClose && childToken) {
+                const tokenWorkerId = (0,ipc_broker/* getWorkerIdByNonce */.Yv)(childToken);
+                for (const [id, popupRef] of core_queue/* activeWorkers */.mR.entries()) {
+                    const session = core_queue/* sessionRegistry */.a.get(id);
+                    if (session?.sessionToken === childToken || id === tokenWorkerId) {
+                        try {
+                            const actualRef = popupRef && (popupRef.ref || popupRef);
+                            if (actualRef && !actualRef.closed) {
+                                console.log(`[WorkerController] 🧹 [forceClose] 자식 요청으로 팝업 강제 폐쇄: ${id}`);
+                                actualRef.close();
+                            }
+                        } catch (e) {}
+                        break;
+                    }
+                }
+                return;
+            }
+
             let matchedId = null;
 
             // [v1.27.0] 1순위: 세션 토큰 매칭 (크로스 오리진 네비게이션 안전)
@@ -3764,6 +3812,10 @@ function initBatchWorkerController() {
                         matchedId = tokenWorkerId;
                         console.log(`[WorkerController] 🔑 [배치] 세션 토큰 매칭 성공: ${matchedId}`);
                     }
+                } else {
+                    // [v1.28.2] nonce 존재하지만 등록 안 됨 → 이미 정리된 세션의 stale WORKER_READY
+                    // flood 방지: silent drop (로깅 없이 즉시 무시)
+                    return;
                 }
             }
 
@@ -4068,15 +4120,30 @@ function initBatchWorkerController() {
                     EventBus/* EventBus */.l.emit(EventBus/* EVT */.c.UPDATE_PROGRESS);
                 }
                 
+                // [v1.28.2] 팝업 참조 선취득 + nonce 지연 (TASK_FAILED)
+                const capturedPopupRef = core_queue/* activeWorkers */.mR.get(matchedId);
                 const sessionToken = (0,core_queue/* getSessionToken */.mj)(matchedId);
-                if (sessionToken) {
-                    (0,ipc_broker/* removeWorkerOrigin */.Re)(matchedId, sessionToken);
-                }
                 (0,core_queue/* destroyWorkerSession */.NQ)(matchedId, 'task_failed');
                 console.log(`[WorkerController] 🧹 세션 정리 (수집패): ${matchedId} → processingSlots=${core_queue/* processingSlots */.PG.size}`);
                 
                 // [v1.27.2] 안전 대기 플래그 정리
                 delete window[`tokisync_waiting_${matchedId}`];
+
+                // [v1.28.2] TASK_FAILED popup close — 선취득 참조로 2차 강제 닫기
+                if (capturedPopupRef) {
+                    setTimeout(() => {
+                        try {
+                            const actualRef = capturedPopupRef.ref || capturedPopupRef;
+                            if (actualRef && !actualRef.closed) {
+                                console.log(`[WorkerController] 🛡️ [실패 종료 가드] 3초 초과 자식 팝업 강제 폐쇄: ${matchedId}`);
+                                actualRef.close();
+                            }
+                        } catch (e) {}
+                        if (sessionToken) (0,ipc_broker/* removeWorkerOrigin */.Re)(matchedId, sessionToken);
+                    }, 3000);
+                } else {
+                    if (sessionToken) (0,ipc_broker/* removeWorkerOrigin */.Re)(matchedId, sessionToken);
+                }
 
                 const currentQueue = (0,core_queue/* getQueue */.IS)();
                 const hasActive = currentQueue.some(i => i.status === 'pending' || i.status === 'processing');
@@ -4755,7 +4822,7 @@ ${tocNav}
 class RuleManager {
     // Built-in sample rules as fallback/templates (Offline Seeding)
     static get _version() {
-        return  true ? "1.28.2-rc.1" : 0;
+        return  true ? "1.28.2-rc.2" : 0;
     }
 
     static #builtInRules = [
@@ -6011,7 +6078,7 @@ class FormRuleEditor {
     }
 
     render() {
-        const scriptVer =  true ? "1.28.2-rc.1" : 0;
+        const scriptVer =  true ? "1.28.2-rc.2" : 0;
         this.overlay.innerHTML = `
             <div class="toki-modal toki-form-editor-modal">
                 <div class="toki-modal-header">
@@ -10327,7 +10394,8 @@ async function processItem(item, builder, siteInfo, iframe, parser, seriesTitle 
         // 단일 합본 및 배치 모드가 아닐 때만 즉시 큐 청소 (UI 지속 노출 보장)
         // 직접 호출된 processItem(큐에 등록되지 않은 항목)는 queueItem 제거 건너뜀
         if (!isSingleVolume && buildingPolicy !== 'zipOfCbzs') {
-            const q = getRawQueue();
+            // [v1.28.2] queue.js 미수출 내부 함수 대신 공개 래퍼 getQueue 사용 (ReferenceError 방지)
+            const q = (0,core_queue/* getQueue */.IS)();
             const exists = q.some(i => i.id === id);
             if (exists) (0,core_queue/* removeQueueItem */.d$)(id);
         }
@@ -10725,6 +10793,7 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
         });
 
         // [v1.7.0] Collect detailed metadata for Phase 3 Persistence
+        const ruleId = parser.rule?.id || 'unknown';
         const seriesMetadata = {
             ...parser.getSeriesMetadata(),
             id: seriesId,
@@ -10740,7 +10809,6 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
         };
 
         // [큐 키 분할] 시리즈 공유 데이터를 별도 키에 저장 (TOKI_SERIES_{ruleId}_{seriesId})
-        const ruleId = parser.rule?.id || 'unknown';
         const seriesKey = (0,series_config/* getSeriesConfigKey */.TS)(ruleId, seriesId || 'noseries', seriesTitle);
         const seriesSaved = (0,series_config/* saveSeriesConfig */.$O)(seriesKey, {
             matchedRule: parser.rule,
@@ -11602,10 +11670,10 @@ var SubscriptionManager = __webpack_require__(330);
  * Fallback values (0.0.0) are never used in production builds.
  */
 const SCRIPT_VERSION =  true
-  ? "1.28.2-rc.1" : 0;
+  ? "1.28.2-rc.2" : 0;
 
 const VIEWER_VERSION = (/* unused pure expression or super */ null && ( true
-  ? "1.28.2-rc.1" : 0));
+  ? "1.28.2-rc.2" : 0));
 
 ;// ./src/core/main.js
 
@@ -12372,6 +12440,21 @@ function initWorkerExtractor() {
                 core_stopSilentAudio();
                 console.log(`[TokiSync:Worker] 🏁 자체 파기(window.close)를 집행합니다.`);
                 window.close();
+                // [v1.28.2] window.close() 실패 감지 — 500ms 후 부모에게 강제 폐쇄 요청
+                const forceCloseToken = workerSessionToken;
+                setTimeout(() => {
+                    if (!window.closed) {
+                        console.warn('[TokiSync:Worker] window.close() 실패 — 부모에게 강제 폐쇄 요청');
+                        try {
+                            (0,ipc_broker/* sendToParent */.Ac)('WORKER_READY', {
+                                targetUrl: window.location.href,
+                                timestamp: Date.now(),
+                                sessionToken: forceCloseToken,
+                                forceClose: true
+                            });
+                        } catch (e) {}
+                    }
+                }, 500);
             };
 
             try {

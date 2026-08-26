@@ -1,10 +1,10 @@
-/* ⚙️ TokiSync Server Code Bundle v1.28.2-rc.1 (Generated: 2026-07-30T15:28:28.942Z) */
+/* ⚙️ TokiSync Server Code Bundle v1.28.2-rc.2 (Generated: 2026-08-26T02:49:16.871Z) */
 
 /* ========================================================================== */
 /* FILE: Main.gs */
 /* ========================================================================== */
 
-// ⚙️ TokiSync API Server v1.28.2-rc.1 (Stateless)
+// ⚙️ TokiSync API Server v1.28.2-rc.2 (Stateless)
 // -----------------------------------------------------
 // 🤝 Compatibility:
 //    - Client v1.8.0+ (User Execution Mode)
@@ -20,7 +20,7 @@
  */
 function doGet(e) {
   return ContentService.createTextOutput(
-    "✅ TokiSync API Server v1.28.2-rc.1 (Stateless) is Running...",
+    "✅ TokiSync API Server v1.28.2-rc.2 (Stateless) is Running...",
   );
 }
 
@@ -39,7 +39,7 @@ function doGet(e) {
  * @returns {TextOutput} JSON 응답
  */
 // [CONSTANTS]
-var SERVER_VERSION = "v1.28.2-rc.1";
+var SERVER_VERSION = "v1.28.2-rc.2";
 // API Key stored in Script Properties (Project Settings > Script Properties)
 // Set property: API_KEY = your_secret_key
 
