@@ -116,6 +116,23 @@ verify('M1: EventBus.js에 dead constants(NOTIFY_CONFIRM 등)가 제거됨', () 
     }
 });
 
+// M33: downloader.js에 미수출 함수 getRawQueue 직접 참조 없음 (ReferenceError 방지)
+verify('M33: downloader.js가 미수출 함수 getRawQueue를 참조하지 않음', () => {
+    assertFileNotContains('src/core/downloader.js',
+        'getRawQueue',
+        '미수출 함수 getRawQueue 참조');
+});
+
+// M34: worker-controller의 handleBatchSuccess에서 destroy 이전 _activeProcessing 선등록 금지 (회귀 방지)
+verify('M34: handleBatchSuccess에서 destroyWorkerSession이 _activeProcessing.add보다 선행함', () => {
+    const fullPath = path.resolve(root, 'src/core/worker-controller.js');
+    const content = fs.readFileSync(fullPath, 'utf8');
+    const destroyIdx = content.indexOf("destroyWorkerSession(matchedId, 'collection_complete')");
+    const addIdx = content.indexOf('_activeProcessing.add(matchedId)');
+    if (destroyIdx === -1 || addIdx === -1) throw new Error('handleBatchSuccess 핵심 호출을 찾을 수 없음');
+    if (addIdx < destroyIdx) throw new Error('_activeProcessing.add가 destroyWorkerSession보다 먼저 실행됨 (소거 회귀)');
+});
+
 console.log(`\n📊 정적 검증 완료: ${passCount}건 통과 / ${failCount}건 실패\n`);
 
 if (failCount > 0) process.exit(1);

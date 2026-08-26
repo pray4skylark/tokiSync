@@ -431,6 +431,8 @@ export const clearQueue = () => {
   const keys = new Set(queue.map(i => i.seriesKey).filter(Boolean));
   keys.forEach(k => deleteSeriesConfig(k));
   saveRawQueue([]);
+  // [v1.28.2] 인메모리 캐시 완전 폐기 이벤트 방출
+  EventBus.emit(EVT.QUEUE_RESET);
 };
 
 /**
@@ -607,6 +609,10 @@ export const stopAllWorkers = (shouldClear = false) => {
       localStorage.setItem('tokisync_queue_stopped_trigger', String(Date.now()));
     }
   } catch (e) {}
+
+  // [v1.28.2] 캐시 정리 이벤트 방출 (worker-controller: extractedDataCache/masterZipCache 정리)
+  // clear=true(전체 초기화)면 폐기, false(수집 중단)면 완료분 부분 ZIP 저장 후 폐기
+  EventBus.emit(EVT.QUEUE_STOP_ALL, { clear: shouldClear });
 };
 
 let isSchedulerRunning = false;

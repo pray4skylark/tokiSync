@@ -379,22 +379,10 @@ export class GenericParser extends BaseParser {
             }
 
             if (!container) {
-                // [v1.28.2-rc.1] container 미매칭 → 전체 문서 img fallback
-                console.warn(`[GenericParser] 지정된 imageContainer(${viewerCfg.imageContainer})를 DOM에서 찾지 못했습니다. 전체 img 태그 fallback을 시도합니다.`);
-                const allImgs = Array.from(iframeDocument.querySelectorAll('img'));
-                return allImgs.map(img => {
-                    const lazyAttrs = ['data-src', 'data-lazy', 'src'];
-                    for (const attr of lazyAttrs) {
-                        const val = img.getAttribute(attr);
-                        if (val) {
-                            const absoluteUrl = this.getAbsoluteUrl(val);
-                            if (absoluteUrl && !this.isDummyUrl(absoluteUrl)) {
-                                return { url: absoluteUrl, isDummy: false };
-                            }
-                        }
-                    }
-                    return null;
-                }).filter(Boolean);
+                // [v1.28.2] container 미매칭 → 전체 문서로 폴백 후 정상 흐름 합류
+                // (exclude/remove 정리, imageItem 셀렉터, dynamicLazyAttr 모두 적용받도록 단일 경로 유지)
+                console.warn(`[GenericParser] 지정된 imageContainer(${viewerCfg.imageContainer})를 DOM에서 찾지 못했습니다. 전체 문서 fallback을 시도합니다.`);
+                container = iframeDocument;
             }
         }
 

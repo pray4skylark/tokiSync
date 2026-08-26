@@ -1,5 +1,5 @@
 import { EventBus, EVT } from './EventBus.js';
-import { addEpisodesToQueue, initQueueScheduler, activeWorkers, processingSlots, sessionRegistry, getQueue, clearQueue, getQueueItemId, setQueueStorage, stopAllWorkers, removeCompletedAndFailedItems, _activeProcessing, assertConsistent } from './queue.js';
+import { addEpisodesToQueue, initQueueScheduler, activeWorkers, processingSlots, sessionRegistry, getQueue, clearQueue, getQueueItemId, setQueueStorage, stopAllWorkers, removeCompletedAndFailedItems, _activeProcessing, assertConsistent, destroyWorkerSession } from './queue.js';
 import { initBatchWorkerController } from './worker-controller.js';
 import { CbzBuilder } from './cbz.js';
 import { getConfig, setConfig, setConfigStorage } from './config.js';
@@ -1853,6 +1853,67 @@ test('clearQueue가 진행 중인 작업이 있을 때 stopAllWorkers를 먼저 
     console.assert(sessionRegistry.size === 0, `clearQueue 후 sessionRegistry 잔존: ${sessionRegistry.size}`);
 
     setQueueStorage(null);
+});
+
+// ── E14: 업로드 페이즈 세션 생존 (destroy → re-add 순서 계약) ──
+test('destroyWorkerSession 이후 _activeProcessing 재등록이 생존하고 스케줄러 가드 조건을 충족해야 합니다.', () => {
+    const { store } = mockStorage(false, true);
+    clearQueue();
+
+    const testId = 'e14_upload_phase';
+    processingSlots.add(testId);
+    sessionRegistry.set(testId, { sessionToken: 'tok_e14', createdAt: Date.now(), lastActivity: Date.now() });
+
+    // handleBatchSuccess와 동일한 순서 모사: destroy 먼저 → add 나중 (FIX-2)
+    destroyWorkerSession(testId, 'collection_complete');
+    console.assert(!_activeProcessing.has(testId), 'destroy가 _activeProcessing 소거하지 않음');
+
+    _activeProcessing.add(testId);
+    console.assert(_activeProcessing.has(testId), 'destroy 후 재등록 생존 실패');
+    console.assert(processingSlots.size === 0 && !sessionRegistry.has(testId), '세션 레지스트리 미정리');
+
+    // 스케줄러 가드 조건: processingSlots=0 + _activeProcessing>=1 → 신규 기동 차단 상태
+    console.assert(processingSlots.size < 1 && _activeProcessing.size >= 1, '업로드 페이즈 가드 상태 아님');
+
+    clearQueue();
+    setQueueStorage(null);
+});
+
+// ── E15: stopAllWorkers/clearQueue 캐시 정리 이벤트 방출 ──
+test('stopAllWorkers는 QUEUE_STOP_ALL(clear 플래그), clearQueue는 QUEUE_RESET을 방출해야 합니다.', async () => {
+    const { store } = mockStorage(false, true);
+    clearQueue();
+
+    let stopPayload = null;
+    let resetCount = 0;
+    const unsubStop = EventBus.on(EVT.QUEUE_STOP_ALL, (p) => { stopPayload = p || {}; });
+    const unsubReset = EventBus.on(EVT.QUEUE_RESET, () => { resetCount++; });
+
+    try {
+        // 수집 중단 (clear=false) → flush 경로
+        addEpisodesToQueue([{ episodeNum: '0001', title: 'E15테스트', url: 'https://t.com/e/1', forceOverwrite: false }], 'E15시리즈');
+        stopAllWorkers(false);
+        await new Promise(r => setTimeout(r, 10));
+        if (!stopPayload || stopPayload.clear !== false) {
+            throw new Error(`QUEUE_STOP_ALL payload 불일치: ${JSON.stringify(stopPayload)}`);
+        }
+
+        // 전체 초기화 (clear=true) → 폐기 경로
+        stopPayload = null;
+        stopAllWorkers(true);
+        await new Promise(r => setTimeout(r, 10));
+        if (!stopPayload || stopPayload.clear !== true) {
+            throw new Error(`QUEUE_STOP_ALL(clear) payload 불일치: ${JSON.stringify(stopPayload)}`);
+        }
+
+        // clearQueue → QUEUE_RESET
+        clearQueue();
+        if (resetCount < 1) throw new Error('QUEUE_RESET 미수신');
+    } finally {
+        unsubStop();
+        unsubReset();
+        setQueueStorage(null);
+    }
 });
 
 // 테스트 기동

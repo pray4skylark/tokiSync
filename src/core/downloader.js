@@ -166,7 +166,8 @@ export async function processItem(item, builder, siteInfo, iframe, parser, serie
         // 단일 합본 및 배치 모드가 아닐 때만 즉시 큐 청소 (UI 지속 노출 보장)
         // 직접 호출된 processItem(큐에 등록되지 않은 항목)는 queueItem 제거 건너뜀
         if (!isSingleVolume && buildingPolicy !== 'zipOfCbzs') {
-            const q = getRawQueue();
+            // [v1.28.2] queue.js 미수출 내부 함수 대신 공개 래퍼 getQueue 사용 (ReferenceError 방지)
+            const q = getQueue();
             const exists = q.some(i => i.id === id);
             if (exists) removeQueueItem(id);
         }
@@ -564,6 +565,7 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
         });
 
         // [v1.7.0] Collect detailed metadata for Phase 3 Persistence
+        const ruleId = parser.rule?.id || 'unknown';
         const seriesMetadata = {
             ...parser.getSeriesMetadata(),
             id: seriesId,
@@ -579,7 +581,6 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
         };
 
         // [큐 키 분할] 시리즈 공유 데이터를 별도 키에 저장 (TOKI_SERIES_{ruleId}_{seriesId})
-        const ruleId = parser.rule?.id || 'unknown';
         const seriesKey = getSeriesConfigKey(ruleId, seriesId || 'noseries', seriesTitle);
         const seriesSaved = saveSeriesConfig(seriesKey, {
             matchedRule: parser.rule,

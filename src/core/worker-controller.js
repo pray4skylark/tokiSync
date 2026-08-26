@@ -70,13 +70,52 @@ let activeWorkerId = null;
 // 🧠 인메모리 수집 콘텐츠 데이터 캐시 (GM Storage 512KB 용량 초과 및 ArrayBuffer 직렬화 실패 원천 차단)
 const extractedDataCache = new Map();
 
-// 대기열 전체 삭제 또는 중단 시 인메모리 캐시 강제 비우기
-EventBus.on(EVT.QUEUE_RESET, () => extractedDataCache.clear());
-EventBus.on(EVT.QUEUE_STOP_ALL, () => extractedDataCache.clear());
+// 대기열 전체 삭제 또는 중단 시 인메모리 캐시 정리
+// [v1.28.2] QUEUE_RESET=완전 폐기 / QUEUE_STOP_ALL=완료분 부분 ZIP 저장 후 폐기 (clear 플래그)
+EventBus.on(EVT.QUEUE_RESET, () => {
+    extractedDataCache.clear();
+    masterZipCache.clear();
+});
+EventBus.on(EVT.QUEUE_STOP_ALL, async ({ clear }) => {
+    extractedDataCache.clear();
+    if (clear) {
+        masterZipCache.clear();
+    } else {
+        await flushMasterZipCache('[수집 중단]');
+    }
+});
 
 // 🛡️ 배치 제어용 중복 리스너 방지 로컬 변수 가드
 let batchIpcCleanup = null;
 let isBatchControllerInitialized = false;
+
+/**
+ * [v1.28.2] masterZipCache 플러시 — 시리즈별 마스터 압축을 로컬에 저장 후 캐시 비움
+ * 배치 정상 종료(!hasActive) 및 수집 중단(QUEUE_STOP_ALL clear=false) 경로에서 공용 사용
+ * @param {string} [context] 로그 식별용 컨텍스트 문자열
+ */
+async function flushMasterZipCache(context = '') {
+    const queue = getQueue();
+    for (const [seriesKey, masterZip] of masterZipCache) {
+        try {
+            const srcItem = queue.find(i => i.seriesKey === seriesKey);
+            const norm = srcItem ? normalizeQueueItem(srcItem) : null;
+            const masterFilename = (norm && norm.rootFolder ? norm.rootFolder.replace(/^\[[^\]]+\]\s*/, '') : seriesKey) + '_all';
+            if (masterZip.files && Object.keys(masterZip.files).length === 0) continue;
+            const masterBlob = await masterZip.generateAsync({ type: "blob" });
+            await saveFile(masterBlob, masterFilename, 'local', 'zip', { folderName: 'TokiSync' });
+            console.log(`[WorkerController] ${context} 📚 마스터 압축 저장 완료: ${masterFilename}.zip`);
+            EventBus.emit(EVT.LOG, {
+                msg: `📚 ${context} 부분 마스터 압축 저장: ${masterFilename}.zip`,
+                tag: 'Downloader:Batch',
+                level: 'info'
+            });
+        } catch (e) {
+            console.error(`[WorkerController] ${context} 마스터 압축 저장 실패: ${e.message}`);
+        }
+    }
+    masterZipCache.clear();
+}
 
 // 🛡️ 배치 폴링 setInterval ID 추적 (중복 초기화 시 이전 인터벌 정리)
 let _batchPollingInterval = null;
@@ -555,12 +594,13 @@ export function initBatchWorkerController() {
                 console.warn('[WorkerController] [배치] 자식 팝업 close 또는 ACK 전송 실패:', ackErr);
             }
         }
-        _activeProcessing.add(matchedId);
         const batchToken = getSessionToken(matchedId);
         if (batchToken) {
             removeWorkerOrigin(matchedId, batchToken);
         }
+        // [v1.28.2] destroyWorkerSession이 _activeProcessing을 먼저 소거하므로(회귀 수정) 반드시 destroy 후에 재등록
         destroyWorkerSession(matchedId, 'collection_complete');
+        _activeProcessing.add(matchedId);
         console.log(`[WorkerController] 🧹 세션 정리 (수집완료): ${matchedId} → processingSlots=${processingSlots.size}`);
         
         // [v1.27.2] 안전 대기 플래그 정리 — 완료 시점
@@ -811,19 +851,7 @@ export function initBatchWorkerController() {
 
         // 전체 큐가 비었을 때 masterZip 저장
         if (!hasActive) {
-            for (const [seriesKey, masterZip] of masterZipCache) {
-                try {
-                    const srcItem = currentQueue.find(i => i.seriesKey === seriesKey);
-                    const norm = srcItem ? normalizeQueueItem(srcItem) : null;
-                    const masterFilename = (norm && norm.rootFolder ? norm.rootFolder.replace(/^\[[^\]]+\]\s*/, '') : seriesKey) + '_all';
-                    const masterBlob = await masterZip.generateAsync({ type: "blob" });
-                    await saveFile(masterBlob, masterFilename, 'local', 'zip', { folderName: 'TokiSync' });
-                    console.log(`[WorkerController] 📚 마스터 압축 저장 완료: ${masterFilename}.zip`);
-                } catch (e) {
-                    console.error(`[WorkerController] 마스터 압축 저장 실패: ${e.message}`);
-                }
-            }
-            masterZipCache.clear();
+            await flushMasterZipCache('[배치 완료]');
         }
 
         // 다음 릴레이 스케줄 기동
