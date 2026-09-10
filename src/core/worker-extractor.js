@@ -77,15 +77,21 @@ export function initWorkerExtractor() {
     // [v1.27.5] Extract session token from popup URL (injected by openEpisodePopup)
     const workerSessionToken = new URLSearchParams(window.location.search).get('ts_token') || '';
 
-    // Establish Handshake Heartbeat every second until parent injects instructions
-    let handshakeInterval = setInterval(() => {
-        console.log("[TokiSync:Worker] 📢 READY 핸드셰이킹 하트비트 전송 중...");
+    // [v1.28.2-rc.3] READY 1회 발송: 페이지 로딩 완료 시点에만 전송 (500ms 하트비트 폐지)
+    const sendReadyOnce = () => {
+        console.log("[TokiSync:Worker] 📢 READY 1회 전송 (로딩 완료)");
         sendToParent('WORKER_READY', {
             targetUrl: window.location.href,
             timestamp: Date.now(),
             sessionToken: workerSessionToken
         });
-    }, 500);
+    };
+
+    if (document.readyState === 'complete') {
+        sendReadyOnce();
+    } else {
+        window.addEventListener('load', sendReadyOnce, { once: true });
+    }
 
     let isExtracting = false;
 
@@ -140,11 +146,7 @@ export function initWorkerExtractor() {
             if (isExtracting) return;
             isExtracting = true;
 
-            // Stop Handshake Heartbeat
-            if (handshakeInterval) {
-                clearInterval(handshakeInterval);
-                handshakeInterval = null;
-            }
+            // [v1.28.2-rc.3] READY 하트비트 제거됨 — 정리 불필요
 
             const { 
                 targetType, 

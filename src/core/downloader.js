@@ -792,6 +792,21 @@ export async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwri
                     activeWorkers.set(id, popupRef);
                     freshlyOpened.push(id);
                     console.log(`[Pre-open] 🔐 세션 등록: ${id} → token=${sessionToken.substring(0, 8)}...`);
+
+                    // [v1.28.2-rc.3] READY 타임아웃: 30초 내 READY 미수신 시 팝업 강제 종료
+                    setTimeout(() => {
+                        // 세션이 이미 파괴되었다면 무시 (수집완료 후 타임아웃 지연 발동 방지)
+                        if (!sessionRegistry.has(id)) return;
+                        console.warn(`[WorkerController] ⏰ READY 타임아웃 (30초): ${id} → 팝업 강제 종료`);
+                        try {
+                            if (popupRef && !popupRef.closed) popupRef.close();
+                        } catch (e) {}
+                        activeWorkers.delete(id);
+                        processingSlots.delete(id);
+                        sessionRegistry.delete(id);
+                        removeWorkerOrigin(id, sessionToken);
+                        updateQueueItem(id, { status: 'failed', errorMsg: 'READY 수신 타임아웃 (30초)' });
+                    }, 30000);
                 } else {
                     logger.error(`❌ [Pre-open #${i + 1}] 브라우저 차단으로 자식 창 확보에 실패하였습니다.`, 'Queue');
                 }

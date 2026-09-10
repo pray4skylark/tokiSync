@@ -89,4 +89,7 @@ export const EVT = {
     STORAGE_FATAL:      'storage:fatal',    // 큐 저장 완전 실패 (재시도 소진)
     TEST_NATIVE_DOWNLOAD: 'native:test_download', // 자동 분류(Native) 다운로드 테스트
     SYNC_SERIES_META:   'sync:series_meta',  // 현재 페이지의 시리즈 메타데이터 동기화
+
+    // ── Site Detection → UI 방향 ────────────────────────
+    SITE_INFO_UPDATED:  'site:info_updated', // 사이트 감지 결과 갱신 { siteInfo }
 };

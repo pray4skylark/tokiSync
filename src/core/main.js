@@ -209,11 +209,19 @@ export async function main() {
     }
 
     // -- 2. Pre-detection & Core States --
-    const siteInfo = await detectSite();
-    if(!siteInfo) {
-        console.warn('[TokiSync] 사이트 매칭 실패. 탬퍼몽키 메뉴를 통해 설정을 확인하세요.');
-        return; 
-    }
+    let siteInfo = null;
+
+    // [v1.28.2-rc.3] 사이트 감지 함수 — 대시보드에서 재시도 시 호출 가능
+    const detectAndInit = async () => {
+        siteInfo = await detectSite();
+        EventBus.emit(EVT.SITE_INFO_UPDATED, siteInfo);
+        if (siteInfo) {
+            console.log(`[TokiSync] 사이트 감지 성공: ${siteInfo.matchedRule?.name || siteInfo.matchedRule?.id}`);
+        } else {
+            console.warn('[TokiSync] 사이트 매칭 실패. 규칙을 확인하세요.');
+        }
+        return siteInfo;
+    };
 
     // -- History Sync (Async) & Cross-Tab Auto Refresh --
     let lastSyncTime = Date.now();
@@ -285,10 +293,12 @@ export async function main() {
     new MenuModal({
         onDownload: () => {}, // Not used directly, specific methods below
         downloadAll: (forceOverwrite) => {
+            if (!siteInfo) { logger.warn('사이트가 감지되지 않았습니다. 재시도해주세요.'); return; }
             const config = getConfig();
             tokiDownload(undefined, config.policy, forceOverwrite);
         },
         downloadRange: (spec, forceOverwrite) => {
+            if (!siteInfo) { logger.warn('사이트가 감지되지 않았습니다. 재시도해주세요.'); return; }
             const config = getConfig();
             tokiDownload(spec, config.policy, forceOverwrite);
         },
@@ -296,6 +306,7 @@ export async function main() {
         toggleLog: () => logger.toggle(),
         getConfig: getConfig,
         setConfig: setConfig,
+        detectAndInit: detectAndInit,
         getEpisodeRange: async () => {
             const parser = await ParserFactory.getParser();
             if (!parser) return { min: 1, max: 100 };
@@ -428,6 +439,14 @@ export async function main() {
                 logger.error(`❌ 다운로드 실패: ${e.message}`, 'System');
                 console.error(e);
             }
+        }
+    });
+
+    // -- 2. Initial Site Detection (after dashboard ready) --
+    detectAndInit().then(() => {
+        // 사이트 감지 성공 시 히스토리 동기화 실행
+        if (siteInfo) {
+            syncHistory();
         }
     });
 

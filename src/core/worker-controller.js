@@ -795,23 +795,18 @@ export function initBatchWorkerController() {
             });
         }
 
-        // [v1.28.2] 선취득한 참조로 2차 강제 닫기 (destroyWorkerSession 이후에도 유효)
+        // [v1.28.2-rc.3] 팝업 즉시 close + nonce 즉시 정리 (RC1 회귀)
         if (capturedPopupRef) {
-            setTimeout(() => {
-                try {
-                    const actualRef = capturedPopupRef.ref || capturedPopupRef;
-                    if (actualRef && !actualRef.closed) {
-                        console.log(`[WorkerController] 🛡️ [자가 종료 가드] 3초 초과 자식 팝업 강제 폐쇄: ${matchedId}`);
-                        actualRef.close();
-                    }
-                } catch (e) {}
-                // 2차 가드 완료 후 nonce 정리
-                if (batchToken) {
-                    removeWorkerOrigin(matchedId, batchToken);
+            try {
+                const actualRef = capturedPopupRef.ref || capturedPopupRef;
+                if (actualRef && !actualRef.closed) {
+                    console.log(`[WorkerController] 🛡️ 팝업 강제 폐쇄: ${matchedId}`);
+                    actualRef.close();
                 }
-            }, 3000);
-        } else {
-            if (batchToken) removeWorkerOrigin(matchedId, batchToken);
+            } catch (e) {}
+        }
+        if (batchToken) {
+            removeWorkerOrigin(matchedId, batchToken);
         }
 
         EventBus.emit(EVT.UPDATE_PROGRESS);
@@ -963,10 +958,10 @@ export function initBatchWorkerController() {
                 const item = normalizeQueueItem(rawItem);
                 
                 if (item) {
-                    // 🛡️ 안전 대기 중 동일 에피소드의 READY 중복 처리 방어 가드
+                    // 🛡️ 중복 READY 방어 (이미 처리 중이면 무시)
                     if (window[`tokisync_waiting_${matchedId}`]) {
                         touchSessionActivity(matchedId);
-                        console.log(`[WorkerController] [배치] ID: ${matchedId} 는 이미 안전 대기 중입니다. 중복 READY 유입 차단.`);
+                        console.log(`[WorkerController] [배치] ID: ${matchedId} 는 이미 처리 중. 중복 READY 무시.`);
                         return;
                     }
                     window[`tokisync_waiting_${matchedId}`] = true;
@@ -975,28 +970,13 @@ export function initBatchWorkerController() {
 
                     const config = getConfig();
                     const multiplier = SLEEP_MULTIPLIERS[config.sleepMode] || SLEEP_MULTIPLIERS.cautious;
-                    const initialDelay = 3000 * multiplier;
-                    
-                    console.log(`[WorkerController] 📢 [배치] READY 수신 (ID: ${matchedId}) ➡️ 안전 대기 기동 (${(initialDelay/1000).toFixed(1)}초)...`);
-                    EventBus.emit(EVT.LOG, {
-                        msg: `⏳ 새 에피소드 연결 성공 ➡️ 안전 대기 중... (${(initialDelay/1000).toFixed(1)}초)`,
-                        tag: 'Queue:Batch',
-                        level: 'info'
-                    });
-                    
-                    await new Promise(r => setTimeout(r, initialDelay));
-                    
-                    // [v1.27.1] 대기 완료 후 중단 여부 재체크
-                    const freshQueue = getQueue();
-                    const freshItem = freshQueue.find(i => i.id === matchedId);
-                    if (!freshItem || freshItem.status !== 'processing' || getQueuePaused()) {
-                        console.log(`[WorkerController] ⏹️ 첫 통신 대기 후 중단/일시정지 감지 -> 주입 취소 (ID: ${matchedId}, status=${freshItem?.status}, paused=${getQueuePaused()})`);
-                        delete window[`tokisync_waiting_${matchedId}`];
-                        return;
-                    }
 
-                    console.log(`[WorkerController] [배치] 안전 대기 완료 START_EXTRACTION 주입 (ID: ${matchedId})`);
+                    console.log(`[WorkerController] 📢 [배치] READY 수신 (ID: ${matchedId}) → IPC_ACK + 즉시 START_EXTRACTION`);
                     
+                    // IPC_ACK 전송
+                    sendToWorker(sourceEvent.source, 'IPC_ACK', { queueId: matchedId });
+                    
+                    // START_EXTRACTION 즉시 전송 (9초 대기 제거)
                     const sessionToken = getSessionToken(matchedId);
                     sendToWorker(sourceEvent.source, 'START_EXTRACTION', {
                         queueId: item.id,
@@ -1015,11 +995,8 @@ export function initBatchWorkerController() {
                         localNameTemplate: config.localNameTemplate || "{number:4} - {title}",
                         sessionNonce: sessionToken
                     });
-                    // [v1.27.3] sendToWorker에 nonce 미포함: 자식의 _activeNonces는 항상 비어있어
-                    // 메시지가 Blocked 되기 때문. sessionNonce는 payload로만 전달되어
-                    // 자식이 TASK_COMPLETED/TASK_FAILED의 child->parent nonce로 재사용.
                     
-                    // [v1.27.2] 플래그는 START_EXTRACTION 후에도 유지 — 워커 완료/실패 시점에 정리
+                    // [v1.28.2-rc.3] 플래그는 START_EXTRACTION 후에도 유지 — 워커 완료/실패 시점에 정리
                 }
             } else {
                 console.warn('[WorkerController] [배치] WORKER_READY 수신했으나 매칭되는 활성 세션을 찾지 못했습니다.', targetUrl);
@@ -1228,21 +1205,17 @@ export function initBatchWorkerController() {
                 // [v1.27.2] 안전 대기 플래그 정리
                 delete window[`tokisync_waiting_${matchedId}`];
 
-                // [v1.28.2] TASK_FAILED popup close — 선취득 참조로 2차 강제 닫기
+                // [v1.28.2-rc.3] 팝업 즉시 close + nonce 즉시 정리 (RC1 회귀)
                 if (capturedPopupRef) {
-                    setTimeout(() => {
-                        try {
-                            const actualRef = capturedPopupRef.ref || capturedPopupRef;
-                            if (actualRef && !actualRef.closed) {
-                                console.log(`[WorkerController] 🛡️ [실패 종료 가드] 3초 초과 자식 팝업 강제 폐쇄: ${matchedId}`);
-                                actualRef.close();
-                            }
-                        } catch (e) {}
-                        if (sessionToken) removeWorkerOrigin(matchedId, sessionToken);
-                    }, 3000);
-                } else {
-                    if (sessionToken) removeWorkerOrigin(matchedId, sessionToken);
+                    try {
+                        const actualRef = capturedPopupRef.ref || capturedPopupRef;
+                        if (actualRef && !actualRef.closed) {
+                            console.log(`[WorkerController] 🛡️ [실패 팝업 폐쇄] ${matchedId}`);
+                            actualRef.close();
+                        }
+                    } catch (e) {}
                 }
+                if (sessionToken) removeWorkerOrigin(matchedId, sessionToken);
 
                 const currentQueue = getQueue();
                 const hasActive = currentQueue.some(i => i.status === 'pending' || i.status === 'processing');

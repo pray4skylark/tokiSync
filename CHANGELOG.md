@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.28.2-rc.4] - 2026-09-07
+
+### 🐛 P1: 워커 READY 중복 폭주 및 유령 세션 생성 수정
+- **문제**: 팝업이 `WORKER_READY`를 500ms 간격으로 반복 발송 → 부모가 URL 매칭으로 유령 세션 재생성 → READY flood + 세션 불일치
+- **`worker-extractor.js`**: READY 500ms 하트비트(`setInterval`) 제거, `document.readyState === 'complete'` 또는 `load` 이벤트 시 **1회만** 발송
+- **`worker-controller.js`**: READY 수신 후9초 안전 대기 제거 → IPC_ACK + **즉시** START_EXTRACTION 전송
+- **`worker-controller.js`**: 팝업 close 3초 지연(`setTimeout`) 제거 → **즉시** close + nonce 즉시 정리 (RC1 회귀)
+- **`downloader.js`**: READY 30초 타임아웃 추가 — 세션 레지스트리 기반(`sessionRegistry.has(id)`)으로 수집완료 후 타임아웃 지연 발동 방지
+
+### 🐛 P2: 사이트 매칭 실패 시 설정 로드 불가 수정
+- **문제**: `MenuModal.getInstance()`가 핸들러 없이 싱글톤 생성 → main.js에서 핸들러 포함 생성 시 기존 인스턴스 반환 → `getConfig` 핸들러 없음 → 설정 값 표시 안 됨
+- **`MenuModal.js`**: `getInstance()`에서 핸들러 없이 생성하지 않도록 수정 (`return MenuModal.instance || null`)
+- **`main.js`**: `detectSite()` 호출 위치를 시작 시점 → 대시보드 표시 시점으로 이동, `detectAndInit()` 함수 분리
+- **`MenuModal.js`**: 사이트 감지 상태에 따라 다운로드/재시도 UI 조건부 전환 (`SITE_INFO_UPDATED` 이벤트 리스너)
+- **`EventBus.js`**: `SITE_INFO_UPDATED` 이벤트 추가
+
+### 🧪 테스트
+- RC1 GenericParser 빌드 vs RC2 GenericParser A/B 테스트로 GenericParser 변경 아님 확인
+- 계측 빌드(`[Parser:Trace]`, `[Network:Trace]`, `[GAS:Trace]`, `[Downloader:Trace]`)로 런타임 타임라인 분석
+- 웹툰/소설 배치 다운로드 테스트 통과
+
 ## [v1.28.2-rc.2] - 2026-08-26
 
 ### 🐛 P1: 현재 에피소드 다운로드 ReferenceError 수정

@@ -44,7 +44,8 @@ export class MenuModal {
             <div class="toki-modal-body">
                 <!-- 1. Download Tab -->
                 <div class="toki-tab-content active" id="toki-tab-download">
-                    <div id="toki-download-actions">
+                    <!-- 감지 성공 시: 다운로드 액션 -->
+                    <div id="toki-download-actions" style="display: none;">
                         <div class="toki-control-group">
                             <label class="toki-label">에피소드 범위 지정</label>
                             <input type="text" id="toki-range-input" class="toki-input" placeholder="예: 1,2,4-10,15 (비우면 전체)">
@@ -63,6 +64,16 @@ export class MenuModal {
                             </button>
                             <button class="toki-btn-action toki-btn-secondary" id="toki-btn-down-all">
                                 <span>전체 다운로드</span>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- 감지 실패 시: 재시도 버튼 -->
+                    <div id="toki-download-retry" style="display: none;">
+                        <div style="text-align: center; padding: 24px 16px;">
+                            <div style="font-size: 13px; color: #888; margin-bottom: 16px;">⚠️ 현재 페이지에서 규칙을 찾을 수 없습니다</div>
+                            <button class="toki-btn-action toki-btn-secondary" id="toki-btn-retry-detect" style="min-width: 200px;">
+                                🔄 규칙 매칭 재시도
                             </button>
                         </div>
                     </div>
@@ -700,6 +711,45 @@ export class MenuModal {
             };
         }
 
+        // 9. Site Detection State Handler
+        const downloadActions = doc.getElementById('toki-download-actions');
+        const downloadRetry = doc.getElementById('toki-download-retry');
+        const retryDetectBtn = doc.getElementById('toki-btn-retry-detect');
+
+        // 사이트 감지 상태에 따라 UI 전환
+        const updateSiteDetectionUI = (siteInfo) => {
+            if (siteInfo) {
+                if (downloadActions) downloadActions.style.display = 'block';
+                if (downloadRetry) downloadRetry.style.display = 'none';
+            } else {
+                if (downloadActions) downloadActions.style.display = 'none';
+                if (downloadRetry) downloadRetry.style.display = 'block';
+            }
+        };
+
+        // 초기 상태: 감지 전이므로 재시도 버튼 표시
+        if (downloadActions) downloadActions.style.display = 'none';
+        if (downloadRetry) downloadRetry.style.display = 'block';
+
+        // 재시도 버튼 이벤트
+        if (retryDetectBtn && this.handlers.detectAndInit) {
+            retryDetectBtn.onclick = async () => {
+                retryDetectBtn.disabled = true;
+                retryDetectBtn.textContent = '⏳ 감지 중...';
+                try {
+                    await this.handlers.detectAndInit();
+                } finally {
+                    retryDetectBtn.disabled = false;
+                    retryDetectBtn.textContent = '🔄 규칙 매칭 재시도';
+                }
+            };
+        }
+
+        // 사이트 감지 결과 수신 시 UI 갱신
+        EventBus.on(EVT.SITE_INFO_UPDATED, (siteInfo) => {
+            updateSiteDetectionUI(siteInfo);
+        });
+
     }
 
     show() {
@@ -726,9 +776,7 @@ export class MenuModal {
     }
 
     static getInstance() {
-        if (!MenuModal.instance) {
-            new MenuModal();
-        }
-        return MenuModal.instance;
+        // [v1.28.2-rc.3] 핸들러 없이 생성하지 않음 — main.js에서 핸들러 포함 생성 필요
+        return MenuModal.instance || null;
     }
 }
