@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         TokiSync (Link to Drive)
 // @namespace    http://tampermonkey.net/
-// @version      1.28.2-rc.2
+// @version      1.28.2-rc.4
 // @description  Toki series sites -> Google Drive syncing tool (Bundled)
 // @author       pray4skylark
 // @updateURL    https://pray4skylark.github.io/tokiSync/tokiSync.user.js
@@ -144,6 +144,9 @@ const EVT = {
     STORAGE_FATAL:      'storage:fatal',    // 큐 저장 완전 실패 (재시도 소진)
     TEST_NATIVE_DOWNLOAD: 'native:test_download', // 자동 분류(Native) 다운로드 테스트
     SYNC_SERIES_META:   'sync:series_meta',  // 현재 페이지의 시리즈 메타데이터 동기화
+
+    // ── Site Detection → UI 방향 ────────────────────────
+    SITE_INFO_UPDATED:  'site:info_updated', // 사이트 감지 결과 갱신 { siteInfo }
 };
 
 
@@ -3696,23 +3699,18 @@ function initBatchWorkerController() {
             });
         }
 
-        // [v1.28.2] 선취득한 참조로 2차 강제 닫기 (destroyWorkerSession 이후에도 유효)
+        // [v1.28.2-rc.3] 팝업 즉시 close + nonce 즉시 정리 (RC1 회귀)
         if (capturedPopupRef) {
-            setTimeout(() => {
-                try {
-                    const actualRef = capturedPopupRef.ref || capturedPopupRef;
-                    if (actualRef && !actualRef.closed) {
-                        console.log(`[WorkerController] 🛡️ [자가 종료 가드] 3초 초과 자식 팝업 강제 폐쇄: ${matchedId}`);
-                        actualRef.close();
-                    }
-                } catch (e) {}
-                // 2차 가드 완료 후 nonce 정리
-                if (batchToken) {
-                    (0,ipc_broker/* removeWorkerOrigin */.Re)(matchedId, batchToken);
+            try {
+                const actualRef = capturedPopupRef.ref || capturedPopupRef;
+                if (actualRef && !actualRef.closed) {
+                    console.log(`[WorkerController] 🛡️ 팝업 강제 폐쇄: ${matchedId}`);
+                    actualRef.close();
                 }
-            }, 3000);
-        } else {
-            if (batchToken) (0,ipc_broker/* removeWorkerOrigin */.Re)(matchedId, batchToken);
+            } catch (e) {}
+        }
+        if (batchToken) {
+            (0,ipc_broker/* removeWorkerOrigin */.Re)(matchedId, batchToken);
         }
 
         EventBus/* EventBus */.l.emit(EventBus/* EVT */.c.UPDATE_PROGRESS);
@@ -3864,10 +3862,10 @@ function initBatchWorkerController() {
                 const item = (0,core_queue/* normalizeQueueItem */.WY)(rawItem);
                 
                 if (item) {
-                    // 🛡️ 안전 대기 중 동일 에피소드의 READY 중복 처리 방어 가드
+                    // 🛡️ 중복 READY 방어 (이미 처리 중이면 무시)
                     if (window[`tokisync_waiting_${matchedId}`]) {
                         (0,core_queue/* touchSessionActivity */.xE)(matchedId);
-                        console.log(`[WorkerController] [배치] ID: ${matchedId} 는 이미 안전 대기 중입니다. 중복 READY 유입 차단.`);
+                        console.log(`[WorkerController] [배치] ID: ${matchedId} 는 이미 처리 중. 중복 READY 무시.`);
                         return;
                     }
                     window[`tokisync_waiting_${matchedId}`] = true;
@@ -3876,28 +3874,13 @@ function initBatchWorkerController() {
 
                     const config = (0,core_config/* getConfig */.zj)();
                     const multiplier = core_config/* SLEEP_MULTIPLIERS */.dx[config.sleepMode] || core_config/* SLEEP_MULTIPLIERS */.dx.cautious;
-                    const initialDelay = 3000 * multiplier;
-                    
-                    console.log(`[WorkerController] 📢 [배치] READY 수신 (ID: ${matchedId}) ➡️ 안전 대기 기동 (${(initialDelay/1000).toFixed(1)}초)...`);
-                    EventBus/* EventBus */.l.emit(EventBus/* EVT */.c.LOG, {
-                        msg: `⏳ 새 에피소드 연결 성공 ➡️ 안전 대기 중... (${(initialDelay/1000).toFixed(1)}초)`,
-                        tag: 'Queue:Batch',
-                        level: 'info'
-                    });
-                    
-                    await new Promise(r => setTimeout(r, initialDelay));
-                    
-                    // [v1.27.1] 대기 완료 후 중단 여부 재체크
-                    const freshQueue = (0,core_queue/* getQueue */.IS)();
-                    const freshItem = freshQueue.find(i => i.id === matchedId);
-                    if (!freshItem || freshItem.status !== 'processing' || (0,core_queue/* getQueuePaused */.kZ)()) {
-                        console.log(`[WorkerController] ⏹️ 첫 통신 대기 후 중단/일시정지 감지 -> 주입 취소 (ID: ${matchedId}, status=${freshItem?.status}, paused=${(0,core_queue/* getQueuePaused */.kZ)()})`);
-                        delete window[`tokisync_waiting_${matchedId}`];
-                        return;
-                    }
 
-                    console.log(`[WorkerController] [배치] 안전 대기 완료 START_EXTRACTION 주입 (ID: ${matchedId})`);
+                    console.log(`[WorkerController] 📢 [배치] READY 수신 (ID: ${matchedId}) → IPC_ACK + 즉시 START_EXTRACTION`);
                     
+                    // IPC_ACK 전송
+                    (0,ipc_broker/* sendToWorker */.eu)(sourceEvent.source, 'IPC_ACK', { queueId: matchedId });
+                    
+                    // START_EXTRACTION 즉시 전송 (9초 대기 제거)
                     const sessionToken = (0,core_queue/* getSessionToken */.mj)(matchedId);
                     (0,ipc_broker/* sendToWorker */.eu)(sourceEvent.source, 'START_EXTRACTION', {
                         queueId: item.id,
@@ -3916,11 +3899,8 @@ function initBatchWorkerController() {
                         localNameTemplate: config.localNameTemplate || "{number:4} - {title}",
                         sessionNonce: sessionToken
                     });
-                    // [v1.27.3] sendToWorker에 nonce 미포함: 자식의 _activeNonces는 항상 비어있어
-                    // 메시지가 Blocked 되기 때문. sessionNonce는 payload로만 전달되어
-                    // 자식이 TASK_COMPLETED/TASK_FAILED의 child->parent nonce로 재사용.
                     
-                    // [v1.27.2] 플래그는 START_EXTRACTION 후에도 유지 — 워커 완료/실패 시점에 정리
+                    // [v1.28.2-rc.3] 플래그는 START_EXTRACTION 후에도 유지 — 워커 완료/실패 시점에 정리
                 }
             } else {
                 console.warn('[WorkerController] [배치] WORKER_READY 수신했으나 매칭되는 활성 세션을 찾지 못했습니다.', targetUrl);
@@ -4129,21 +4109,17 @@ function initBatchWorkerController() {
                 // [v1.27.2] 안전 대기 플래그 정리
                 delete window[`tokisync_waiting_${matchedId}`];
 
-                // [v1.28.2] TASK_FAILED popup close — 선취득 참조로 2차 강제 닫기
+                // [v1.28.2-rc.3] 팝업 즉시 close + nonce 즉시 정리 (RC1 회귀)
                 if (capturedPopupRef) {
-                    setTimeout(() => {
-                        try {
-                            const actualRef = capturedPopupRef.ref || capturedPopupRef;
-                            if (actualRef && !actualRef.closed) {
-                                console.log(`[WorkerController] 🛡️ [실패 종료 가드] 3초 초과 자식 팝업 강제 폐쇄: ${matchedId}`);
-                                actualRef.close();
-                            }
-                        } catch (e) {}
-                        if (sessionToken) (0,ipc_broker/* removeWorkerOrigin */.Re)(matchedId, sessionToken);
-                    }, 3000);
-                } else {
-                    if (sessionToken) (0,ipc_broker/* removeWorkerOrigin */.Re)(matchedId, sessionToken);
+                    try {
+                        const actualRef = capturedPopupRef.ref || capturedPopupRef;
+                        if (actualRef && !actualRef.closed) {
+                            console.log(`[WorkerController] 🛡️ [실패 팝업 폐쇄] ${matchedId}`);
+                            actualRef.close();
+                        }
+                    } catch (e) {}
                 }
+                if (sessionToken) (0,ipc_broker/* removeWorkerOrigin */.Re)(matchedId, sessionToken);
 
                 const currentQueue = (0,core_queue/* getQueue */.IS)();
                 const hasActive = currentQueue.some(i => i.status === 'pending' || i.status === 'processing');
@@ -4822,7 +4798,7 @@ ${tocNav}
 class RuleManager {
     // Built-in sample rules as fallback/templates (Offline Seeding)
     static get _version() {
-        return  true ? "1.28.2-rc.2" : 0;
+        return  true ? "1.28.2-rc.4" : 0;
     }
 
     static #builtInRules = [
@@ -6078,7 +6054,7 @@ class FormRuleEditor {
     }
 
     render() {
-        const scriptVer =  true ? "1.28.2-rc.2" : 0;
+        const scriptVer =  true ? "1.28.2-rc.4" : 0;
         this.overlay.innerHTML = `
             <div class="toki-modal toki-form-editor-modal">
                 <div class="toki-modal-header">
@@ -7259,7 +7235,8 @@ class MenuModal {
             <div class="toki-modal-body">
                 <!-- 1. Download Tab -->
                 <div class="toki-tab-content active" id="toki-tab-download">
-                    <div id="toki-download-actions">
+                    <!-- 감지 성공 시: 다운로드 액션 -->
+                    <div id="toki-download-actions" style="display: none;">
                         <div class="toki-control-group">
                             <label class="toki-label">에피소드 범위 지정</label>
                             <input type="text" id="toki-range-input" class="toki-input" placeholder="예: 1,2,4-10,15 (비우면 전체)">
@@ -7278,6 +7255,16 @@ class MenuModal {
                             </button>
                             <button class="toki-btn-action toki-btn-secondary" id="toki-btn-down-all">
                                 <span>전체 다운로드</span>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- 감지 실패 시: 재시도 버튼 -->
+                    <div id="toki-download-retry" style="display: none;">
+                        <div style="text-align: center; padding: 24px 16px;">
+                            <div style="font-size: 13px; color: #888; margin-bottom: 16px;">⚠️ 현재 페이지에서 규칙을 찾을 수 없습니다</div>
+                            <button class="toki-btn-action toki-btn-secondary" id="toki-btn-retry-detect" style="min-width: 200px;">
+                                🔄 규칙 매칭 재시도
                             </button>
                         </div>
                     </div>
@@ -7915,6 +7902,45 @@ class MenuModal {
             };
         }
 
+        // 9. Site Detection State Handler
+        const downloadActions = doc.getElementById('toki-download-actions');
+        const downloadRetry = doc.getElementById('toki-download-retry');
+        const retryDetectBtn = doc.getElementById('toki-btn-retry-detect');
+
+        // 사이트 감지 상태에 따라 UI 전환
+        const updateSiteDetectionUI = (siteInfo) => {
+            if (siteInfo) {
+                if (downloadActions) downloadActions.style.display = 'block';
+                if (downloadRetry) downloadRetry.style.display = 'none';
+            } else {
+                if (downloadActions) downloadActions.style.display = 'none';
+                if (downloadRetry) downloadRetry.style.display = 'block';
+            }
+        };
+
+        // 초기 상태: 감지 전이므로 재시도 버튼 표시
+        if (downloadActions) downloadActions.style.display = 'none';
+        if (downloadRetry) downloadRetry.style.display = 'block';
+
+        // 재시도 버튼 이벤트
+        if (retryDetectBtn && this.handlers.detectAndInit) {
+            retryDetectBtn.onclick = async () => {
+                retryDetectBtn.disabled = true;
+                retryDetectBtn.textContent = '⏳ 감지 중...';
+                try {
+                    await this.handlers.detectAndInit();
+                } finally {
+                    retryDetectBtn.disabled = false;
+                    retryDetectBtn.textContent = '🔄 규칙 매칭 재시도';
+                }
+            };
+        }
+
+        // 사이트 감지 결과 수신 시 UI 갱신
+        EventBus/* EventBus */.l.on(EventBus/* EVT */.c.SITE_INFO_UPDATED, (siteInfo) => {
+            updateSiteDetectionUI(siteInfo);
+        });
+
     }
 
     show() {
@@ -7941,10 +7967,8 @@ class MenuModal {
     }
 
     static getInstance() {
-        if (!MenuModal.instance) {
-            new MenuModal();
-        }
-        return MenuModal.instance;
+        // [v1.28.2-rc.3] 핸들러 없이 생성하지 않음 — main.js에서 핸들러 포함 생성 필요
+        return MenuModal.instance || null;
     }
 }
 
@@ -11020,6 +11044,21 @@ async function tokiDownload(rangeSpec, policy = 'zipOfCbzs', forceOverwrite = fa
                     core_queue/* activeWorkers */.mR.set(id, popupRef);
                     freshlyOpened.push(id);
                     console.log(`[Pre-open] 🔐 세션 등록: ${id} → token=${sessionToken.substring(0, 8)}...`);
+
+                    // [v1.28.2-rc.3] READY 타임아웃: 30초 내 READY 미수신 시 팝업 강제 종료
+                    setTimeout(() => {
+                        // 세션이 이미 파괴되었다면 무시 (수집완료 후 타임아웃 지연 발동 방지)
+                        if (!core_queue/* sessionRegistry */.a.has(id)) return;
+                        console.warn(`[WorkerController] ⏰ READY 타임아웃 (30초): ${id} → 팝업 강제 종료`);
+                        try {
+                            if (popupRef && !popupRef.closed) popupRef.close();
+                        } catch (e) {}
+                        core_queue/* activeWorkers */.mR.delete(id);
+                        core_queue/* processingSlots */.PG.delete(id);
+                        core_queue/* sessionRegistry */.a.delete(id);
+                        removeWorkerOrigin(id, sessionToken);
+                        (0,core_queue/* updateQueueItem */.Gg)(id, { status: 'failed', errorMsg: 'READY 수신 타임아웃 (30초)' });
+                    }, 30000);
                 } else {
                     logger.logger.error(`❌ [Pre-open #${i + 1}] 브라우저 차단으로 자식 창 확보에 실패하였습니다.`, 'Queue');
                 }
@@ -11670,10 +11709,10 @@ var SubscriptionManager = __webpack_require__(330);
  * Fallback values (0.0.0) are never used in production builds.
  */
 const SCRIPT_VERSION =  true
-  ? "1.28.2-rc.2" : 0;
+  ? "1.28.2-rc.4" : 0;
 
 const VIEWER_VERSION = (/* unused pure expression or super */ null && ( true
-  ? "1.28.2-rc.2" : 0));
+  ? "1.28.2-rc.4" : 0));
 
 ;// ./src/core/main.js
 
@@ -11887,11 +11926,19 @@ async function main() {
     }
 
     // -- 2. Pre-detection & Core States --
-    const siteInfo = await detectSite();
-    if(!siteInfo) {
-        console.warn('[TokiSync] 사이트 매칭 실패. 탬퍼몽키 메뉴를 통해 설정을 확인하세요.');
-        return; 
-    }
+    let siteInfo = null;
+
+    // [v1.28.2-rc.3] 사이트 감지 함수 — 대시보드에서 재시도 시 호출 가능
+    const detectAndInit = async () => {
+        siteInfo = await detectSite();
+        EventBus/* EventBus */.l.emit(EventBus/* EVT */.c.SITE_INFO_UPDATED, siteInfo);
+        if (siteInfo) {
+            console.log(`[TokiSync] 사이트 감지 성공: ${siteInfo.matchedRule?.name || siteInfo.matchedRule?.id}`);
+        } else {
+            console.warn('[TokiSync] 사이트 매칭 실패. 규칙을 확인하세요.');
+        }
+        return siteInfo;
+    };
 
     // -- History Sync (Async) & Cross-Tab Auto Refresh --
     let lastSyncTime = Date.now();
@@ -11963,10 +12010,12 @@ async function main() {
     new ui/* MenuModal */.fo({
         onDownload: () => {}, // Not used directly, specific methods below
         downloadAll: (forceOverwrite) => {
+            if (!siteInfo) { logger.logger.warn('사이트가 감지되지 않았습니다. 재시도해주세요.'); return; }
             const config = (0,core_config/* getConfig */.zj)();
             tokiDownload(undefined, config.policy, forceOverwrite);
         },
         downloadRange: (spec, forceOverwrite) => {
+            if (!siteInfo) { logger.logger.warn('사이트가 감지되지 않았습니다. 재시도해주세요.'); return; }
             const config = (0,core_config/* getConfig */.zj)();
             tokiDownload(spec, config.policy, forceOverwrite);
         },
@@ -11974,6 +12023,7 @@ async function main() {
         toggleLog: () => logger.logger.toggle(),
         getConfig: core_config/* getConfig */.zj,
         setConfig: core_config/* setConfig */.Nk,
+        detectAndInit: detectAndInit,
         getEpisodeRange: async () => {
             const parser = await ParserFactory.getParser();
             if (!parser) return { min: 1, max: 100 };
@@ -12106,6 +12156,14 @@ async function main() {
                 logger.logger.error(`❌ 다운로드 실패: ${e.message}`, 'System');
                 console.error(e);
             }
+        }
+    });
+
+    // -- 2. Initial Site Detection (after dashboard ready) --
+    detectAndInit().then(() => {
+        // 사이트 감지 성공 시 히스토리 동기화 실행
+        if (siteInfo) {
+            syncHistory();
         }
     });
 
@@ -12330,15 +12388,21 @@ function initWorkerExtractor() {
     // [v1.27.5] Extract session token from popup URL (injected by openEpisodePopup)
     const workerSessionToken = new URLSearchParams(window.location.search).get('ts_token') || '';
 
-    // Establish Handshake Heartbeat every second until parent injects instructions
-    let handshakeInterval = setInterval(() => {
-        console.log("[TokiSync:Worker] 📢 READY 핸드셰이킹 하트비트 전송 중...");
+    // [v1.28.2-rc.3] READY 1회 발송: 페이지 로딩 완료 시点에만 전송 (500ms 하트비트 폐지)
+    const sendReadyOnce = () => {
+        console.log("[TokiSync:Worker] 📢 READY 1회 전송 (로딩 완료)");
         (0,ipc_broker/* sendToParent */.Ac)('WORKER_READY', {
             targetUrl: window.location.href,
             timestamp: Date.now(),
             sessionToken: workerSessionToken
         });
-    }, 500);
+    };
+
+    if (document.readyState === 'complete') {
+        sendReadyOnce();
+    } else {
+        window.addEventListener('load', sendReadyOnce, { once: true });
+    }
 
     let isExtracting = false;
 
@@ -12393,11 +12457,7 @@ function initWorkerExtractor() {
             if (isExtracting) return;
             isExtracting = true;
 
-            // Stop Handshake Heartbeat
-            if (handshakeInterval) {
-                clearInterval(handshakeInterval);
-                handshakeInterval = null;
-            }
+            // [v1.28.2-rc.3] READY 하트비트 제거됨 — 정리 불필요
 
             const { 
                 targetType, 
