@@ -2887,6 +2887,8 @@ var core_queue = __webpack_require__(302);
 var EventBus = __webpack_require__(31);
 // EXTERNAL MODULE: ./src/core/config.js
 var core_config = __webpack_require__(899);
+// EXTERNAL MODULE: ./src/core/logger.js
+var logger = __webpack_require__(569);
 // EXTERNAL MODULE: ./src/core/gas.js
 var gas = __webpack_require__(488);
 // EXTERNAL MODULE: ./src/core/epub.js
@@ -2906,6 +2908,7 @@ var external_JSZip_namespaceObject = JSZip;
  * tokiSync - Unified Worker Controller
  * Manages single popup lifecycle and IPC routing for sequential download mode.
  */
+
 
 
 
@@ -3875,12 +3878,15 @@ function initBatchWorkerController() {
                     const config = (0,core_config/* getConfig */.zj)();
                     const multiplier = core_config/* SLEEP_MULTIPLIERS */.dx[config.sleepMode] || core_config/* SLEEP_MULTIPLIERS */.dx.cautious;
 
-                    console.log(`[WorkerController] 📢 [배치] READY 수신 (ID: ${matchedId}) → IPC_ACK + 즉시 START_EXTRACTION`);
+                    logger.logger.log(`READY 수신 (ID: ${matchedId}) → IPC_ACK + 3초 후 START_EXTRACTION`, 'Worker:Batch');
                     
                     // IPC_ACK 전송
                     (0,ipc_broker/* sendToWorker */.eu)(sourceEvent.source, 'IPC_ACK', { queueId: matchedId });
                     
-                    // START_EXTRACTION 즉시 전송 (9초 대기 제거)
+                    // [v1.28.2-rc.4-patch] 페이지 안정화 대기 (3초)
+                    await new Promise(r => setTimeout(r, 3000));
+                    
+                    // START_EXTRACTION 전송
                     const sessionToken = (0,core_queue/* getSessionToken */.mj)(matchedId);
                     (0,ipc_broker/* sendToWorker */.eu)(sourceEvent.source, 'START_EXTRACTION', {
                         queueId: item.id,
