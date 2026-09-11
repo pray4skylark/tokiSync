@@ -8,6 +8,7 @@ import { registerIpcListener, sendToWorker, registerWorkerOrigin, removeWorkerOr
 import { updateQueueItem, WORKER_STAGE, activeWorkers, getQueue, runSchedulerOnce, getQueuePaused, _activeProcessing, processingSlots, sessionRegistry, destroyWorkerSession, getSessionToken, touchSessionActivity, updateSessionPopupRef, normalizeQueueItem } from './queue.js';
 import { EventBus, EVT } from './EventBus.js';
 import { getConfig, SLEEP_MULTIPLIERS } from './config.js';
+import { logger } from './logger.js';
 import { refreshCacheAfterUpload } from './gas.js';
 import { EpubBuilder } from './epub.js';
 import { CbzBuilder } from './cbz.js';
@@ -971,12 +972,15 @@ export function initBatchWorkerController() {
                     const config = getConfig();
                     const multiplier = SLEEP_MULTIPLIERS[config.sleepMode] || SLEEP_MULTIPLIERS.cautious;
 
-                    console.log(`[WorkerController] 📢 [배치] READY 수신 (ID: ${matchedId}) → IPC_ACK + 즉시 START_EXTRACTION`);
+                    logger.log(`READY 수신 (ID: ${matchedId}) → IPC_ACK + 3초 후 START_EXTRACTION`, 'Worker:Batch');
                     
                     // IPC_ACK 전송
                     sendToWorker(sourceEvent.source, 'IPC_ACK', { queueId: matchedId });
                     
-                    // START_EXTRACTION 즉시 전송 (9초 대기 제거)
+                    // [v1.28.2-rc.4-patch] 페이지 안정화 대기 (3초)
+                    await new Promise(r => setTimeout(r, 3000));
+                    
+                    // START_EXTRACTION 전송
                     const sessionToken = getSessionToken(matchedId);
                     sendToWorker(sourceEvent.source, 'START_EXTRACTION', {
                         queueId: item.id,
