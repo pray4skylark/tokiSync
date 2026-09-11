@@ -1,10 +1,10 @@
-/* ⚙️ TokiSync Server Code Bundle v1.28.1 (Generated: 2026-07-21T18:15:36.534Z) */
+/* ⚙️ TokiSync Server Code Bundle v1.28.2-rc.4 (Generated: 2026-09-11T00:53:43.134Z) */
 
 /* ========================================================================== */
 /* FILE: Main.gs */
 /* ========================================================================== */
 
-// ⚙️ TokiSync API Server v1.28.1 (Stateless)
+// ⚙️ TokiSync API Server v1.28.2-rc.4 (Stateless)
 // -----------------------------------------------------
 // 🤝 Compatibility:
 //    - Client v1.8.0+ (User Execution Mode)
@@ -20,7 +20,7 @@
  */
 function doGet(e) {
   return ContentService.createTextOutput(
-    "✅ TokiSync API Server v1.28.1 (Stateless) is Running...",
+    "✅ TokiSync API Server v1.28.2-rc.4 (Stateless) is Running...",
   );
 }
 
@@ -39,7 +39,7 @@ function doGet(e) {
  * @returns {TextOutput} JSON 응답
  */
 // [CONSTANTS]
-var SERVER_VERSION = "v1.28.1";
+var SERVER_VERSION = "v1.28.2-rc.4";
 // API Key stored in Script Properties (Project Settings > Script Properties)
 // Set property: API_KEY = your_secret_key
 
@@ -230,6 +230,22 @@ function findFolderId(folderName, rootFolderId) {
         Debug.log(`   ✅ Fallback Found: ${fallbackRes[0].name} (${fallbackRes[0].id})`);
         return fallbackRes[0].id;
       }
+    } else {
+      // 3. Reverse Fallback: 순수 제목 실패 시, [ID] prefix 구 형식 검색
+      Debug.log(`⚠️ Exact name failed. Trying contains search (legacy [ID] prefix)...`);
+      const safeName = folderName.replace(/'/g, "\\'");
+      const containsQuery = `'${rootFolderId}' in parents and name contains '${safeName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+
+      const containsRes = DriveAccessService.list(rootFolderId, {
+        query: containsQuery,
+        fields: "files(id, name)",
+        pageSize: 1
+      });
+
+      if (containsRes.length > 0) {
+        Debug.log(`   ✅ Contains Fallback Found: ${containsRes[0].name} (${containsRes[0].id})`);
+        return containsRes[0].id;
+      }
     }
   } catch (e) {
     Debug.error("❌ Advanced Search Failed", e);
@@ -251,10 +267,60 @@ function getOrCreateSeriesFolder(
   const seriesId = findFolderId(folderName, rootFolderId);
   if (seriesId) return seriesId;
 
+  if (category) {
+    const catFolder = findFolderId(category, rootFolderId);
+    if (catFolder) {
+      const catSeriesId = findFolderId(folderName, catFolder);
+      if (catSeriesId) return catSeriesId;
+    }
+  }
+
   if (!createIfMissing) return null;
 
   Debug.log(`🆕 Creating New Series Folder in Root: ${folderName}`);
   return DriveAccessService.ensureFolder(rootFolderId, folderName);
+}
+
+/**
+ * [v1.28.2-rc.1] sourceId 기반 시리즈 폴더 검색.
+ * _MergeIndex 아래의 merge fragment에서 series 폴더 ID를 조회합니다.
+ * 신 정책 (폴더명에 [ID] prefix 없음) 환경에서도 폴더 탐색 가능.
+ *
+ * @param {string} rootFolderId - 루트 폴더 ID (GAS config.folderId)
+ * @param {string} sourceId - 사이트 시리즈 ID (e.g. "33266")
+ * @returns {string|null} 시리즈 폴더 ID 또는 null
+ */
+function lookupSeriesIdBySourceId(rootFolderId, sourceId) {
+  try {
+    const mergeFolders = DriveAccessService.list(rootFolderId, {
+      query: "name = '_MergeIndex' and mimeType = 'application/vnd.google-apps.folder'",
+      fields: "files(id)"
+    });
+    if (mergeFolders.length === 0) {
+      Debug.log(`[IndexLookup] _MergeIndex folder not found under root`);
+      return null;
+    }
+
+    const mergeFolderId = mergeFolders[0].id;
+    const fragName = `_toki_merge_${sourceId}.json`;
+    const fragFiles = DriveAccessService.list(mergeFolderId, {
+      query: `name = '${fragName}'`,
+      fields: "files(id)"
+    });
+    if (fragFiles.length === 0) {
+      Debug.log(`[IndexLookup] Fragment not found: ${fragName}`);
+      return null;
+    }
+
+    const content = DriveAccessService.getFileContent(fragFiles[0].id);
+    const frag = JSON.parse(content);
+    const seriesFolderId = frag.id || null;
+    Debug.log(`[IndexLookup] Resolved sourceId=${sourceId} → folderId=${seriesFolderId}`);
+    return seriesFolderId;
+  } catch (e) {
+    Debug.error(`[IndexLookup] Failed for sourceId=${sourceId}: ${e.toString()}`);
+    return null;
+  }
 }
 
 /**
@@ -1069,20 +1135,89 @@ function View_Dispatcher(data) {
       if (!folderId) throw new Error("folderId is required for history");
       resultBody = View_saveReadHistory(data, folderId);
       return resultBody; // Already wrapped in createRes
+    } else if (action === "view_prepare_cache") {
+      // [v1.28.2-rc.1] 다운로드 사전작업: merge fragment 조기 생성
+      // 아직 시리즈 폴더가 없을 수도 있으므로, 없으면 조용히 넘어감 (배치 완료 시 생성)
+      if (!data.folderName)
+        throw new Error("folderName is required for cache prepare");
+      if (!data.metadata || !data.metadata.sourceId)
+        throw new Error("metadata.sourceId is required for cache prepare");
+
+      const meta = data.metadata;
+      let seriesId = lookupSeriesIdBySourceId(folderId, meta.sourceId);
+      if (!seriesId) {
+        seriesId = getOrCreateSeriesFolder(folderId, data.folderName, data.category || null, false);
+      }
+      if (!seriesId) {
+        resultBody = { prepared: false, reason: "series folder not found yet" };
+      } else {
+        try {
+          const mergeFolderId = DriveAccessService.ensureFolder(folderId, "_MergeIndex");
+          const fragName = `_toki_merge_${meta.sourceId}.json`;
+          const existingFrags = DriveAccessService.list(mergeFolderId, {
+            query: `name = '${fragName}'`,
+            fields: "files(id)"
+          });
+
+          const seriesMeta = DriveAccessService.getMetadata(seriesId);
+          const seriesFolderName = seriesMeta.name;
+
+          const fragData = JSON.stringify({
+            id: seriesId,
+            sourceId: meta.sourceId,
+            ruleId: meta.ruleId || "",
+            vendor: meta.sourceSite || "",
+            name: meta.seriesTitle || seriesFolderName,
+            normalizedName: meta.normalizedName || meta.seriesTitle || "",
+            aliases: [],
+            folderName: seriesFolderName,
+            url: meta.sourceUrl || "",
+            category: data.category || "Unknown",
+            cacheFileId: "",
+            itemsCount: 0,
+            created: seriesMeta.modifiedTime,
+            lastUpdated: new Date().toISOString(),
+            status: meta.status || "preparing"
+          });
+
+          if (existingFrags.length > 0) {
+            DriveAccessService.updateFileContent(existingFrags[0].id, fragData);
+          } else {
+            DriveAccessService.createFile(mergeFolderId, fragName, fragData, "application/json");
+          }
+          Debug.log(`[PrepareCache] Fragment ${meta.status} for sourceId=${meta.sourceId}`);
+          resultBody = { prepared: true, seriesId: seriesId };
+        } catch (e) {
+          Debug.error(`[PrepareCache] Error: ${e.toString()}`);
+          resultBody = { prepared: false, reason: e.toString() };
+        }
+      }
     } else if (action === "view_update_cache") {
       // UserScript 업로드 완료 후 호출 — folderName 기반으로 캐시 갱신
       if (!data.folderName)
         throw new Error("folderName is required for cache update");
-      const seriesId = getOrCreateSeriesFolder(
-        folderId,
-        data.folderName,
-        null,
-        false,
-      );
+
+      const extraMeta = data.metadata || {};
+
+      // [v1.28.2-rc.1] 신 정책: sourceId 기반 index lookup 우선 시도
+      let seriesId = null;
+      if (extraMeta.sourceId) {
+        seriesId = lookupSeriesIdBySourceId(folderId, extraMeta.sourceId);
+      }
+
+      // Fallback: 폴더명 기반 검색 (구 정책 호환, ID prefix 또는 신 정책 순수 제목)
+      if (!seriesId) {
+        seriesId = getOrCreateSeriesFolder(
+          folderId,
+          data.folderName,
+          data.category || null,
+          false,
+        );
+      }
+
       if (!seriesId) {
         resultBody = { updated: false, reason: "folder not found" };
       } else {
-        const extraMeta = data.metadata || {};
         const booksArray = View_getBooks(seriesId, true, extraMeta.episodeTitles || null);
         const itemsCount = booksArray ? booksArray.length : 0;
         
@@ -1095,8 +1230,6 @@ function View_Dispatcher(data) {
             const meta = DriveAccessService.getMetadata(seriesId);
             const seriesFolderName = meta.name;
             const idMatch = seriesFolderName.match(/^\[([a-zA-Z0-9_\-]+)\]/);
-            
-            const extraMeta = data.metadata || {};
             const sourceId = extraMeta.sourceId || extraMeta.id || (idMatch ? idMatch[1] : seriesId);
             
             let cacheFileId = "";
@@ -1144,14 +1277,17 @@ function View_Dispatcher(data) {
                     ...existingMeta,
                     id: seriesId,
                     sourceId: sourceId,
+                    ruleId: extraMeta.ruleId || existingMeta.ruleId || "",
                     vendorId: extraMeta.vendorId || existingMeta.vendorId || sourceId,
                     name: titleClean || existingMeta.name || seriesFolderName.replace(/^\[[a-zA-Z0-9_\-]+\]\s*/, '').trim(),
+                    normalizedName: extraMeta.normalizedName || existingMeta.normalizedName || titleClean || "",
+                    aliases: existingMeta.aliases || [],
                     originalSeriesTitle: extraMeta.originalSeriesTitle || existingMeta.originalSeriesTitle || "",
                     folderName: seriesFolderName,
-                    url: existingMeta.url || "", 
+                    url: extraMeta.sourceUrl || existingMeta.url || "", 
                     category: data.category || existingMeta.category || "Unknown",
                     author: existingMeta.author || extraMeta.author || "",
-                    vendor: data.vendor || existingMeta.vendor || extraMeta.vendor || "",
+                    vendor: data.vendor || existingMeta.vendor || extraMeta.vendor || extraMeta.sourceSite || "",
                     status: normalizeStatus(existingMeta.status || extraMeta.status || "연재중"),
                     summary: existingMeta.summary || extraMeta.summary || "",
                     thumbnail: existingMeta.thumbnail || extraMeta.thumbnail || "",
@@ -1646,6 +1782,15 @@ function SweepMergeIndex(folderId) {
                             if (fragData.lastUpdated) {
                                 masterList[targetIndex].lastModified = new Date(fragData.lastUpdated);
                             }
+                            if (fragData.vendor) {
+                                masterList[targetIndex].vendor = fragData.vendor;
+                            }
+                            if (fragData.ruleId) {
+                                masterList[targetIndex].ruleId = fragData.ruleId;
+                            }
+                            if (fragData.normalizedName) {
+                                masterList[targetIndex].normalizedName = fragData.normalizedName;
+                            }
                             hasMerged = true;
                             Debug.log("[MergeIndex] Merged fragment into main list: " + fragData.sourceId);
                         } else if (fragData.name && fragData.id) {
@@ -1662,6 +1807,10 @@ function SweepMergeIndex(folderId) {
                                     cacheFileId: fragData.cacheFileId,
                                     itemsCount: fragData.itemsCount || 0,
                                     category: fragData.category || "Unknown",
+                                    vendor: fragData.vendor || "",
+                                    ruleId: fragData.ruleId || "",
+                                    normalizedName: fragData.normalizedName || "",
+                                    vendorId: fragData.vendorId || "",
                                     created: fragData.created || new Date().toISOString(),
                                     lastModified: new Date(fragData.lastUpdated || Date.now())
                                 });
@@ -2012,6 +2161,8 @@ function View_updateMetadata(seriesId, metadata, rootFolderId) {
     author: metadata.author !== undefined ? metadata.author : (existingMeta.author || ""),
     vendor: metadata.vendor !== undefined ? metadata.vendor : (existingMeta.vendor || ""),
     vendorId: metadata.vendorId !== undefined ? metadata.vendorId : (existingMeta.vendorId || existingMeta.sourceId || ""),
+    ruleId: metadata.ruleId !== undefined ? metadata.ruleId : (existingMeta.ruleId || ""),
+    normalizedName: metadata.normalizedName !== undefined ? metadata.normalizedName : (existingMeta.normalizedName || ""),
     originalSeriesTitle: metadata.originalSeriesTitle !== undefined ? metadata.originalSeriesTitle : (existingMeta.originalSeriesTitle || ""),
     status: metadata.status !== undefined ? normalizeStatus(metadata.status) : (normalizeStatus(existingMeta.status) || "연재중"),
     summary: metadata.summary !== undefined ? metadata.summary : (existingMeta.summary || ""),
@@ -2039,6 +2190,8 @@ function View_updateMetadata(seriesId, metadata, rootFolderId) {
         masterList[idx].lastModified = updatedMeta.lastUpdated;
         masterList[idx].vendor = updatedMeta.vendor;
         masterList[idx].vendorId = updatedMeta.vendorId;
+        masterList[idx].ruleId = updatedMeta.ruleId;
+        masterList[idx].normalizedName = updatedMeta.normalizedName;
         masterList[idx].originalSeriesTitle = updatedMeta.originalSeriesTitle;
         if (!masterList[idx].metadata) masterList[idx].metadata = {};
         masterList[idx].metadata.category = updatedMeta.category;
